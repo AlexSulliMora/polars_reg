@@ -166,6 +166,76 @@ def test_hausman_no_reject_when_uncorrelated():
     assert result["pvalue"] > 0.05
 
 
+# ── Weak instrument test ────────────────────────────────────────
+
+
+@pytest.fixture
+def iv_strong():
+    """IV result with strong instruments."""
+    rng = np.random.default_rng(42)
+    n = 1000
+    z1 = rng.standard_normal(n)
+    z2 = rng.standard_normal(n)
+    u = rng.standard_normal(n)
+    # Strong instruments: high correlation with endogenous var
+    x_end = 0.8 * z1 + 0.6 * z2 + 0.3 * u
+    y = 1.0 + 2.0 * x_end + u
+    df = pl.DataFrame({"y": y, "x_end": x_end, "z1": z1, "z2": z2})
+    return pr.iv2sls("y ~ 1 || x_end ~ z1 + z2", data=df)
+
+
+@pytest.fixture
+def iv_weak():
+    """IV result with weak instruments."""
+    rng = np.random.default_rng(42)
+    n = 200
+    z1 = rng.standard_normal(n)
+    z2 = rng.standard_normal(n)
+    u = rng.standard_normal(n)
+    # Weak instruments: very low correlation
+    x_end = 0.02 * z1 + 0.01 * z2 + u
+    y = 1.0 + 2.0 * x_end + u
+    df = pl.DataFrame({"y": y, "x_end": x_end, "z1": z1, "z2": z2})
+    return pr.iv2sls("y ~ 1 || x_end ~ z1 + z2", data=df)
+
+
+def test_weak_instrument_strong(iv_strong):
+    result = pr.weak_instrument_test(iv_strong, n_instruments=2)
+    assert result["staiger_stock"] is True
+    assert result["assessment"] == "strong"
+    assert result["f_stat"] > 10
+
+
+def test_weak_instrument_weak(iv_weak):
+    result = pr.weak_instrument_test(iv_weak, n_instruments=2)
+    assert result["staiger_stock"] is False
+    assert result["assessment"] == "weak"
+    assert result["f_stat"] < 10
+
+
+def test_weak_instrument_stock_yogo(iv_strong):
+    result = pr.weak_instrument_test(iv_strong, n_instruments=2)
+    assert result["stock_yogo"] is not None
+    assert "critical_values" in result["stock_yogo"]
+    assert result["stock_yogo"]["n_instruments"] == 2
+
+
+def test_weak_instrument_no_stock_yogo(iv_strong):
+    """Without n_instruments, no Stock-Yogo values."""
+    result = pr.weak_instrument_test(iv_strong)
+    assert result["stock_yogo"] is None
+
+
+def test_weak_instrument_no_f_stat():
+    """Should raise for results without first-stage F."""
+    rng = np.random.default_rng(42)
+    n = 100
+    df = pl.DataFrame({"y": rng.standard_normal(n), "x1": rng.standard_normal(n)})
+    r = pr.ols("y ~ x1", data=df)
+    with pytest.raises(ValueError, match="No first-stage F"):
+        pr.weak_instrument_test(r)
+
+
 def test_hausman_coefficients_compared(panel_data):
     r_fe = pr.panel_fe("y ~ x1 + x2", data=panel_data, entity="firm_id", time="year_id")
     r_re = pr.panel_re("y ~ x1 + x2", data=panel_data, entity="firm_id")

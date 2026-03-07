@@ -99,6 +99,84 @@ def vcov_clustered(
     return dfc * XtX_inv @ meat @ XtX_inv
 
 
+def vcov_hac(
+    X: NDArray,
+    resid: NDArray,
+    time_ids: NDArray,
+    bandwidth: int | None = None,
+) -> NDArray:
+    """Newey-West HAC VCV (heteroskedasticity and autocorrelation consistent).
+
+    Uses Bartlett kernel: w(j) = 1 - j/(L+1).
+
+    Args:
+        time_ids: Time period identifiers. Observations are sorted by these.
+        bandwidth: Number of lags. Default: floor(4*(T/100)^(2/9)).
+    """
+    n, k = X.shape
+    XtX_inv = np.linalg.inv(X.T @ X)
+    score = X * resid[:, None]
+
+    # Sort by time to ensure proper lag structure
+    order = np.argsort(time_ids)
+    score = score[order]
+
+    if bandwidth is None:
+        bandwidth = max(1, int(np.floor(4 * (n / 100) ** (2 / 9))))
+
+    # Meat: Γ_0 + Σ_{j=1}^{L} w(j) * (Γ_j + Γ_j')
+    S = score.T @ score
+    for j in range(1, bandwidth + 1):
+        w = 1.0 - j / (bandwidth + 1)
+        Gamma_j = score[j:].T @ score[:-j]
+        S += w * (Gamma_j + Gamma_j.T)
+
+    dfc = n / (n - k)
+    return dfc * XtX_inv @ S @ XtX_inv
+
+
+def vcov_driscoll_kraay(
+    X: NDArray,
+    resid: NDArray,
+    time_ids: NDArray,
+    bandwidth: int | None = None,
+) -> NDArray:
+    """Driscoll-Kraay VCV for panel data.
+
+    Robust to cross-sectional dependence, heteroskedasticity, and autocorrelation.
+    Aggregates score vectors by time period, then applies Newey-West.
+
+    Args:
+        time_ids: Time period identifiers for each observation.
+        bandwidth: Number of lags. Default: floor(4*(T/100)^(2/9)).
+    """
+    n, k = X.shape
+    XtX_inv = np.linalg.inv(X.T @ X)
+    score = X * resid[:, None]
+
+    # Aggregate scores by time period
+    unique_times, time_idx = np.unique(time_ids, return_inverse=True)
+    T = len(unique_times)
+
+    h = np.zeros((T, k))
+    for j in range(k):
+        h[:, j] = np.bincount(time_idx, weights=score[:, j], minlength=T)
+
+    if bandwidth is None:
+        bandwidth = max(1, int(np.floor(4 * (T / 100) ** (2 / 9))))
+
+    # Newey-West on cross-sectional sums
+    S = h.T @ h
+    for j in range(1, bandwidth + 1):
+        w = 1.0 - j / (bandwidth + 1)
+        Gamma_j = h[j:].T @ h[:-j]
+        S += w * (Gamma_j + Gamma_j.T)
+
+    # Small-sample correction: T/(T-1) following Hoechle (2007)
+    dfc = T / (T - 1)
+    return dfc * XtX_inv @ S @ XtX_inv
+
+
 def _interaction_codes(*arrays: NDArray) -> NDArray:
     """Create unique integer codes for the interaction of multiple cluster arrays."""
     if len(arrays) == 1:

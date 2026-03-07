@@ -7,6 +7,23 @@ from scipy import stats
 
 from polars_reg._results import RegressionResult
 
+# Stock & Yogo (2005) Table 5.2: Critical values for Cragg-Donald Wald F test
+# k2=1 (single endogenous regressor), maximal IV relative bias
+# Key: n_excluded_instruments -> {max_bias_pct: F_critical}
+_STOCK_YOGO_K2_1 = {
+    2: {5: 19.93, 10: 11.59, 20: 7.54, 30: 5.96},
+    3: {5: 13.91, 10: 9.08, 20: 6.46, 30: 5.39},
+    4: {5: 16.85, 10: 10.27, 20: 6.71, 30: 5.34},
+    5: {5: 18.37, 10: 10.83, 20: 6.77, 30: 5.25},
+    6: {5: 19.28, 10: 11.12, 20: 6.76, 30: 5.15},
+    7: {5: 19.86, 10: 11.29, 20: 6.73, 30: 5.07},
+    8: {5: 20.25, 10: 11.39, 20: 6.69, 30: 4.99},
+    10: {5: 20.74, 10: 11.49, 20: 6.60, 30: 4.86},
+    15: {5: 21.23, 10: 11.56, 20: 6.42, 30: 4.62},
+    20: {5: 21.40, 10: 11.55, 20: 6.28, 30: 4.45},
+    30: {5: 21.42, 10: 11.48, 20: 6.07, 30: 4.20},
+}
+
 
 def hausman_test(
     fe_result: RegressionResult,
@@ -62,3 +79,48 @@ def hausman_test(
         "df": df,
         "coefficients_compared": common,
     }
+
+
+def weak_instrument_test(
+    iv_result: RegressionResult,
+    n_instruments: int | None = None,
+) -> dict:
+    """Assess instrument strength for IV regression.
+
+    Reports the first-stage F-statistic and applies the Staiger-Stock (1997)
+    rule of thumb (F > 10). When the number of excluded instruments is known,
+    also reports Stock-Yogo (2005) critical values for maximal relative bias.
+
+    Args:
+        iv_result: Result from iv2sls() or liml().
+        n_instruments: Number of excluded instruments. Required for
+            Stock-Yogo critical values.
+
+    Returns:
+        dict with 'f_stat', 'staiger_stock' (bool), 'stock_yogo' (dict or None)
+    """
+    if iv_result.first_stage_f is None:
+        raise ValueError("No first-stage F-statistic available in the result")
+
+    f = iv_result.first_stage_f
+
+    result = {
+        "f_stat": f,
+        "staiger_stock": f > 10,
+        "assessment": "strong" if f > 10 else "weak",
+    }
+
+    if n_instruments is not None and n_instruments in _STOCK_YOGO_K2_1:
+        cv = _STOCK_YOGO_K2_1[n_instruments]
+        result["stock_yogo"] = {
+            "n_instruments": n_instruments,
+            "critical_values": cv,
+            "reject_5pct": f > cv[5],
+            "reject_10pct": f > cv[10],
+            "reject_20pct": f > cv[20],
+            "reject_30pct": f > cv[30],
+        }
+    else:
+        result["stock_yogo"] = None
+
+    return result

@@ -6,7 +6,13 @@ import polars as pl
 from polars_reg._demean import absorbed_dof, demean, drop_singletons
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
-from polars_reg._se import vcov_clustered, vcov_iid, vcov_multiway_clustered
+from polars_reg._se import (
+    vcov_clustered,
+    vcov_driscoll_kraay,
+    vcov_hac,
+    vcov_iid,
+    vcov_multiway_clustered,
+)
 from polars_reg._utils import ensure_polars, extract_arrays
 
 
@@ -17,11 +23,16 @@ def panel_fe(
     time: str | None = None,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    bandwidth: int | None = None,
 ) -> RegressionResult:
     """Panel fixed effects (within) estimator.
 
     Demeans by entity (and optionally time), then OLS on demeaned data.
     Default clusters SEs by entity.
+
+    Args:
+        vcov: "iid", "NW" (Newey-West), or "DK" (Driscoll-Kraay).
+        bandwidth: Number of lags for NW/DK. Default: Newey-West rule of thumb.
     """
     if isinstance(cluster, str):
         cluster = [cluster]
@@ -36,7 +47,7 @@ def panel_fe(
     spec.fe = [entity] + ([time] if time else [])
     spec.add_intercept = False
 
-    arrays = extract_arrays(data, spec, cluster=cluster if cluster else None)
+    arrays = extract_arrays(data, spec, cluster=cluster if cluster else None, time=time)
     y, X = arrays.y, arrays.X
     fe_dict = arrays.fe_arrays
 
@@ -50,6 +61,8 @@ def panel_fe(
         y, X = y[keep], X[keep]
         fe_dict = {k: v[keep] for k, v in fe_dict.items()}
         arrays.cluster_arrays = {k: v[keep] for k, v in arrays.cluster_arrays.items()}
+        if arrays.time_array is not None:
+            arrays.time_array = arrays.time_array[keep]
 
     all_vars = np.column_stack([y.reshape(-1, 1), X])
     demeaned = demean(all_vars, fe_dict)
@@ -66,7 +79,17 @@ def panel_fe(
     r2 = 1.0 - ss_res / ss_tot
     r2_adj = 1.0 - (1.0 - r2) * (n - 1) / (n - k - df_abs)
 
-    if cluster:
+    if vcov in ("NW", "DK"):
+        if arrays.time_array is None:
+            raise ValueError(f"vcov='{vcov}' requires time= parameter")
+        if vcov == "NW":
+            V = vcov_hac(X_dm, resid, arrays.time_array, bandwidth=bandwidth)
+        else:
+            V = vcov_driscoll_kraay(X_dm, resid, arrays.time_array, bandwidth=bandwidth)
+        vcov_type_str = vcov
+        n_clusters_dict = None
+        df_r = n - k - df_abs
+    elif cluster:
         cluster_arrays_list = [arrays.cluster_arrays[c] for c in cluster]
         if len(cluster_arrays_list) == 1:
             V = vcov_clustered(X_dm, resid, cluster_arrays_list[0])

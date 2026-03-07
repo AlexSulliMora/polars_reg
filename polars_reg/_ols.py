@@ -8,6 +8,8 @@ from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
 from polars_reg._se import (
     vcov_clustered,
+    vcov_driscoll_kraay,
+    vcov_hac,
     vcov_iid,
     vcov_multiway_clustered,
     vcov_robust,
@@ -58,21 +60,25 @@ def ols(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    time: str | None = None,
+    bandwidth: int | None = None,
 ) -> RegressionResult:
     """Ordinary Least Squares regression.
 
     Args:
         formula: Formula string, e.g. "y ~ x1 + x2" or "y ~ x1 + x2 | fe1 + fe2"
         data: Polars DataFrame or LazyFrame
-        vcov: "iid", "HC0", "HC1", "HC2", or "HC3"
+        vcov: "iid", "HC0", "HC1", "HC2", "HC3", "NW" (Newey-West), or "DK" (Driscoll-Kraay)
         cluster: Column name(s) for clustered SEs. Overrides vcov.
+        time: Column name for time ordering (required for NW/DK).
+        bandwidth: Number of lags for HAC/DK. Default: Newey-West rule of thumb.
     """
     if isinstance(cluster, str):
         cluster = [cluster]
     data = ensure_polars(data)
 
     spec = parse_formula(formula)
-    arrays = extract_arrays(data, spec, cluster=cluster)
+    arrays = extract_arrays(data, spec, cluster=cluster, time=time)
 
     X, y = arrays.X, arrays.y
     fe_dict = arrays.fe_arrays
@@ -87,6 +93,8 @@ def ols(
             fe_dict = {k: v[keep] for k, v in fe_dict.items()}
             if cluster:
                 arrays.cluster_arrays = {k: v[keep] for k, v in arrays.cluster_arrays.items()}
+            if arrays.time_array is not None:
+                arrays.time_array = arrays.time_array[keep]
 
         # Remove intercept (absorbed by FE)
         if spec.add_intercept and arrays.names[-1] == "_cons":
@@ -132,6 +140,16 @@ def ols(
         vcov_type = "cluster"
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1
+    elif vcov in ("NW", "DK"):
+        if arrays.time_array is None:
+            raise ValueError(f"vcov='{vcov}' requires time= parameter")
+        if vcov == "NW":
+            V = vcov_hac(X, resid, arrays.time_array, bandwidth=bandwidth)
+        else:
+            V = vcov_driscoll_kraay(X, resid, arrays.time_array, bandwidth=bandwidth)
+        vcov_type = vcov
+        n_clusters = None
+        df_r = n - k - df_abs
     elif vcov == "iid":
         V = vcov_iid(X, resid, df_abs=df_abs)
         vcov_type = "iid"
