@@ -27,6 +27,7 @@ from polars_reg._diagnostics import (
     weak_instrument_test,
 )
 from polars_reg._groupby import GroupRegressionResult, groupby_reg
+from polars_reg._quantile import quantreg
 from polars_reg._regtable import regtable
 from polars_reg.r_equiv import compare_r, to_r
 from polars_reg.stata import compare_stata, to_stata
@@ -55,4 +56,5 @@ __all__ = [
     "logit",
     "marginal_effects",
     "panel_ab",
+    "quantreg",
 ]
