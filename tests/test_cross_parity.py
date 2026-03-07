@@ -33,12 +33,8 @@ LOOSE = 2e-3
 
 skip_no_stata = pytest.mark.skipif(not stata_available(), reason="Stata not available")
 skip_no_r = pytest.mark.skipif(not r_available(), reason="R/fixest not available")
-skip_no_r_aer = pytest.mark.skipif(
-    not r_has_package("AER"), reason="R package AER not installed"
-)
-skip_no_r_plm = pytest.mark.skipif(
-    not r_has_package("plm"), reason="R package plm not installed"
-)
+skip_no_r_aer = pytest.mark.skipif(not r_has_package("AER"), reason="R package AER not installed")
+skip_no_r_plm = pytest.mark.skipif(not r_has_package("plm"), reason="R package plm not installed")
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -64,15 +60,7 @@ def cross_data() -> pl.DataFrame:
 
     firm_fe = rng.standard_normal(n_firms)
     year_fe = rng.standard_normal(n_years)
-    y = (
-        2.0
-        + 1.0 * x1
-        - 0.5 * x2
-        + 1.5 * x_endog
-        + firm_fe[firm_id]
-        + year_fe[year_id - 2000]
-        + u
-    )
+    y = 2.0 + 1.0 * x1 - 0.5 * x2 + 1.5 * x_endog + firm_fe[firm_id] + year_fe[year_id - 2000] + u
 
     return pl.DataFrame(
         {
@@ -155,16 +143,12 @@ def test_ols_hc3_r(cross_data):
 
 @skip_no_stata
 def test_ols_cluster_stata(cross_data):
-    assert_stata_parity(
-        "ols", "y ~ x1 + x2", cross_data, cluster=["firm_id"], rtol=TIGHT
-    )
+    assert_stata_parity("ols", "y ~ x1 + x2", cross_data, cluster=["firm_id"], rtol=TIGHT)
 
 
 @skip_no_r
 def test_ols_cluster_r(cross_data):
-    assert_r_parity(
-        "ols", "y ~ x1 + x2", cross_data, cluster=["firm_id"], rtol=TIGHT
-    )
+    assert_r_parity("ols", "y ~ x1 + x2", cross_data, cluster=["firm_id"], rtol=TIGHT)
 
 
 # ===================================================================
@@ -296,16 +280,12 @@ def test_fe2_iid_r(cross_data):
 
 @skip_no_stata
 def test_iv2sls_iid_stata(cross_data):
-    assert_stata_parity(
-        "iv2sls", "y ~ x1 || x_endog ~ z1 + z2", cross_data, rtol=TIGHT
-    )
+    assert_stata_parity("iv2sls", "y ~ x1 || x_endog ~ z1 + z2", cross_data, rtol=TIGHT)
 
 
 @skip_no_r
 def test_iv2sls_iid_r(cross_data):
-    assert_r_parity(
-        "iv2sls", "y ~ x1 || x_endog ~ z1 + z2", cross_data, rtol=TIGHT
-    )
+    assert_r_parity("iv2sls", "y ~ x1 || x_endog ~ z1 + z2", cross_data, rtol=TIGHT)
 
 
 # ===================================================================
@@ -315,16 +295,12 @@ def test_iv2sls_iid_r(cross_data):
 
 @skip_no_stata
 def test_iv2sls_hc1_stata(cross_data):
-    assert_stata_parity(
-        "iv2sls", "y ~ x1 || x_endog ~ z1 + z2", cross_data, vcov="HC1", rtol=TIGHT
-    )
+    assert_stata_parity("iv2sls", "y ~ x1 || x_endog ~ z1 + z2", cross_data, vcov="HC1", rtol=TIGHT)
 
 
 @skip_no_r
 def test_iv2sls_hc1_r(cross_data):
-    assert_r_parity(
-        "iv2sls", "y ~ x1 || x_endog ~ z1 + z2", cross_data, vcov="HC1", rtol=TIGHT
-    )
+    assert_r_parity("iv2sls", "y ~ x1 || x_endog ~ z1 + z2", cross_data, vcov="HC1", rtol=TIGHT)
 
 
 # ===================================================================
@@ -334,17 +310,13 @@ def test_iv2sls_hc1_r(cross_data):
 
 @skip_no_stata
 def test_liml_iid_stata(cross_data):
-    assert_stata_parity(
-        "liml", "y ~ x1 || x_endog ~ z1 + z2", cross_data, rtol=LOOSE
-    )
+    assert_stata_parity("liml", "y ~ x1 || x_endog ~ z1 + z2", cross_data, rtol=LOOSE)
 
 
 @skip_no_r
 @skip_no_r_aer
 def test_liml_iid_r(cross_data):
-    assert_r_parity(
-        "liml", "y ~ x1 || x_endog ~ z1 + z2", cross_data, rtol=LOOSE
-    )
+    assert_r_parity("liml", "y ~ x1 || x_endog ~ z1 + z2", cross_data, rtol=LOOSE)
 
 
 # ===================================================================
@@ -354,9 +326,7 @@ def test_liml_iid_r(cross_data):
 
 @skip_no_stata
 def test_gmm_robust_stata(cross_data):
-    assert_stata_parity(
-        "gmm_iv", "y ~ x1 || x_endog ~ z1 + z2", cross_data, rtol=MEDIUM
-    )
+    assert_stata_parity("gmm_iv", "y ~ x1 || x_endog ~ z1 + z2", cross_data, rtol=MEDIUM)
 
 
 # ===================================================================

@@ -31,10 +31,15 @@ def panel_data():
     # Make x1 correlated with the entity effect so RE is inconsistent
     x1 = x1 + firm_fe[firm_id] * 0.8
     y = 1.0 * x1 - 0.5 * x2 + firm_fe[firm_id] + rng.standard_normal(n) * 0.3
-    return pl.DataFrame({
-        "y": y, "x1": x1, "x2": x2,
-        "firm_id": firm_id, "year_id": year_id,
-    })
+    return pl.DataFrame(
+        {
+            "y": y,
+            "x1": x1,
+            "x2": x2,
+            "firm_id": firm_id,
+            "year_id": year_id,
+        }
+    )
 
 
 # ── Wald test ─────────────────────────────────────────────────────
@@ -115,13 +120,17 @@ def test_hausman_rejects_when_correlated():
     x1 = rng.standard_normal(n) + firm_fe[firm_id] * 0.8
     x2 = rng.standard_normal(n)
     y = 1.0 * x1 - 0.5 * x2 + firm_fe[firm_id] + rng.standard_normal(n) * 0.3
-    df = pl.DataFrame({
-        "y": y, "x1": x1, "x2": x2,
-        "firm_id": firm_id, "year_id": year_id,
-    })
+    df = pl.DataFrame(
+        {
+            "y": y,
+            "x1": x1,
+            "x2": x2,
+            "firm_id": firm_id,
+            "year_id": year_id,
+        }
+    )
     # Use iid SEs for FE (classic Hausman requires comparable VCVs)
-    r_fe = pr.panel_fe("y ~ x1 + x2", data=df, entity="firm_id", time="year_id",
-                       cluster=[])
+    r_fe = pr.panel_fe("y ~ x1 + x2", data=df, entity="firm_id", time="year_id", cluster=[])
     r_re = pr.panel_re("y ~ x1 + x2", data=df, entity="firm_id")
     result = pr.hausman_test(r_fe, r_re)
     # Coefficients should differ meaningfully
@@ -142,10 +151,15 @@ def test_hausman_no_reject_when_uncorrelated():
     firm_fe = rng.standard_normal(n_firms)
     # No correlation between FE and regressors
     y = 1.0 * x1 - 0.5 * x2 + firm_fe[firm_id] + rng.standard_normal(n) * 0.5
-    df = pl.DataFrame({
-        "y": y, "x1": x1, "x2": x2,
-        "firm_id": firm_id, "year_id": year_id,
-    })
+    df = pl.DataFrame(
+        {
+            "y": y,
+            "x1": x1,
+            "x2": x2,
+            "firm_id": firm_id,
+            "year_id": year_id,
+        }
+    )
     r_fe = pr.panel_fe("y ~ x1 + x2", data=df, entity="firm_id", time="year_id")
     r_re = pr.panel_re("y ~ x1 + x2", data=df, entity="firm_id")
     result = pr.hausman_test(r_fe, r_re)

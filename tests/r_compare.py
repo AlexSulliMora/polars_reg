@@ -228,23 +228,22 @@ def to_r_script(
         f'fh <- file("{results_path}", "w")',
         'writeLines("param,coef,se", fh)',
         "for (i in seq_along(b)) {",
-        '  writeLines(paste0(nms[i], ",", format(b[i], digits=15), ",", format(s[i], digits=15)), fh)',
+        '  writeLines(paste0(nms[i], ",", format(b[i], digits=15),'
+        ' ",", format(s[i], digits=15)), fh)',
         "}",
-        f'writeLines(paste0("___N___,", nobs(model), ",0"), fh)',
-        'tryCatch({',
-        '  r2 <- summary(model)$r.squared',
-        '  if (is.null(r2)) r2 <- summary(model)$r.sq',
+        'writeLines(paste0("___N___,", nobs(model), ",0"), fh)',
+        "tryCatch({",
+        "  r2 <- summary(model)$r.squared",
+        "  if (is.null(r2)) r2 <- summary(model)$r.sq",
         '  if (!is.null(r2)) writeLines(paste0("___r2___,", format(r2, digits=15), ",0"), fh)',
-        '}, error=function(e) {})',
+        "}, error=function(e) {})",
         "close(fh)",
     ]
 
     return "\n".join(lines)
 
 
-def _ols_r_script(
-    spec: Any, formula: str, vcov: str, cluster: list[str] | None
-) -> list[str]:
+def _ols_r_script(spec: Any, formula: str, vcov: str, cluster: list[str] | None) -> list[str]:
     """Generate R script lines for OLS regression."""
     has_fe = len(spec.fe) > 0
 
@@ -253,7 +252,7 @@ def _ols_r_script(
         lines = ["library(fixest)"]
         r_formula = _build_feols_formula(spec)
         vcov_arg = _feols_vcov_arg(vcov, cluster)
-        lines.append(f'model <- feols({r_formula}, data=df, vcov={vcov_arg})')
+        lines.append(f"model <- feols({r_formula}, data=df, vcov={vcov_arg})")
         lines.append("vcov_mat <- vcov(model)")
         return lines
     else:
@@ -268,21 +267,17 @@ def _ols_r_script(
         return lines
 
 
-def _iv2sls_r_script(
-    spec: Any, formula: str, vcov: str, cluster: list[str] | None
-) -> list[str]:
+def _iv2sls_r_script(spec: Any, formula: str, vcov: str, cluster: list[str] | None) -> list[str]:
     """Generate R script lines for 2SLS regression."""
     lines = ["library(fixest)"]
     r_formula = _build_feols_iv_formula(spec)
     vcov_arg = _feols_vcov_arg(vcov, cluster)
-    lines.append(f'model <- feols({r_formula}, data=df, vcov={vcov_arg})')
+    lines.append(f"model <- feols({r_formula}, data=df, vcov={vcov_arg})")
     lines.append("vcov_mat <- vcov(model)")
     return lines
 
 
-def _liml_r_script(
-    spec: Any, formula: str, vcov: str, cluster: list[str] | None
-) -> list[str]:
+def _liml_r_script(spec: Any, formula: str, vcov: str, cluster: list[str] | None) -> list[str]:
     """Generate R script lines for LIML regression."""
     lines = ["library(AER)"]
     # AER::ivreg formula: y ~ exog + endog | exog + instruments
@@ -326,16 +321,12 @@ def _panel_r_script(
         index_parts.append(f'"{time}"')
     index_str = ", ".join(index_parts)
 
-    lines.append(
-        f'model <- plm({r_formula}, data=df, model="{model_type}", index=c({index_str}))'
-    )
+    lines.append(f'model <- plm({r_formula}, data=df, model="{model_type}", index=c({index_str}))')
 
     if cluster and len(cluster) == 1:
         lines.append("library(lmtest)")
         lines.append("library(sandwich)")
-        lines.append(
-            f'vcov_mat <- vcovHC(model, method="arellano", type="HC1", cluster="group")'
-        )
+        lines.append('vcov_mat <- vcovHC(model, method="arellano", type="HC1", cluster="group")')
     else:
         lines.append("vcov_mat <- vcov(model)")
 
@@ -633,8 +624,14 @@ def assert_r_parity(
     try:
         # 3. Generate R script
         script = to_r_script(
-            estimator, formula, csv_path, results_path,
-            vcov=vcov, cluster=cluster, entity=entity, time=time,
+            estimator,
+            formula,
+            csv_path,
+            results_path,
+            vcov=vcov,
+            cluster=cluster,
+            entity=entity,
+            time=time,
         )
 
         # 4. Run R
@@ -645,8 +642,12 @@ def assert_r_parity(
 
         # 6. Compare
         comparison = compare_results(
-            estimator, formula, script.split("\n")[3],  # The model <- ... line
-            polars_result, r_result, rtol,
+            estimator,
+            formula,
+            script.split("\n")[3],  # The model <- ... line
+            polars_result,
+            r_result,
+            rtol,
         )
 
         if not comparison.passed:

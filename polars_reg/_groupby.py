@@ -7,7 +7,6 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-import numpy as np
 import polars as pl
 
 from polars_reg._results import RegressionResult
@@ -67,13 +66,11 @@ class GroupRegressionResult:
         ]
         for key, result in self.results.items():
             lines.append(f"\n--- Group: {key} (N={result.n_obs}) ---")
-            coefs = ", ".join(
-                f"{n}={c:.4f}" for n, c in zip(result.names, result.coefficients)
-            )
+            coefs = ", ".join(f"{n}={c:.4f}" for n, c in zip(result.names, result.coefficients))
             lines.append(f"  Coefs: {coefs}")
             lines.append(f"  R²={result.r_squared:.4f}")
         if self.failed:
-            lines.append(f"\n--- Failed groups ---")
+            lines.append("\n--- Failed groups ---")
             for key, reason in self.failed.items():
                 lines.append(f"  {key}: {reason}")
         return "\n".join(lines)

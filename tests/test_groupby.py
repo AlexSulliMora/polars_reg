@@ -77,17 +77,13 @@ def test_groupby_values(grouped_data):
 
 
 def test_groupby_min_obs(grouped_data):
-    result = pr.groupby_reg(
-        pr.ols, "y ~ x1 + x2", grouped_data, group_by="group", min_obs=200
-    )
+    result = pr.groupby_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group", min_obs=200)
     assert len(result) == 0
     assert len(result.failed) == 3
 
 
 def test_groupby_with_robust(grouped_data):
-    result = pr.groupby_reg(
-        pr.ols, "y ~ x1 + x2", grouped_data, group_by="group", vcov="HC1"
-    )
+    result = pr.groupby_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group", vcov="HC1")
     assert len(result) == 3
     for r in result.values():
         assert r.vcov_type == "HC1"
@@ -95,12 +91,14 @@ def test_groupby_with_robust(grouped_data):
 
 def test_groupby_singular_group():
     """Groups with singular X'X should fail gracefully."""
-    df = pl.DataFrame({
-        "y": [1.0, 2.0, 3.0],
-        "x1": [1.0, 1.0, 1.0],  # no variation
-        "x2": [0.0, 0.0, 0.0],
-        "group": ["A", "A", "A"],
-    })
+    df = pl.DataFrame(
+        {
+            "y": [1.0, 2.0, 3.0],
+            "x1": [1.0, 1.0, 1.0],  # no variation
+            "x2": [0.0, 0.0, 0.0],
+            "group": ["A", "A", "A"],
+        }
+    )
     result = pr.groupby_reg(pr.ols, "y ~ x1 + x2", df, group_by="group")
     # Should fail gracefully rather than crash
     assert len(result) == 0 or len(result.failed) > 0
@@ -118,12 +116,14 @@ def test_groupby_multikey():
     """GroupBy with multiple key columns."""
     rng = np.random.default_rng(42)
     n = 200
-    df = pl.DataFrame({
-        "y": rng.standard_normal(n),
-        "x1": rng.standard_normal(n),
-        "sector": np.repeat(["Tech", "Fin"], n // 2),
-        "region": np.tile(["US", "EU"], n // 2),
-    })
+    df = pl.DataFrame(
+        {
+            "y": rng.standard_normal(n),
+            "x1": rng.standard_normal(n),
+            "sector": np.repeat(["Tech", "Fin"], n // 2),
+            "region": np.tile(["US", "EU"], n // 2),
+        }
+    )
     result = pr.groupby_reg(pr.ols, "y ~ x1", df, group_by=["sector", "region"])
     assert len(result) == 4  # 2 sectors * 2 regions
 
@@ -144,9 +144,14 @@ def test_groupby_iv(grouped_data):
     u = rng.standard_normal(n)
     x_end = 0.5 * z1 + 0.3 * z2 + 0.5 * u
     y = 1.0 + 2.0 * x_end + u
-    df = pl.DataFrame({
-        "y": y, "x_end": x_end, "z1": z1, "z2": z2,
-        "group": np.repeat(["A", "B", "C"], 100),
-    })
+    df = pl.DataFrame(
+        {
+            "y": y,
+            "x_end": x_end,
+            "z1": z1,
+            "z2": z2,
+            "group": np.repeat(["A", "B", "C"], 100),
+        }
+    )
     result = pr.groupby_reg(pr.iv2sls, "y ~ 1 || x_end ~ z1 + z2", df, group_by="group")
     assert len(result) == 3

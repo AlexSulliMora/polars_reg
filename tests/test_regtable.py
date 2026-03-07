@@ -56,8 +56,7 @@ def test_regtable_se_in_parens(simple_data):
     table = regtable(r1)
     # Find a line with parentheses (SE line)
     se_lines = [
-        line for line in table.split("\n")
-        if "(" in line and ")" in line and "p<" not in line
+        line for line in table.split("\n") if "(" in line and ")" in line and "p<" not in line
     ]
     assert len(se_lines) > 0
     for line in se_lines:

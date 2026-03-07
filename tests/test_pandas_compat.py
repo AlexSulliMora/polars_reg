@@ -86,13 +86,15 @@ def test_panel_fe_pandas():
     rng = np.random.default_rng(99)
     n_firms, n_years = 20, 10
     n = n_firms * n_years
-    pl_panel = pl.DataFrame({
-        "y": rng.standard_normal(n),
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-        "firm": np.repeat(np.arange(n_firms), n_years),
-        "year": np.tile(np.arange(n_years), n_firms),
-    })
+    pl_panel = pl.DataFrame(
+        {
+            "y": rng.standard_normal(n),
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+            "firm": np.repeat(np.arange(n_firms), n_years),
+            "year": np.tile(np.arange(n_years), n_firms),
+        }
+    )
     pd_panel = pl_panel.to_pandas()
     r_pl = pr.panel_fe("y ~ x1 + x2", data=pl_panel, entity="firm", time="year")
     r_pd = pr.panel_fe("y ~ x1 + x2", data=pd_panel, entity="firm", time="year")
@@ -109,13 +111,15 @@ def test_panel_fd_pandas():
     rng = np.random.default_rng(99)
     n_firms, n_years = 20, 10
     n = n_firms * n_years
-    pl_panel = pl.DataFrame({
-        "y": rng.standard_normal(n),
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-        "firm": np.repeat(np.arange(n_firms), n_years),
-        "year": np.tile(np.arange(n_years), n_firms),
-    })
+    pl_panel = pl.DataFrame(
+        {
+            "y": rng.standard_normal(n),
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+            "firm": np.repeat(np.arange(n_firms), n_years),
+            "year": np.tile(np.arange(n_years), n_firms),
+        }
+    )
     pd_panel = pl_panel.to_pandas()
     r_pl = pr.panel_fd("y ~ x1 + x2", data=pl_panel, entity="firm", time="year")
     r_pd = pr.panel_fd("y ~ x1 + x2", data=pd_panel, entity="firm", time="year")
