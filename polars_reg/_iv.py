@@ -10,7 +10,7 @@ from polars_reg._se import (
     _clustered_meat,
     _interaction_codes,
 )
-from polars_reg._utils import extract_arrays
+from polars_reg._utils import ensure_polars, extract_arrays
 
 
 def iv2sls(
@@ -31,6 +31,7 @@ def iv2sls(
     """
     if isinstance(cluster, str):
         cluster = [cluster]
+    data = ensure_polars(data)
 
     spec = parse_formula(formula)
 

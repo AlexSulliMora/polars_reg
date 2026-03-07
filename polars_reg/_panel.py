@@ -7,7 +7,7 @@ from polars_reg._demean import absorbed_dof, demean, drop_singletons
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
 from polars_reg._se import vcov_clustered, vcov_iid, vcov_multiway_clustered
-from polars_reg._utils import extract_arrays
+from polars_reg._utils import ensure_polars, extract_arrays
 
 
 def panel_fe(
@@ -27,6 +27,7 @@ def panel_fe(
         cluster = [entity]
     elif isinstance(cluster, str):
         cluster = [cluster]
+    data = ensure_polars(data)
 
     spec = parse_formula(formula)
     spec.fe = [entity] + ([time] if time else [])
@@ -117,6 +118,7 @@ def panel_re(
         entity: Column name for entity (panel) identifier
         vcov: "iid" (default)
     """
+    data = ensure_polars(data)
     spec = parse_formula(formula)
     # Don't put entity in spec.fe — RE keeps the intercept and handles
     # entity codes internally for variance component estimation.
@@ -221,6 +223,7 @@ def panel_fd(
         cluster = [cluster]
     if cluster is None:
         cluster = [entity]
+    data = ensure_polars(data)
 
     spec = parse_formula(formula)
     # We need entity and time columns but not as FE

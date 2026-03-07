@@ -8,6 +8,18 @@ import polars as pl
 from polars_reg._formula import FormulaSpec
 
 
+def ensure_polars(data: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFrame:
+    """Convert pandas DataFrame to Polars if needed. Passes through Polars data unchanged."""
+    try:
+        import pandas as pd
+
+        if isinstance(data, pd.DataFrame):
+            return pl.from_pandas(data)
+    except ImportError:
+        pass
+    return data
+
+
 @dataclass
 class ExtractedArrays:
     y: np.ndarray

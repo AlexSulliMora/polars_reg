@@ -13,7 +13,7 @@ from polars_reg._se import (
     vcov_multiway_clustered,
     vcov_robust,
 )
-from polars_reg._utils import extract_arrays
+from polars_reg._utils import ensure_polars, extract_arrays
 
 
 def liml(
@@ -32,6 +32,7 @@ def liml(
     """
     if isinstance(cluster, str):
         cluster = [cluster]
+    data = ensure_polars(data)
 
     spec = parse_formula(formula)
     arrays = extract_arrays(data, spec, cluster=cluster)
@@ -165,6 +166,7 @@ def gmm_iv(
     """
     if isinstance(cluster, str):
         cluster = [cluster]
+    data = ensure_polars(data)
 
     spec = parse_formula(formula)
     arrays = extract_arrays(data, spec, cluster=cluster)

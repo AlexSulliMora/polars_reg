@@ -97,37 +97,78 @@ Extend the existing `tests/stata_compare.py` infrastructure to also verify again
 
 ---
 
-## 3. Other Feature Gaps
+## 3. GroupBy Regression
 
-### 3a. Interaction terms in formula
+Accept a Polars `GroupBy` object to run the same regression per group and collect results — e.g., estimating factor loadings for each stock, or running regressions per industry.
+
+### 3a. Core API
+- [ ] `pr.ols("y ~ x1 + x2", data=df.group_by("ticker"))` returns a collection of results keyed by group
+- [ ] Should also work with `iv2sls`, `liml`, `gmm_iv`, `panel_fe`, etc.
+- [ ] Return type: `GroupRegressionResult` (dict-like, keyed by group values)
+  - `.keys()` — group labels
+  - `[group]` — individual `RegressionResult`
+  - `.coef_table()` — stacked Polars DataFrame with a group column
+  - `.summary()` — compact multi-group summary
+- [ ] Parallel execution via Polars' thread pool or Python multiprocessing
+
+### 3b. Integration with regtable
+- [ ] `regtable(*group_result.values())` should work naturally
+- [ ] Auto-label columns with group names
+
+### 3c. Edge cases
+- [ ] Groups with too few observations → skip with warning, don't crash
+- [ ] Groups with singular X'X → skip with warning
+- [ ] Consistent column ordering across groups (some groups may lack certain categories)
+
+---
+
+## 4. Pandas Compatibility
+
+Accept `pandas.DataFrame` as input — convert to Polars internally, run as normal, and return Polars-native results. Pandas users can still use `.coef_table().to_pandas()` etc.
+
+### 4a. Input handling
+- [ ] In each estimator (`ols`, `iv2sls`, `liml`, `gmm_iv`, `panel_fe`, `panel_re`, `panel_fd`), check `isinstance(data, pd.DataFrame)` at the top and convert via `pl.from_pandas(data)`
+- [ ] Centralize in a shared helper (e.g., `_utils.py: ensure_polars(data)`) to avoid repeating the check in every function
+- [ ] Import pandas only inside the check (`if isinstance(...)`) so pandas remains an optional dependency
+- [ ] No changes to return types — `RegressionResult` stays the same (NumPy arrays, Polars `.coef_table()`)
+
+### 4b. Tests
+- [ ] Test that `ols("y ~ x1", data=pandas_df)` produces identical results to the Polars version
+- [ ] Test that pandas is truly optional — importing polars_reg without pandas installed doesn't error
+
+---
+
+## 5. Other Feature Gaps
+
+### 5a. Interaction terms in formula
 - [ ] Support `x1:x2` syntax for interaction terms in formula parser
 - [ ] Support `x1##x2` (full factorial: main effects + interaction)
 
-### 3b. HAC / Driscoll-Kraay standard errors
+### 5b. HAC / Driscoll-Kraay standard errors
 - [ ] Newey-West (HAC) for time series
 - [ ] Driscoll-Kraay for panel data with cross-sectional dependence
 
-### 3c. Additional diagnostics
+### 5c. Additional diagnostics
 - [ ] Wald test for linear restrictions
 - [ ] Hausman test (FE vs RE)
 - [ ] Weak instrument diagnostics (Stock-Yogo critical values, Kleibergen-Paap)
 
 ---
 
-## 4. Polish & Packaging
+## 6. Polish & Packaging
 
-### 4a. Documentation
+### 6a. Documentation
 - [ ] README with quickstart, installation, feature overview
 - [ ] API reference (auto-generated from docstrings)
 - [ ] Add showcase notebook link to README
 
-### 4b. CI/CD
+### 6b. CI/CD
 - [ ] GitHub Actions: run tests on push (Python 3.10+)
 - [ ] Optional Stata parity job (manual trigger, requires Stata license)
 - [ ] Optional R parity job (install fixest, AER, plm, sandwich, lmtest)
 - [ ] Auto-publish to PyPI on tagged release
 
-### 4c. Performance
+### 6c. Performance
 - [ ] Benchmark suite (N = 1K, 10K, 100K, 1M)
 - [ ] Sparse FE dummies for large group counts (>1000)
 - [ ] Profile demeaning for bottlenecks
