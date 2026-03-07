@@ -1,0 +1,1887 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.6.43">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>polars_reg Showcase</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { display: inline-block; text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.5.1/jquery.min.js" integrity="sha512-bLT0Qm9VnAYZDflyKcBaQ2gg0hSYNQrJ8RilYldYQ1FxQYoCLtUjuuRuZo+fjqhx/qtq/1itJ0C2ejDxltZVFg==" crossorigin="anonymous"></script><script src="showcase_files/libs/clipboard/clipboard.min.js"></script>
+<script src="showcase_files/libs/quarto-html/quarto.js"></script>
+<script src="showcase_files/libs/quarto-html/popper.min.js"></script>
+<script src="showcase_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="showcase_files/libs/quarto-html/anchor.min.js"></script>
+<link href="showcase_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="showcase_files/libs/quarto-html/quarto-syntax-highlighting-d4d76bf8491c20bad77d141916dc28e1.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="showcase_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="showcase_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="showcase_files/libs/bootstrap/bootstrap-1dcd82a9f00e2cedf3042ce474c4dd6c.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" integrity="sha512-c3Nl8+7g4LMSTdrm621y7kf9v3SDPnhxLNhcjFJbKECVnmZHTdo+IRO05sNLTH/D3vA6u1X32ehoLC7WFVdheg==" crossorigin="anonymous"></script>
+
+<script type="application/javascript">define('jquery', [],function() {return window.jQuery;})</script>
+
+
+</head>
+
+<body>
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+<div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+  <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Table of contents</h2>
+   
+  <ul>
+  <li><a href="#polars_reg-showcase" id="toc-polars_reg-showcase" class="nav-link active" data-scroll-target="#polars_reg-showcase">polars_reg Showcase</a>
+  <ul class="collapse">
+  <li><a href="#generate-sample-data" id="toc-generate-sample-data" class="nav-link" data-scroll-target="#generate-sample-data">1. Generate sample data</a></li>
+  <li><a href="#ols-basic-robust-and-clustered-standard-errors" id="toc-ols-basic-robust-and-clustered-standard-errors" class="nav-link" data-scroll-target="#ols-basic-robust-and-clustered-standard-errors">2. OLS — Basic, Robust, and Clustered Standard Errors</a></li>
+  <li><a href="#b.-hac-and-driscoll-kraay-standard-errors" id="toc-b.-hac-and-driscoll-kraay-standard-errors" class="nav-link" data-scroll-target="#b.-hac-and-driscoll-kraay-standard-errors">2b. HAC and Driscoll-Kraay Standard Errors</a></li>
+  <li><a href="#high-dimensional-fixed-effects-reghdfe-style" id="toc-high-dimensional-fixed-effects-reghdfe-style" class="nav-link" data-scroll-target="#high-dimensional-fixed-effects-reghdfe-style">3. High-Dimensional Fixed Effects (reghdfe-style)</a></li>
+  <li><a href="#instrumental-variables" id="toc-instrumental-variables" class="nav-link" data-scroll-target="#instrumental-variables">4. Instrumental Variables</a></li>
+  <li><a href="#panel-estimators" id="toc-panel-estimators" class="nav-link" data-scroll-target="#panel-estimators">5. Panel Estimators</a></li>
+  <li><a href="#result-object-programmatic-access" id="toc-result-object-programmatic-access" class="nav-link" data-scroll-target="#result-object-programmatic-access">6. Result Object — Programmatic Access</a></li>
+  <li><a href="#regtable-side-by-side-regression-comparison-estout-style" id="toc-regtable-side-by-side-regression-comparison-estout-style" class="nav-link" data-scroll-target="#regtable-side-by-side-regression-comparison-estout-style">7. regtable — Side-by-Side Regression Comparison (estout-style)</a></li>
+  <li><a href="#groupby-regression-run-per-group" id="toc-groupby-regression-run-per-group" class="nav-link" data-scroll-target="#groupby-regression-run-per-group">8. GroupBy Regression — Run per Group</a></li>
+  <li><a href="#stata-equivalence-generate-stata-code" id="toc-stata-equivalence-generate-stata-code" class="nav-link" data-scroll-target="#stata-equivalence-generate-stata-code">9. Stata Equivalence — Generate Stata Code</a></li>
+  <li><a href="#r-equivalence-generate-r-code" id="toc-r-equivalence-generate-r-code" class="nav-link" data-scroll-target="#r-equivalence-generate-r-code">10. R Equivalence — Generate R Code</a></li>
+  <li><a href="#formula-syntax-reference" id="toc-formula-syntax-reference" class="nav-link" data-scroll-target="#formula-syntax-reference">11. Formula Syntax Reference</a></li>
+  </ul></li>
+  </ul>
+</nav>
+</div>
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">polars_reg Showcase</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<section id="polars_reg-showcase" class="level1">
+<h1>polars_reg Showcase</h1>
+<p>A tour of everything <code>polars_reg</code> can do: OLS, fixed effects, instrumental variables, panel estimators, robust/clustered standard errors, pretty-printed tables, and Stata equivalence checking.</p>
+<pre><code>pip install polars_reg</code></pre>
+<div id="n3n1mpvtg58" class="cell" data-execution_count="1">
+<div class="sourceCode cell-code" id="cb2"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> numpy <span class="im">as</span> np</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> polars <span class="im">as</span> pl</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> polars_reg <span class="im">as</span> pr</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="co"># Reproducible data</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>rng <span class="op">=</span> np.random.default_rng(<span class="dv">42</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<section id="generate-sample-data" class="level2">
+<h2 class="anchored" data-anchor-id="generate-sample-data">1. Generate sample data</h2>
+<p>A simulated panel dataset with firm and industry fixed effects, an endogenous variable, and instruments.</p>
+<div id="4sl59e7fdcr" class="cell" data-execution_count="2">
+<div class="sourceCode cell-code" id="cb3"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>n_firms, n_years <span class="op">=</span> <span class="dv">100</span>, <span class="dv">10</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>n <span class="op">=</span> n_firms <span class="op">*</span> n_years</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>firm_id <span class="op">=</span> np.repeat(np.arange(n_firms), n_years)</span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>year_id <span class="op">=</span> np.tile(np.arange(<span class="dv">2010</span>, <span class="dv">2010</span> <span class="op">+</span> n_years), n_firms)</span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>industry <span class="op">=</span> np.repeat(rng.choice([<span class="st">"Tech"</span>, <span class="st">"Finance"</span>, <span class="st">"Health"</span>, <span class="st">"Energy"</span>], n_firms), n_years)</span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a><span class="co"># Fixed effects</span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>firm_fe <span class="op">=</span> rng.standard_normal(n_firms)</span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>year_fe <span class="op">=</span> rng.standard_normal(n_years) <span class="op">*</span> <span class="fl">0.5</span></span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a><span class="co"># Regressors</span></span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>x1 <span class="op">=</span> rng.standard_normal(n)</span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a>x2 <span class="op">=</span> rng.standard_normal(n)</span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a><span class="co"># Endogenous variable + instruments</span></span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a>z1 <span class="op">=</span> rng.standard_normal(n)</span>
+<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a>z2 <span class="op">=</span> rng.standard_normal(n)</span>
+<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a>u <span class="op">=</span> rng.standard_normal(n)  <span class="co"># correlated error</span></span>
+<span id="cb3-20"><a href="#cb3-20" aria-hidden="true" tabindex="-1"></a>x_endog <span class="op">=</span> <span class="fl">0.5</span> <span class="op">*</span> z1 <span class="op">+</span> <span class="fl">0.3</span> <span class="op">*</span> z2 <span class="op">+</span> <span class="fl">0.8</span> <span class="op">*</span> u</span>
+<span id="cb3-21"><a href="#cb3-21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-22"><a href="#cb3-22" aria-hidden="true" tabindex="-1"></a><span class="co"># Outcome</span></span>
+<span id="cb3-23"><a href="#cb3-23" aria-hidden="true" tabindex="-1"></a>y <span class="op">=</span> <span class="fl">2.0</span> <span class="op">+</span> <span class="fl">1.0</span> <span class="op">*</span> x1 <span class="op">-</span> <span class="fl">0.5</span> <span class="op">*</span> x2 <span class="op">+</span> <span class="fl">1.5</span> <span class="op">*</span> x_endog <span class="op">+</span> firm_fe[firm_id] <span class="op">+</span> year_fe[year_id <span class="op">%</span> n_years] <span class="op">+</span> u</span>
+<span id="cb3-24"><a href="#cb3-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-25"><a href="#cb3-25" aria-hidden="true" tabindex="-1"></a>df <span class="op">=</span> pl.DataFrame({</span>
+<span id="cb3-26"><a href="#cb3-26" aria-hidden="true" tabindex="-1"></a>    <span class="st">"y"</span>: y, <span class="st">"x1"</span>: x1, <span class="st">"x2"</span>: x2,</span>
+<span id="cb3-27"><a href="#cb3-27" aria-hidden="true" tabindex="-1"></a>    <span class="st">"x_endog"</span>: x_endog, <span class="st">"z1"</span>: z1, <span class="st">"z2"</span>: z2,</span>
+<span id="cb3-28"><a href="#cb3-28" aria-hidden="true" tabindex="-1"></a>    <span class="st">"firm_id"</span>: firm_id, <span class="st">"year"</span>: year_id, <span class="st">"industry"</span>: industry,</span>
+<span id="cb3-29"><a href="#cb3-29" aria-hidden="true" tabindex="-1"></a>})</span>
+<span id="cb3-30"><a href="#cb3-30" aria-hidden="true" tabindex="-1"></a>df.head()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-display" data-execution_count="2">
+<div><style>
+.dataframe > thead > tr,
+.dataframe > tbody > tr {
+  text-align: right;
+  white-space: pre-wrap;
+}
+</style>
+<small>shape: (5, 9)</small>
+<table class="dataframe caption-top table table-sm table-striped small" data-quarto-postprocess="true" data-border="1">
+<thead>
+<tr class="header">
+<th data-quarto-table-cell-role="th">y</th>
+<th data-quarto-table-cell-role="th">x1</th>
+<th data-quarto-table-cell-role="th">x2</th>
+<th data-quarto-table-cell-role="th">x_endog</th>
+<th data-quarto-table-cell-role="th">z1</th>
+<th data-quarto-table-cell-role="th">z2</th>
+<th data-quarto-table-cell-role="th">firm_id</th>
+<th data-quarto-table-cell-role="th">year</th>
+<th data-quarto-table-cell-role="th">industry</th>
+</tr>
+<tr class="even">
+<th>f64</th>
+<th>f64</th>
+<th>f64</th>
+<th>f64</th>
+<th>f64</th>
+<th>f64</th>
+<th>i64</th>
+<th>i64</th>
+<th>str</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>6.105845</td>
+<td>-0.499296</td>
+<td>-2.450872</td>
+<td>0.743585</td>
+<td>0.677485</td>
+<td>-1.456985</td>
+<td>0</td>
+<td>2010</td>
+<td>"Tech"</td>
+</tr>
+<tr class="even">
+<td>2.412468</td>
+<td>-1.184944</td>
+<td>-1.417684</td>
+<td>-0.216587</td>
+<td>-0.743861</td>
+<td>-0.698221</td>
+<td>0</td>
+<td>2011</td>
+<td>"Tech"</td>
+</tr>
+<tr class="odd">
+<td>-1.115963</td>
+<td>-0.965117</td>
+<td>-1.18707</td>
+<td>-1.341555</td>
+<td>-0.521539</td>
+<td>-0.051568</td>
+<td>0</td>
+<td>2012</td>
+<td>"Tech"</td>
+</tr>
+<tr class="even">
+<td>-1.765926</td>
+<td>-0.725226</td>
+<td>-0.363261</td>
+<td>-1.370323</td>
+<td>-0.943954</td>
+<td>0.546667</td>
+<td>0</td>
+<td>2013</td>
+<td>"Tech"</td>
+</tr>
+<tr class="odd">
+<td>6.496028</td>
+<td>2.12847</td>
+<td>-0.254608</td>
+<td>1.24362</td>
+<td>1.301158</td>
+<td>0.554797</td>
+<td>0</td>
+<td>2014</td>
+<td>"Tech"</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</section>
+<section id="ols-basic-robust-and-clustered-standard-errors" class="level2">
+<h2 class="anchored" data-anchor-id="ols-basic-robust-and-clustered-standard-errors">2. OLS — Basic, Robust, and Clustered Standard Errors</h2>
+<div id="0wb02pe5dyrb" class="cell" data-execution_count="3">
+<div class="sourceCode cell-code" id="cb4"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Basic OLS with iid standard errors</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>r_iid <span class="op">=</span> pr.ols(<span class="st">"y ~ x1 + x2 + x_endog"</span>, data<span class="op">=</span>df)</span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(r_iid.summary())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>================================================================================
+  OLS Regression Results
+================================================================================
+  Dep. Variable:          y                            R-squared:         0.8243
+  No. Observations:    1000                            Adj. R-squared:    0.8238
+  Df Residuals:         996                            SE type:              iid
+================================================================================
+                     Coef   Std.Err.        t    P&gt;|t|      [95% Conf. Interval]
+--------------------------------------------------------------------------------
+x1                 0.9862     0.0383    25.76    &lt;0.01   [   0.9111,     1.0613]
+x2                -0.5080     0.0375   -13.53    &lt;0.01   [  -0.5817,    -0.4343]
+x_endog            2.3318     0.0376    61.95    &lt;0.01   [   2.2579,     2.4057]
+_cons              1.8787     0.0383    49.11    &lt;0.01   [   1.8036,     1.9538]
+================================================================================</code></pre>
+</div>
+</div>
+<div id="zfexdzqj76h" class="cell" data-execution_count="4">
+<div class="sourceCode cell-code" id="cb6"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Robust standard errors (HC1, HC2, HC3)</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>r_robust <span class="op">=</span> pr.ols(<span class="st">"y ~ x1 + x2 + x_endog"</span>, data<span class="op">=</span>df, vcov<span class="op">=</span><span class="st">"HC1"</span>)</span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(r_robust.summary())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>================================================================================
+  OLS Regression Results
+================================================================================
+  Dep. Variable:          y                            R-squared:         0.8243
+  No. Observations:    1000                            Adj. R-squared:    0.8238
+  Df Residuals:         996                            SE type:              HC1
+================================================================================
+                     Coef   Std.Err.        t    P&gt;|t|      [95% Conf. Interval]
+--------------------------------------------------------------------------------
+x1                 0.9862     0.0421    23.42    &lt;0.01   [   0.9036,     1.0689]
+x2                -0.5080     0.0379   -13.41    &lt;0.01   [  -0.5824,    -0.4337]
+x_endog            2.3318     0.0375    62.18    &lt;0.01   [   2.2582,     2.4054]
+_cons              1.8787     0.0380    49.46    &lt;0.01   [   1.8042,     1.9533]
+================================================================================</code></pre>
+</div>
+</div>
+<div id="i4tiyk6libi" class="cell" data-execution_count="5">
+<div class="sourceCode cell-code" id="cb8"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Clustered standard errors (one-way)</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>r_cl1 <span class="op">=</span> pr.ols(<span class="st">"y ~ x1 + x2 + x_endog"</span>, data<span class="op">=</span>df, cluster<span class="op">=</span><span class="st">"firm_id"</span>)</span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(r_cl1.summary())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>================================================================================
+  OLS Regression Results
+================================================================================
+  Dep. Variable:          y                            R-squared:         0.8243
+  No. Observations:    1000                            Adj. R-squared:    0.8238
+  Df Residuals:          99                            SE type:          cluster
+  Clusters:          firm_id: 100
+================================================================================
+                     Coef   Std.Err.        t    P&gt;|t|      [95% Conf. Interval]
+--------------------------------------------------------------------------------
+x1                 0.9862     0.0388    25.43    &lt;0.01   [   0.9093,     1.0632]
+x2                -0.5080     0.0356   -14.27    &lt;0.01   [  -0.5787,    -0.4374]
+x_endog            2.3318     0.0379    61.51    &lt;0.01   [   2.2566,     2.4070]
+_cons              1.8787     0.0936    20.08    &lt;0.01   [   1.6930,     2.0644]
+================================================================================</code></pre>
+</div>
+</div>
+<div id="6y2d6lgdnt3" class="cell" data-execution_count="6">
+<div class="sourceCode cell-code" id="cb10"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Multi-way clustered standard errors (Cameron-Gelbach-Miller)</span></span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>r_cl2 <span class="op">=</span> pr.ols(<span class="st">"y ~ x1 + x2 + x_endog"</span>, data<span class="op">=</span>df, cluster<span class="op">=</span>[<span class="st">"firm_id"</span>, <span class="st">"year"</span>])</span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(r_cl2.summary())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>================================================================================
+  OLS Regression Results
+================================================================================
+  Dep. Variable:          y                            R-squared:         0.8243
+  No. Observations:    1000                            Adj. R-squared:    0.8238
+  Df Residuals:           9                            SE type:          cluster
+  Clusters:          firm_id: 100, year: 10
+================================================================================
+                     Coef   Std.Err.        t    P&gt;|t|      [95% Conf. Interval]
+--------------------------------------------------------------------------------
+x1                 0.9862     0.0332    29.70    &lt;0.01   [   0.9111,     1.0613]
+x2                -0.5080     0.0315   -16.12    &lt;0.01   [  -0.5793,    -0.4367]
+x_endog            2.3318     0.0178   131.06    &lt;0.01   [   2.2915,     2.3720]
+_cons              1.8787     0.1903     9.87    &lt;0.01   [   1.4483,     2.3091]
+================================================================================</code></pre>
+</div>
+</div>
+</section>
+<section id="b.-hac-and-driscoll-kraay-standard-errors" class="level2">
+<h2 class="anchored" data-anchor-id="b.-hac-and-driscoll-kraay-standard-errors">2b. HAC and Driscoll-Kraay Standard Errors</h2>
+<p>Newey-West (HAC) for autocorrelation-robust SEs, and Driscoll-Kraay for panel data with cross-sectional dependence.</p>
+<div id="2jnyry5jsy9" class="cell" data-execution_count="7">
+<div class="sourceCode cell-code" id="cb12"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Newey-West HAC standard errors (robust to autocorrelation)</span></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>r_nw <span class="op">=</span> pr.ols(<span class="st">"y ~ x1 + x2 + x_endog"</span>, data<span class="op">=</span>df, vcov<span class="op">=</span><span class="st">"NW"</span>, time<span class="op">=</span><span class="st">"year"</span>)</span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(r_nw.summary())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>================================================================================
+  OLS Regression Results
+================================================================================
+  Dep. Variable:          y                            R-squared:         0.8243
+  No. Observations:    1000                            Adj. R-squared:    0.8238
+  Df Residuals:         996                            SE type:               NW
+================================================================================
+                     Coef   Std.Err.        t    P&gt;|t|      [95% Conf. Interval]
+--------------------------------------------------------------------------------
+x1                 0.9862     0.0397    24.85    &lt;0.01   [   0.9083,     1.0641]
+x2                -0.5080     0.0363   -14.01    &lt;0.01   [  -0.5792,    -0.4368]
+x_endog            2.3318     0.0353    66.04    &lt;0.01   [   2.2625,     2.4011]
+_cons              1.8787     0.0538    34.90    &lt;0.01   [   1.7731,     1.9843]
+================================================================================</code></pre>
+</div>
+</div>
+<div id="xplu5ytb0v" class="cell" data-execution_count="8">
+<div class="sourceCode cell-code" id="cb14"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Driscoll-Kraay SEs: robust to cross-sectional dependence + autocorrelation</span></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a><span class="co"># Works with absorbed FE — ideal for macro panels with common shocks</span></span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>r_dk <span class="op">=</span> pr.ols(</span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a>    <span class="st">"y ~ x1 + x2 + x_endog | firm_id"</span>,</span>
+<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a>    data<span class="op">=</span>df,</span>
+<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a>    vcov<span class="op">=</span><span class="st">"DK"</span>,</span>
+<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a>    time<span class="op">=</span><span class="st">"year"</span>,</span>
+<span id="cb14-8"><a href="#cb14-8" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb14-9"><a href="#cb14-9" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(r_dk.summary())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>================================================================================
+  OLS Regression Results
+================================================================================
+  Dep. Variable:          y                            R-squared:         0.9127
+  No. Observations:    1000                            Adj. R-squared:    0.9027
+  Df Residuals:         897                            SE type:               DK
+  Absorbed FE:       firm_id (100 DoF)
+================================================================================
+                     Coef   Std.Err.        t    P&gt;|t|      [95% Conf. Interval]
+--------------------------------------------------------------------------------
+x1                 0.9937     0.0210    47.41    &lt;0.01   [   0.9525,     1.0348]
+x2                -0.4707     0.0128   -36.76    &lt;0.01   [  -0.4958,    -0.4455]
+x_endog            2.3105     0.0156   148.00    &lt;0.01   [   2.2798,     2.3411]
+================================================================================</code></pre>
+</div>
+</div>
+<div id="pe8rvbgtuod" class="cell" data-execution_count="9">
+<div class="sourceCode cell-code" id="cb16"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Panel FE with Driscoll-Kraay SEs</span></span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>r_pfe_dk <span class="op">=</span> pr.panel_fe(</span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>    <span class="st">"y ~ x1 + x2 + x_endog"</span>,</span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>    data<span class="op">=</span>df,</span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>    entity<span class="op">=</span><span class="st">"firm_id"</span>,</span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>    time<span class="op">=</span><span class="st">"year"</span>,</span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a>    vcov<span class="op">=</span><span class="st">"DK"</span>,</span>
+<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a>    bandwidth<span class="op">=</span><span class="dv">3</span>,</span>
+<span id="cb16-9"><a href="#cb16-9" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb16-10"><a href="#cb16-10" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(r_pfe_dk.summary())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>================================================================================
+  Panel FE Regression Results
+================================================================================
+  Dep. Variable:          y                            R-squared:         0.9507
+  No. Observations:    1000                            Adj. R-squared:    0.9445
+  Df Residuals:         888                            SE type:               DK
+  Absorbed FE:       firm_id, year (109 DoF)
+================================================================================
+                     Coef   Std.Err.        t    P&gt;|t|      [95% Conf. Interval]
+--------------------------------------------------------------------------------
+x1                 1.0021     0.0162    61.96    &lt;0.01   [   0.9704,     1.0339]
+x2                -0.4837     0.0122   -39.61    &lt;0.01   [  -0.5076,    -0.4597]
+x_endog            2.3005     0.0165   139.64    &lt;0.01   [   2.2681,     2.3328]
+================================================================================</code></pre>
+</div>
+</div>
+</section>
+<section id="high-dimensional-fixed-effects-reghdfe-style" class="level2">
+<h2 class="anchored" data-anchor-id="high-dimensional-fixed-effects-reghdfe-style">3. High-Dimensional Fixed Effects (reghdfe-style)</h2>
+<p>Absorb firm and/or year fixed effects via iterative demeaning. The <code>|</code> separator in the formula specifies which variables to absorb.</p>
+<div id="w93xbb7d1hf" class="cell" data-execution_count="10">
+<div class="sourceCode cell-code" id="cb18"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="co"># One-way FE: absorb firm</span></span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>r_fe1 <span class="op">=</span> pr.ols(<span class="st">"y ~ x1 + x2 + x_endog | firm_id"</span>, data<span class="op">=</span>df, cluster<span class="op">=</span><span class="st">"firm_id"</span>)</span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(r_fe1.summary())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>================================================================================
+  OLS Regression Results
+================================================================================
+  Dep. Variable:          y                            R-squared:         0.9127
+  No. Observations:    1000                            Adj. R-squared:    0.9027
+  Df Residuals:          99                            SE type:          cluster
+  Absorbed FE:       firm_id (100 DoF)
+  Clusters:          firm_id: 100
+================================================================================
+                     Coef   Std.Err.        t    P&gt;|t|      [95% Conf. Interval]
+--------------------------------------------------------------------------------
+x1                 0.9937     0.0271    36.64    &lt;0.01   [   0.9398,     1.0475]
+x2                -0.4707     0.0230   -20.45    &lt;0.01   [  -0.5163,    -0.4250]
+x_endog            2.3105     0.0279    82.82    &lt;0.01   [   2.2551,     2.3658]
+================================================================================</code></pre>
+</div>
+</div>
+<div id="zdhlsibls8" class="cell" data-execution_count="11">
+<div class="sourceCode cell-code" id="cb20"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Two-way FE: absorb firm + year, two-way clustered SEs</span></span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>r_fe2 <span class="op">=</span> pr.ols(<span class="st">"y ~ x1 + x2 + x_endog | firm_id + year"</span>, data<span class="op">=</span>df, cluster<span class="op">=</span>[<span class="st">"firm_id"</span>, <span class="st">"year"</span>])</span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(r_fe2.summary())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>================================================================================
+  OLS Regression Results
+================================================================================
+  Dep. Variable:          y                            R-squared:         0.9507
+  No. Observations:    1000                            Adj. R-squared:    0.9445
+  Df Residuals:           9                            SE type:          cluster
+  Absorbed FE:       firm_id, year (109 DoF)
+  Clusters:          firm_id: 100, year: 10
+================================================================================
+                     Coef   Std.Err.        t    P&gt;|t|      [95% Conf. Interval]
+--------------------------------------------------------------------------------
+x1                 1.0021     0.0165    60.85    &lt;0.01   [   0.9649,     1.0394]
+x2                -0.4837     0.0161   -30.03    &lt;0.01   [  -0.5201,    -0.4472]
+x_endog            2.3005     0.0152   151.55    &lt;0.01   [   2.2661,     2.3348]
+================================================================================</code></pre>
+</div>
+</div>
+<div id="l80jxa693h" class="cell" data-execution_count="12">
+<div class="sourceCode cell-code" id="cb22"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Three-way FE: firm + year + industry</span></span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a>r_fe3 <span class="op">=</span> pr.ols(<span class="st">"y ~ x1 + x2 | firm_id + year + industry"</span>, data<span class="op">=</span>df, cluster<span class="op">=</span><span class="st">"firm_id"</span>)</span>
+<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(r_fe3.summary())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>================================================================================
+  OLS Regression Results
+================================================================================
+  Dep. Variable:          y                            R-squared:         0.1618
+  No. Observations:    1000                            Adj. R-squared:    0.0581
+  Df Residuals:          99                            SE type:          cluster
+  Absorbed FE:       firm_id, year, industry (109 DoF)
+  Clusters:          firm_id: 100
+================================================================================
+                     Coef   Std.Err.        t    P&gt;|t|      [95% Conf. Interval]
+--------------------------------------------------------------------------------
+x1                 0.9234     0.0737    12.53    &lt;0.01   [   0.7771,     1.0696]
+x2                -0.5049     0.0798    -6.33    &lt;0.01   [  -0.6632,    -0.3466]
+================================================================================</code></pre>
+</div>
+</div>
+</section>
+<section id="instrumental-variables" class="level2">
+<h2 class="anchored" data-anchor-id="instrumental-variables">4. Instrumental Variables</h2>
+<p>Use <code>||</code> to separate the IV equation: <code>y ~ exog_vars || endog_var ~ instruments</code></p>
+<p>With fixed effects: <code>y ~ exog_vars | fe_vars | endog_var ~ instruments</code></p>
+<div id="0ihapigztll5" class="cell" data-execution_count="13">
+<div class="sourceCode cell-code" id="cb24"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 2SLS: instrument x_endog with z1 and z2</span></span>
+<span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a>r_2sls <span class="op">=</span> pr.iv2sls(<span class="st">"y ~ x1 + x2 || x_endog ~ z1 + z2"</span>, data<span class="op">=</span>df)</span>
+<span id="cb24-3"><a href="#cb24-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(r_2sls.summary())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>================================================================================
+  2SLS Regression Results
+================================================================================
+  Dep. Variable:          y                            R-squared:         0.7364
+  No. Observations:    1000                            Adj. R-squared:    0.7356
+  Df Residuals:         996                            SE type:              iid
+  First-stage F:     301.22
+================================================================================
+                     Coef   Std.Err.        t    P&gt;|t|      [95% Conf. Interval]
+--------------------------------------------------------------------------------
+x1                 0.9747     0.0469    20.78    &lt;0.01   [   0.8827,     1.0667]
+x2                -0.5207     0.0460   -11.32    &lt;0.01   [  -0.6109,    -0.4304]
+_cons              1.8684     0.0469    39.87    &lt;0.01   [   1.7765,     1.9604]
+x_endog            1.4916     0.0751    19.87    &lt;0.01   [   1.3442,     1.6389]
+================================================================================</code></pre>
+</div>
+</div>
+<div id="glfhn40hpyc" class="cell" data-execution_count="14">
+<div class="sourceCode cell-code" id="cb26"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 2SLS with absorbed firm FE</span></span>
+<span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a>r_2sls_fe <span class="op">=</span> pr.iv2sls(<span class="st">"y ~ x1 + x2 | firm_id | x_endog ~ z1 + z2"</span>, data<span class="op">=</span>df)</span>
+<span id="cb26-3"><a href="#cb26-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(r_2sls_fe.summary())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>================================================================================
+  2SLS Regression Results
+================================================================================
+  Dep. Variable:          y                            R-squared:         0.8289
+  No. Observations:    1000                            Adj. R-squared:    0.8094
+  Df Residuals:         897                            SE type:              iid
+  Absorbed FE:       firm_id (100 DoF)
+  First-stage F:     302.57
+================================================================================
+                     Coef   Std.Err.        t    P&gt;|t|      [95% Conf. Interval]
+--------------------------------------------------------------------------------
+x1                 0.9676     0.0372    26.00    &lt;0.01   [   0.8946,     1.0407]
+x2                -0.4772     0.0364   -13.13    &lt;0.01   [  -0.5486,    -0.4059]
+x_endog            1.5441     0.0595    25.96    &lt;0.01   [   1.4274,     1.6609]
+================================================================================</code></pre>
+</div>
+</div>
+<div id="qwco33py5er" class="cell" data-execution_count="15">
+<div class="sourceCode cell-code" id="cb28"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a><span class="co"># LIML — more robust to weak instruments than 2SLS</span></span>
+<span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a>r_liml <span class="op">=</span> pr.liml(<span class="st">"y ~ x1 + x2 || x_endog ~ z1 + z2"</span>, data<span class="op">=</span>df)</span>
+<span id="cb28-3"><a href="#cb28-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(r_liml.summary())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>================================================================================
+  LIML Regression Results
+================================================================================
+  Dep. Variable:          y                            R-squared:         0.7357
+  No. Observations:    1000                            Adj. R-squared:    0.7349
+  Df Residuals:         996                            SE type:              iid
+================================================================================
+                     Coef   Std.Err.        t    P&gt;|t|      [95% Conf. Interval]
+--------------------------------------------------------------------------------
+x1                 0.9747     0.0470    20.76    &lt;0.01   [   0.8825,     1.0668]
+x2                -0.5207     0.0461   -11.31    &lt;0.01   [  -0.6111,    -0.4303]
+_cons              1.8684     0.0469    39.82    &lt;0.01   [   1.7763,     1.9605]
+x_endog            1.4883     0.0753    19.77    &lt;0.01   [   1.3406,     1.6359]
+================================================================================</code></pre>
+</div>
+</div>
+<div id="lnhk8v46dmm" class="cell" data-execution_count="16">
+<div class="sourceCode cell-code" id="cb30"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a><span class="co"># GMM-IV — efficient two-step GMM with Hansen J overidentification test</span></span>
+<span id="cb30-2"><a href="#cb30-2" aria-hidden="true" tabindex="-1"></a>r_gmm <span class="op">=</span> pr.gmm_iv(<span class="st">"y ~ x1 + x2 || x_endog ~ z1 + z2"</span>, data<span class="op">=</span>df)</span>
+<span id="cb30-3"><a href="#cb30-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(r_gmm.summary())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>================================================================================
+  GMM Regression Results
+================================================================================
+  Dep. Variable:          y                            R-squared:         0.7387
+  No. Observations:    1000                            Adj. R-squared:    0.7379
+  Df Residuals:         996                            SE type:           robust
+  Hansen J:          1.3978 (p = 0.2371)
+================================================================================
+                     Coef   Std.Err.        t    P&gt;|t|      [95% Conf. Interval]
+--------------------------------------------------------------------------------
+x1                 0.9751     0.0496    19.66    &lt;0.01   [   0.8778,     1.0724]
+x2                -0.5203     0.0456   -11.41    &lt;0.01   [  -0.6098,    -0.4309]
+_cons              1.8701     0.0461    40.57    &lt;0.01   [   1.7797,     1.9606]
+x_endog            1.5023     0.0747    20.12    &lt;0.01   [   1.3558,     1.6488]
+================================================================================</code></pre>
+</div>
+</div>
+<div id="ucpc5a18szs" class="cell" data-execution_count="17">
+<div class="sourceCode cell-code" id="cb32"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb32-1"><a href="#cb32-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Weak instrument diagnostics</span></span>
+<span id="cb32-2"><a href="#cb32-2" aria-hidden="true" tabindex="-1"></a><span class="co"># Staiger-Stock rule of thumb (F &gt; 10) + Stock-Yogo critical values</span></span>
+<span id="cb32-3"><a href="#cb32-3" aria-hidden="true" tabindex="-1"></a>wit <span class="op">=</span> pr.weak_instrument_test(r_2sls, n_instruments<span class="op">=</span><span class="dv">2</span>)</span>
+<span id="cb32-4"><a href="#cb32-4" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="ss">f"First-stage F: </span><span class="sc">{</span>wit[<span class="st">'f_stat'</span>]<span class="sc">:.2f}</span><span class="ss">"</span>)</span>
+<span id="cb32-5"><a href="#cb32-5" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="ss">f"Staiger-Stock (F &gt; 10): </span><span class="sc">{</span><span class="st">'Pass'</span> <span class="cf">if</span> wit[<span class="st">'staiger_stock'</span>] <span class="cf">else</span> <span class="st">'Fail'</span><span class="sc">}</span><span class="ss">"</span>)</span>
+<span id="cb32-6"><a href="#cb32-6" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> wit[<span class="st">'stock_yogo'</span>]:</span>
+<span id="cb32-7"><a href="#cb32-7" aria-hidden="true" tabindex="-1"></a>    cv <span class="op">=</span> wit[<span class="st">'stock_yogo'</span>][<span class="st">'critical_values'</span>]</span>
+<span id="cb32-8"><a href="#cb32-8" aria-hidden="true" tabindex="-1"></a>    <span class="bu">print</span>(<span class="ss">f"Stock-Yogo critical values (maximal relative bias):"</span>)</span>
+<span id="cb32-9"><a href="#cb32-9" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> pct, val <span class="kw">in</span> <span class="bu">sorted</span>(cv.items()):</span>
+<span id="cb32-10"><a href="#cb32-10" aria-hidden="true" tabindex="-1"></a>        reject <span class="op">=</span> wit[<span class="st">'stock_yogo'</span>][<span class="ss">f'reject_</span><span class="sc">{</span>pct<span class="sc">}</span><span class="ss">pct'</span>]</span>
+<span id="cb32-11"><a href="#cb32-11" aria-hidden="true" tabindex="-1"></a>        <span class="bu">print</span>(<span class="ss">f"  </span><span class="sc">{</span>pct<span class="sc">}</span><span class="ss">%: </span><span class="sc">{</span>val<span class="sc">:.2f}</span><span class="ss"> </span><span class="sc">{</span><span class="st">'(reject)'</span> <span class="cf">if</span> reject <span class="cf">else</span> <span class="st">'(fail to reject)'</span><span class="sc">}</span><span class="ss">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>First-stage F: 301.22
+Staiger-Stock (F &gt; 10): Pass
+Stock-Yogo critical values (maximal relative bias):
+  5%: 19.93 (reject)
+  10%: 11.59 (reject)
+  20%: 7.54 (reject)
+  30%: 5.96 (reject)</code></pre>
+</div>
+</div>
+</section>
+<section id="panel-estimators" class="level2">
+<h2 class="anchored" data-anchor-id="panel-estimators">5. Panel Estimators</h2>
+<p>Fixed effects (within), random effects (Swamy-Arora GLS), and first-difference.</p>
+<div id="m26tcfyqms" class="cell" data-execution_count="18">
+<div class="sourceCode cell-code" id="cb34"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb34-1"><a href="#cb34-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Panel fixed effects (within estimator, SEs clustered by entity)</span></span>
+<span id="cb34-2"><a href="#cb34-2" aria-hidden="true" tabindex="-1"></a>r_pfe <span class="op">=</span> pr.panel_fe(<span class="st">"y ~ x1 + x2 + x_endog"</span>, data<span class="op">=</span>df, entity<span class="op">=</span><span class="st">"firm_id"</span>, time<span class="op">=</span><span class="st">"year"</span>)</span>
+<span id="cb34-3"><a href="#cb34-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(r_pfe.summary())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>================================================================================
+  Panel FE Regression Results
+================================================================================
+  Dep. Variable:          y                            R-squared:         0.9507
+  No. Observations:    1000                            Adj. R-squared:    0.9445
+  Df Residuals:          99                            SE type:          cluster
+  Absorbed FE:       firm_id, year (109 DoF)
+  Clusters:          firm_id: 100
+================================================================================
+                     Coef   Std.Err.        t    P&gt;|t|      [95% Conf. Interval]
+--------------------------------------------------------------------------------
+x1                 1.0021     0.0200    50.03    &lt;0.01   [   0.9624,     1.0418]
+x2                -0.4837     0.0165   -29.27    &lt;0.01   [  -0.5164,    -0.4509]
+x_endog            2.3005     0.0205   112.07    &lt;0.01   [   2.2597,     2.3412]
+================================================================================</code></pre>
+</div>
+</div>
+<div id="9efpkbitok5" class="cell" data-execution_count="19">
+<div class="sourceCode cell-code" id="cb36"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Panel random effects (GLS with Swamy-Arora variance components)</span></span>
+<span id="cb36-2"><a href="#cb36-2" aria-hidden="true" tabindex="-1"></a>r_pre <span class="op">=</span> pr.panel_re(<span class="st">"y ~ x1 + x2 + x_endog"</span>, data<span class="op">=</span>df, entity<span class="op">=</span><span class="st">"firm_id"</span>)</span>
+<span id="cb36-3"><a href="#cb36-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(r_pre.summary())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>================================================================================
+  Panel RE Regression Results
+================================================================================
+  Dep. Variable:          y                            R-squared:         0.8241
+  No. Observations:    1000                            Adj. R-squared:    0.8236
+  Df Residuals:         996                            SE type:              iid
+================================================================================
+                     Coef   Std.Err.        t    P&gt;|t|      [95% Conf. Interval]
+--------------------------------------------------------------------------------
+x1                 0.9931     0.0265    37.54    &lt;0.01   [   0.9412,     1.0450]
+x2                -0.4735     0.0259   -18.30    &lt;0.01   [  -0.5243,    -0.4228]
+x_endog            2.3121     0.0260    88.88    &lt;0.01   [   2.2611,     2.3632]
+_cons              1.8815     0.0948    19.85    &lt;0.01   [   1.6955,     2.0676]
+================================================================================</code></pre>
+</div>
+</div>
+<div id="d99xjto93fe" class="cell" data-execution_count="20">
+<div class="sourceCode cell-code" id="cb38"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb38-1"><a href="#cb38-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Panel first-difference</span></span>
+<span id="cb38-2"><a href="#cb38-2" aria-hidden="true" tabindex="-1"></a>r_pfd <span class="op">=</span> pr.panel_fd(<span class="st">"y ~ x1 + x2 + x_endog"</span>, data<span class="op">=</span>df, entity<span class="op">=</span><span class="st">"firm_id"</span>, time<span class="op">=</span><span class="st">"year"</span>)</span>
+<span id="cb38-3"><a href="#cb38-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(r_pfd.summary())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>================================================================================
+  Panel FD Regression Results
+================================================================================
+  Dep. Variable:          y                            R-squared:         0.9282
+  No. Observations:     900                            Adj. R-squared:    0.9279
+  Df Residuals:          99                            SE type:          cluster
+  Clusters:          firm_id: 100
+================================================================================
+                     Coef   Std.Err.        t    P&gt;|t|      [95% Conf. Interval]
+--------------------------------------------------------------------------------
+x1                 1.0088     0.0289    34.85    &lt;0.01   [   0.9514,     1.0662]
+x2                -0.4798     0.0262   -18.33    &lt;0.01   [  -0.5317,    -0.4278]
+x_endog            2.3033     0.0285    80.80    &lt;0.01   [   2.2467,     2.3598]
+_cons             -0.0087     0.0090    -0.97    0.336   [  -0.0266,     0.0092]
+================================================================================</code></pre>
+</div>
+</div>
+<div id="6478mpr9ddn" class="cell" data-execution_count="21">
+<div class="sourceCode cell-code" id="cb40"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb40-1"><a href="#cb40-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Hausman test: FE vs RE — test whether RE is consistent</span></span>
+<span id="cb40-2"><a href="#cb40-2" aria-hidden="true" tabindex="-1"></a>hausman <span class="op">=</span> pr.hausman_test(r_pfe, r_pre)</span>
+<span id="cb40-3"><a href="#cb40-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="ss">f"Hausman test: chi2=</span><span class="sc">{</span>hausman[<span class="st">'statistic'</span>]<span class="sc">:.2f}</span><span class="ss">, "</span></span>
+<span id="cb40-4"><a href="#cb40-4" aria-hidden="true" tabindex="-1"></a>      <span class="ss">f"p=</span><span class="sc">{</span>hausman[<span class="st">'pvalue'</span>]<span class="sc">:.4f}</span><span class="ss">, df=</span><span class="sc">{</span>hausman[<span class="st">'df'</span>]<span class="sc">}</span><span class="ss">"</span>)</span>
+<span id="cb40-5"><a href="#cb40-5" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="ss">f"Coefficients compared: </span><span class="sc">{</span>hausman[<span class="st">'coefficients_compared'</span>]<span class="sc">}</span><span class="ss">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Hausman test: chi2=0.00, p=1.0000, df=3
+Coefficients compared: ['x1', 'x2', 'x_endog']</code></pre>
+</div>
+</div>
+</section>
+<section id="result-object-programmatic-access" class="level2">
+<h2 class="anchored" data-anchor-id="result-object-programmatic-access">6. Result Object — Programmatic Access</h2>
+<p>Every regression returns a <code>RegressionResult</code> with coefficients, standard errors, t-stats, p-values, confidence intervals, coefficient tables, fitted values, and predictions.</p>
+<div id="4d8sr4j5rzf" class="cell" data-execution_count="22">
+<div class="sourceCode cell-code" id="cb42"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb42-1"><a href="#cb42-1" aria-hidden="true" tabindex="-1"></a>r <span class="op">=</span> pr.ols(<span class="st">"y ~ x1 + x2"</span>, data<span class="op">=</span>df)</span>
+<span id="cb42-2"><a href="#cb42-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb42-3"><a href="#cb42-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">"Coefficients:"</span>, r.coefficients)</span>
+<span id="cb42-4"><a href="#cb42-4" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">"Std errors:  "</span>, r.se)</span>
+<span id="cb42-5"><a href="#cb42-5" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">"t-stats:     "</span>, r.tstat)</span>
+<span id="cb42-6"><a href="#cb42-6" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">"p-values:    "</span>, r.pvalue)</span>
+<span id="cb42-7"><a href="#cb42-7" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">"95% CI:</span><span class="ch">\n</span><span class="st">"</span>, r.confint())</span>
+<span id="cb42-8"><a href="#cb42-8" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">"</span><span class="ch">\n</span><span class="st">R²:"</span>, r.r_squared, <span class="st">" Adj R²:"</span>, r.r_squared_adj, <span class="st">" N:"</span>, r.n_obs)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Coefficients: [ 0.95428992 -0.54312729  1.85016554]
+Std errors:   [0.08428604 0.08264979 0.08423072]
+t-stats:      [11.32203953 -6.57142988 21.96544941]
+p-values:     [4.83693656e-28 8.01761476e-11 1.56643938e-87]
+95% CI:
+ [[ 0.78889152  1.11968832]
+ [-0.70531479 -0.38093979]
+ [ 1.68487571  2.01545537]]
+
+R²: 0.1474211973818752  Adj R²: 0.14571090891122696  N: 1000</code></pre>
+</div>
+</div>
+<div id="2vvnlus1fhf" class="cell" data-execution_count="23">
+<div class="sourceCode cell-code" id="cb44"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb44-1"><a href="#cb44-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Coefficient table as a Polars DataFrame — easy to filter, export, etc.</span></span>
+<span id="cb44-2"><a href="#cb44-2" aria-hidden="true" tabindex="-1"></a>r.coef_table()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-display" data-execution_count="23">
+<div><style>
+.dataframe > thead > tr,
+.dataframe > tbody > tr {
+  text-align: right;
+  white-space: pre-wrap;
+}
+</style>
+<small>shape: (3, 7)</small>
+<table class="dataframe caption-top table table-sm table-striped small" data-quarto-postprocess="true" data-border="1">
+<thead>
+<tr class="header">
+<th data-quarto-table-cell-role="th">name</th>
+<th data-quarto-table-cell-role="th">coef</th>
+<th data-quarto-table-cell-role="th">se</th>
+<th data-quarto-table-cell-role="th">t</th>
+<th data-quarto-table-cell-role="th">p</th>
+<th data-quarto-table-cell-role="th">ci_lower</th>
+<th data-quarto-table-cell-role="th">ci_upper</th>
+</tr>
+<tr class="even">
+<th>str</th>
+<th>f64</th>
+<th>f64</th>
+<th>f64</th>
+<th>f64</th>
+<th>f64</th>
+<th>f64</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>"x1"</td>
+<td>0.95429</td>
+<td>0.084286</td>
+<td>11.32204</td>
+<td>4.8369e-28</td>
+<td>0.788892</td>
+<td>1.119688</td>
+</tr>
+<tr class="even">
+<td>"x2"</td>
+<td>-0.543127</td>
+<td>0.08265</td>
+<td>-6.57143</td>
+<td>8.0176e-11</td>
+<td>-0.705315</td>
+<td>-0.38094</td>
+</tr>
+<tr class="odd">
+<td>"_cons"</td>
+<td>1.850166</td>
+<td>0.084231</td>
+<td>21.965449</td>
+<td>1.5664e-87</td>
+<td>1.684876</td>
+<td>2.015455</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+<div id="tvfn3vjdck" class="cell" data-execution_count="24">
+<div class="sourceCode cell-code" id="cb45"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb45-1"><a href="#cb45-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Fitted values and prediction</span></span>
+<span id="cb45-2"><a href="#cb45-2" aria-hidden="true" tabindex="-1"></a>y_hat <span class="op">=</span> r.fitted()</span>
+<span id="cb45-3"><a href="#cb45-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">"In-sample fitted values (first 5):"</span>, y_hat[:<span class="dv">5</span>])</span>
+<span id="cb45-4"><a href="#cb45-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb45-5"><a href="#cb45-5" aria-hidden="true" tabindex="-1"></a><span class="co"># Out-of-sample prediction with new data</span></span>
+<span id="cb45-6"><a href="#cb45-6" aria-hidden="true" tabindex="-1"></a>new_df <span class="op">=</span> pl.DataFrame({<span class="st">"x1"</span>: [<span class="fl">1.0</span>, <span class="fl">2.0</span>], <span class="st">"x2"</span>: [<span class="fl">0.5</span>, <span class="op">-</span><span class="fl">0.5</span>]})</span>
+<span id="cb45-7"><a href="#cb45-7" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">"Predictions:"</span>, r.predict(new_df))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>In-sample fitted values (first 5): [2.70482832 1.48936861 1.57389469 1.35538639 4.01962739]
+Predictions: [2.53289182 4.03030902]</code></pre>
+</div>
+</div>
+<div id="zfbodcpjlid" class="cell" data-execution_count="25">
+<div class="sourceCode cell-code" id="cb47"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb47-1"><a href="#cb47-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Wald test: test that beta_x1 = 0 (should reject)</span></span>
+<span id="cb47-2"><a href="#cb47-2" aria-hidden="true" tabindex="-1"></a>wald <span class="op">=</span> r.wald_test(np.array([[<span class="dv">1</span>, <span class="dv">0</span>, <span class="dv">0</span>]]))</span>
+<span id="cb47-3"><a href="#cb47-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="ss">f"Wald test H0: beta_x1 = 0 -&gt; "</span></span>
+<span id="cb47-4"><a href="#cb47-4" aria-hidden="true" tabindex="-1"></a>      <span class="ss">f"F=</span><span class="sc">{</span>wald[<span class="st">'statistic'</span>]<span class="sc">:.2f}</span><span class="ss">, p=</span><span class="sc">{</span>wald[<span class="st">'pvalue'</span>]<span class="sc">:.4f}</span><span class="ss">"</span>)</span>
+<span id="cb47-5"><a href="#cb47-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb47-6"><a href="#cb47-6" aria-hidden="true" tabindex="-1"></a><span class="co"># Wald test: test joint significance of x1 and x2</span></span>
+<span id="cb47-7"><a href="#cb47-7" aria-hidden="true" tabindex="-1"></a>wald_joint <span class="op">=</span> r.wald_test(np.array([[<span class="dv">1</span>, <span class="dv">0</span>, <span class="dv">0</span>], [<span class="dv">0</span>, <span class="dv">1</span>, <span class="dv">0</span>]]))</span>
+<span id="cb47-8"><a href="#cb47-8" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="ss">f"Wald test H0: beta_x1 = beta_x2 = 0 -&gt; "</span></span>
+<span id="cb47-9"><a href="#cb47-9" aria-hidden="true" tabindex="-1"></a>      <span class="ss">f"F=</span><span class="sc">{</span>wald_joint[<span class="st">'statistic'</span>]<span class="sc">:.2f}</span><span class="ss">, p=</span><span class="sc">{</span>wald_joint[<span class="st">'pvalue'</span>]<span class="sc">:.4f}</span><span class="ss">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Wald test H0: beta_x1 = 0 -&gt; F=128.19, p=0.0000
+Wald test H0: beta_x1 = beta_x2 = 0 -&gt; F=86.20, p=0.0000</code></pre>
+</div>
+</div>
+</section>
+<section id="regtable-side-by-side-regression-comparison-estout-style" class="level2">
+<h2 class="anchored" data-anchor-id="regtable-side-by-side-regression-comparison-estout-style">7. regtable — Side-by-Side Regression Comparison (estout-style)</h2>
+<p>Compare multiple specifications in a single compact table. Each FE and cluster variable gets its own Y/N indicator row.</p>
+<div id="m2hrt983nnk" class="cell" data-execution_count="26">
+<div class="sourceCode cell-code" id="cb49"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb49-1"><a href="#cb49-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Build up a specification progressively</span></span>
+<span id="cb49-2"><a href="#cb49-2" aria-hidden="true" tabindex="-1"></a>m1 <span class="op">=</span> pr.ols(<span class="st">"y ~ x1 + x2 + x_endog"</span>, data<span class="op">=</span>df)</span>
+<span id="cb49-3"><a href="#cb49-3" aria-hidden="true" tabindex="-1"></a>m2 <span class="op">=</span> pr.ols(<span class="st">"y ~ x1 + x2 + x_endog"</span>, data<span class="op">=</span>df, vcov<span class="op">=</span><span class="st">"HC1"</span>)</span>
+<span id="cb49-4"><a href="#cb49-4" aria-hidden="true" tabindex="-1"></a>m3 <span class="op">=</span> pr.ols(<span class="st">"y ~ x1 + x2 + x_endog | firm_id"</span>, data<span class="op">=</span>df, cluster<span class="op">=</span><span class="st">"firm_id"</span>)</span>
+<span id="cb49-5"><a href="#cb49-5" aria-hidden="true" tabindex="-1"></a>m4 <span class="op">=</span> pr.ols(<span class="st">"y ~ x1 + x2 + x_endog | firm_id + year"</span>, data<span class="op">=</span>df, cluster<span class="op">=</span>[<span class="st">"firm_id"</span>, <span class="st">"year"</span>])</span>
+<span id="cb49-6"><a href="#cb49-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb49-7"><a href="#cb49-7" aria-hidden="true" tabindex="-1"></a>pr.regtable(m1, m2, m3, m4, labels<span class="op">=</span>[<span class="st">"OLS"</span>, <span class="st">"Robust"</span>, <span class="st">"Firm FE"</span>, <span class="st">"Twoway FE"</span>])</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>===============================================================================
+                              OLS         Robust        Firm FE      Twoway FE
+                              OLS            OLS            OLS            OLS
+-------------------------------------------------------------------------------
+x1                      0.9862***      0.9862***      0.9937***       1.002***
+                        (0.03828)      (0.04212)      (0.02712)      (0.01647)
+x2                      -0.508***      -0.508***     -0.4707***     -0.4837***
+                        (0.03754)      (0.03788)      (0.02301)       (0.0161)
+x_endog                  2.332***       2.332***        2.31***         2.3***
+                        (0.03764)       (0.0375)       (0.0279)      (0.01518)
+_cons                    1.879***       1.879***                              
+                        (0.03826)      (0.03798)                              
+-------------------------------------------------------------------------------
+firm_id FE                      N              N              Y              Y
+year FE                         N              N              N              Y
+Cluster: firm_id                N              N              Y              Y
+Cluster: year                   N              N              N              Y
+-------------------------------------------------------------------------------
+N                            1000           1000           1000           1000
+R²                         0.8243         0.8243         0.9127         0.9507
+Adj. R²                    0.8238         0.8238         0.9027         0.9445
+===============================================================================
+* p&lt;0.10, ** p&lt;0.05, *** p&lt;0.01</code></pre>
+</div>
+<div class="cell-output cell-output-display" data-execution_count="26">
+<pre><code>'===============================================================================\n                              OLS         Robust        Firm FE      Twoway FE\n                              OLS            OLS            OLS            OLS\n-------------------------------------------------------------------------------\nx1                      0.9862***      0.9862***      0.9937***       1.002***\n                        (0.03828)      (0.04212)      (0.02712)      (0.01647)\nx2                      -0.508***      -0.508***     -0.4707***     -0.4837***\n                        (0.03754)      (0.03788)      (0.02301)       (0.0161)\nx_endog                  2.332***       2.332***        2.31***         2.3***\n                        (0.03764)       (0.0375)       (0.0279)      (0.01518)\n_cons                    1.879***       1.879***                              \n                        (0.03826)      (0.03798)                              \n-------------------------------------------------------------------------------\nfirm_id FE                      N              N              Y              Y\nyear FE                         N              N              N              Y\nCluster: firm_id                N              N              Y              Y\nCluster: year                   N              N              N              Y\n-------------------------------------------------------------------------------\nN                            1000           1000           1000           1000\nR²                         0.8243         0.8243         0.9127         0.9507\nAdj. R²                    0.8238         0.8238         0.9027         0.9445\n===============================================================================\n* p&lt;0.10, ** p&lt;0.05, *** p&lt;0.01'</code></pre>
+</div>
+</div>
+<div id="i59lxkwr709" class="cell" data-execution_count="27">
+<div class="sourceCode cell-code" id="cb52"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb52-1"><a href="#cb52-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Compare IV estimators side by side</span></span>
+<span id="cb52-2"><a href="#cb52-2" aria-hidden="true" tabindex="-1"></a>pr.regtable(r_2sls, r_liml, r_gmm, labels<span class="op">=</span>[<span class="st">"2SLS"</span>, <span class="st">"LIML"</span>, <span class="st">"GMM"</span>])</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>============================================================
+                         2SLS           LIML            GMM
+                         2SLS           LIML            GMM
+------------------------------------------------------------
+x1                  0.9747***      0.9747***      0.9751***
+                     (0.0469)      (0.04696)      (0.04959)
+x2                 -0.5207***     -0.5207***     -0.5203***
+                    (0.04599)      (0.04605)      (0.04559)
+_cons                1.868***       1.868***        1.87***
+                    (0.04686)      (0.04693)       (0.0461)
+x_endog              1.492***       1.488***       1.502***
+                    (0.07508)      (0.07527)      (0.07466)
+------------------------------------------------------------
+------------------------------------------------------------
+N                        1000           1000           1000
+R²                     0.7364         0.7357         0.7387
+Adj. R²                0.7356         0.7349         0.7379
+============================================================
+* p&lt;0.10, ** p&lt;0.05, *** p&lt;0.01</code></pre>
+</div>
+<div class="cell-output cell-output-display" data-execution_count="27">
+<pre><code>'============================================================\n                         2SLS           LIML            GMM\n                         2SLS           LIML            GMM\n------------------------------------------------------------\nx1                  0.9747***      0.9747***      0.9751***\n                     (0.0469)      (0.04696)      (0.04959)\nx2                 -0.5207***     -0.5207***     -0.5203***\n                    (0.04599)      (0.04605)      (0.04559)\n_cons                1.868***       1.868***        1.87***\n                    (0.04686)      (0.04693)       (0.0461)\nx_endog              1.492***       1.488***       1.502***\n                    (0.07508)      (0.07527)      (0.07466)\n------------------------------------------------------------\n------------------------------------------------------------\nN                        1000           1000           1000\nR²                     0.7364         0.7357         0.7387\nAdj. R²                0.7356         0.7349         0.7379\n============================================================\n* p&lt;0.10, ** p&lt;0.05, *** p&lt;0.01'</code></pre>
+</div>
+</div>
+<div id="8skpk779rzt" class="cell" data-execution_count="28">
+<div class="sourceCode cell-code" id="cb55"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb55-1"><a href="#cb55-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Compare panel estimators</span></span>
+<span id="cb55-2"><a href="#cb55-2" aria-hidden="true" tabindex="-1"></a>pr.regtable(r_pfe, r_pre, r_pfd, labels<span class="op">=</span>[<span class="st">"Panel FE"</span>, <span class="st">"Panel RE"</span>, <span class="st">"Panel FD"</span>])</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>================================================================
+                         Panel FE       Panel RE       Panel FD
+                         Panel FE       Panel RE       Panel FD
+----------------------------------------------------------------
+x1                       1.002***      0.9931***       1.009***
+                        (0.02003)      (0.02645)      (0.02894)
+x2                     -0.4837***     -0.4735***     -0.4798***
+                        (0.01652)      (0.02587)      (0.02617)
+x_endog                    2.3***       2.312***       2.303***
+                        (0.02053)      (0.02601)       (0.0285)
+_cons                                   1.882***      -0.008707
+                                        (0.0948)     (0.009008)
+----------------------------------------------------------------
+firm_id FE                      Y              N              N
+year FE                         Y              N              N
+Cluster: firm_id                Y              N              Y
+----------------------------------------------------------------
+N                            1000           1000            900
+R²                         0.9507         0.8241         0.9282
+Adj. R²                    0.9445         0.8236         0.9279
+================================================================
+* p&lt;0.10, ** p&lt;0.05, *** p&lt;0.01</code></pre>
+</div>
+<div class="cell-output cell-output-display" data-execution_count="28">
+<pre><code>'================================================================\n                         Panel FE       Panel RE       Panel FD\n                         Panel FE       Panel RE       Panel FD\n----------------------------------------------------------------\nx1                       1.002***      0.9931***       1.009***\n                        (0.02003)      (0.02645)      (0.02894)\nx2                     -0.4837***     -0.4735***     -0.4798***\n                        (0.01652)      (0.02587)      (0.02617)\nx_endog                    2.3***       2.312***       2.303***\n                        (0.02053)      (0.02601)       (0.0285)\n_cons                                   1.882***      -0.008707\n                                        (0.0948)     (0.009008)\n----------------------------------------------------------------\nfirm_id FE                      Y              N              N\nyear FE                         Y              N              N\nCluster: firm_id                Y              N              Y\n----------------------------------------------------------------\nN                            1000           1000            900\nR²                         0.9507         0.8241         0.9282\nAdj. R²                    0.9445         0.8236         0.9279\n================================================================\n* p&lt;0.10, ** p&lt;0.05, *** p&lt;0.01'</code></pre>
+</div>
+</div>
+<div id="jqkc2i9056h" class="cell" data-execution_count="29">
+<div class="sourceCode cell-code" id="cb58"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb58-1"><a href="#cb58-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Customize: no stars, higher precision</span></span>
+<span id="cb58-2"><a href="#cb58-2" aria-hidden="true" tabindex="-1"></a>pr.regtable(m1, m3, stars<span class="op">=</span><span class="va">False</span>, precision<span class="op">=</span><span class="dv">6</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>=================================================
+                              (1)            (2)
+                              OLS            OLS
+-------------------------------------------------
+x1                       0.986214       0.993656
+                      (0.0382822)    (0.0271224)
+x2                      -0.508013      -0.470659
+                      (0.0375399)    (0.0230137)
+x_endog                   2.33179        2.31047
+                      (0.0376397)    (0.0278959)
+_cons                     1.87872               
+                      (0.0382563)               
+-------------------------------------------------
+firm_id FE                      N              Y
+Cluster: firm_id                N              Y
+-------------------------------------------------
+N                            1000           1000
+R²                         0.8243         0.9127
+Adj. R²                    0.8238         0.9027
+=================================================</code></pre>
+</div>
+<div class="cell-output cell-output-display" data-execution_count="29">
+<pre><code>'=================================================\n                              (1)            (2)\n                              OLS            OLS\n-------------------------------------------------\nx1                       0.986214       0.993656\n                      (0.0382822)    (0.0271224)\nx2                      -0.508013      -0.470659\n                      (0.0375399)    (0.0230137)\nx_endog                   2.33179        2.31047\n                      (0.0376397)    (0.0278959)\n_cons                     1.87872               \n                      (0.0382563)               \n-------------------------------------------------\nfirm_id FE                      N              Y\nCluster: firm_id                N              Y\n-------------------------------------------------\nN                            1000           1000\nR²                         0.8243         0.9127\nAdj. R²                    0.8238         0.9027\n================================================='</code></pre>
+</div>
+</div>
+</section>
+<section id="groupby-regression-run-per-group" class="level2">
+<h2 class="anchored" data-anchor-id="groupby-regression-run-per-group">8. GroupBy Regression — Run per Group</h2>
+<p><code>groupby_reg()</code> runs the same regression for each group in the data — useful for estimating factor loadings per stock, running regressions per industry, etc.</p>
+<div id="958bwz6i814" class="cell" data-execution_count="30">
+<div class="sourceCode cell-code" id="cb61"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb61-1"><a href="#cb61-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Run OLS per industry group</span></span>
+<span id="cb61-2"><a href="#cb61-2" aria-hidden="true" tabindex="-1"></a>grp <span class="op">=</span> pr.groupby_reg(pr.ols, <span class="st">"y ~ x1 + x2 + x_endog"</span>, df, group_by<span class="op">=</span><span class="st">"industry"</span>)</span>
+<span id="cb61-3"><a href="#cb61-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(grp.summary())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>GroupBy Regression: 4 groups succeeded
+============================================================
+
+--- Group: Tech (N=220) ---
+  Coefs: x1=1.0385, x2=-0.4486, x_endog=2.3278, _cons=1.9915
+  R²=0.8827
+
+--- Group: Energy (N=280) ---
+  Coefs: x1=0.8939, x2=-0.5258, x_endog=2.3360, _cons=1.9813
+  R²=0.7670
+
+--- Group: Health (N=240) ---
+  Coefs: x1=1.0364, x2=-0.5471, x_endog=2.4097, _cons=1.6810
+  R²=0.8461
+
+--- Group: Finance (N=260) ---
+  Coefs: x1=0.9920, x2=-0.4957, x_endog=2.2685, _cons=1.8508
+  R²=0.8192</code></pre>
+</div>
+</div>
+<div id="r5jk6zn2tff" class="cell" data-execution_count="31">
+<div class="sourceCode cell-code" id="cb63"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb63-1"><a href="#cb63-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Stacked coefficient table across all groups</span></span>
+<span id="cb63-2"><a href="#cb63-2" aria-hidden="true" tabindex="-1"></a>grp.coef_table()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-display" data-execution_count="31">
+<div><style>
+.dataframe > thead > tr,
+.dataframe > tbody > tr {
+  text-align: right;
+  white-space: pre-wrap;
+}
+</style>
+<small>shape: (16, 8)</small>
+<table class="dataframe caption-top table table-sm table-striped small" data-quarto-postprocess="true" data-border="1">
+<thead>
+<tr class="header">
+<th data-quarto-table-cell-role="th">group</th>
+<th data-quarto-table-cell-role="th">name</th>
+<th data-quarto-table-cell-role="th">coef</th>
+<th data-quarto-table-cell-role="th">se</th>
+<th data-quarto-table-cell-role="th">t</th>
+<th data-quarto-table-cell-role="th">p</th>
+<th data-quarto-table-cell-role="th">ci_lower</th>
+<th data-quarto-table-cell-role="th">ci_upper</th>
+</tr>
+<tr class="even">
+<th>str</th>
+<th>str</th>
+<th>f64</th>
+<th>f64</th>
+<th>f64</th>
+<th>f64</th>
+<th>f64</th>
+<th>f64</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>"Tech"</td>
+<td>"x1"</td>
+<td>1.038527</td>
+<td>0.069704</td>
+<td>14.899151</td>
+<td>5.2881e-35</td>
+<td>0.901141</td>
+<td>1.175914</td>
+</tr>
+<tr class="even">
+<td>"Tech"</td>
+<td>"x2"</td>
+<td>-0.448646</td>
+<td>0.067057</td>
+<td>-6.690551</td>
+<td>1.8797e-10</td>
+<td>-0.580816</td>
+<td>-0.316477</td>
+</tr>
+<tr class="odd">
+<td>"Tech"</td>
+<td>"x_endog"</td>
+<td>2.327811</td>
+<td>0.064988</td>
+<td>35.818861</td>
+<td>7.9869e-93</td>
+<td>2.199719</td>
+<td>2.455904</td>
+</tr>
+<tr class="even">
+<td>"Tech"</td>
+<td>"_cons"</td>
+<td>1.991462</td>
+<td>0.069086</td>
+<td>28.825915</td>
+<td>5.6705e-76</td>
+<td>1.855293</td>
+<td>2.12763</td>
+</tr>
+<tr class="odd">
+<td>"Energy"</td>
+<td>"x1"</td>
+<td>0.893921</td>
+<td>0.080314</td>
+<td>11.130391</td>
+<td>5.1340e-24</td>
+<td>0.735816</td>
+<td>1.052026</td>
+</tr>
+<tr class="even">
+<td>…</td>
+<td>…</td>
+<td>…</td>
+<td>…</td>
+<td>…</td>
+<td>…</td>
+<td>…</td>
+<td>…</td>
+</tr>
+<tr class="odd">
+<td>"Health"</td>
+<td>"_cons"</td>
+<td>1.680963</td>
+<td>0.075295</td>
+<td>22.324897</td>
+<td>4.1863e-60</td>
+<td>1.532626</td>
+<td>1.8293</td>
+</tr>
+<tr class="even">
+<td>"Finance"</td>
+<td>"x1"</td>
+<td>0.992039</td>
+<td>0.080879</td>
+<td>12.265783</td>
+<td>1.6303e-27</td>
+<td>0.832767</td>
+<td>1.151311</td>
+</tr>
+<tr class="odd">
+<td>"Finance"</td>
+<td>"x2"</td>
+<td>-0.495732</td>
+<td>0.077845</td>
+<td>-6.368233</td>
+<td>8.8052e-10</td>
+<td>-0.649029</td>
+<td>-0.342435</td>
+</tr>
+<tr class="even">
+<td>"Finance"</td>
+<td>"x_endog"</td>
+<td>2.268491</td>
+<td>0.072877</td>
+<td>31.12774</td>
+<td>5.2973e-89</td>
+<td>2.124976</td>
+<td>2.412005</td>
+</tr>
+<tr class="odd">
+<td>"Finance"</td>
+<td>"_cons"</td>
+<td>1.850838</td>
+<td>0.07461</td>
+<td>24.80698</td>
+<td>4.7860e-70</td>
+<td>1.703912</td>
+<td>1.997765</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+<div id="asrkcg73pe9" class="cell" data-execution_count="32">
+<div class="sourceCode cell-code" id="cb64"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb64-1"><a href="#cb64-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Use regtable to compare groups side by side</span></span>
+<span id="cb64-2"><a href="#cb64-2" aria-hidden="true" tabindex="-1"></a>pr.regtable(<span class="op">*</span>grp.values(), labels<span class="op">=</span><span class="bu">list</span>(grp.keys()))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>===========================================================================
+                         Tech         Energy         Health        Finance
+                          OLS            OLS            OLS            OLS
+---------------------------------------------------------------------------
+x1                   1.039***      0.8939***       1.036***       0.992***
+                     (0.0697)      (0.08031)      (0.07144)      (0.08088)
+x2                 -0.4486***     -0.5258***     -0.5471***     -0.4957***
+                    (0.06706)      (0.07835)      (0.07259)      (0.07784)
+x_endog              2.328***       2.336***        2.41***       2.268***
+                    (0.06499)      (0.08509)      (0.07378)      (0.07288)
+_cons                1.991***       1.981***       1.681***       1.851***
+                    (0.06909)      (0.08227)       (0.0753)      (0.07461)
+---------------------------------------------------------------------------
+---------------------------------------------------------------------------
+N                         220            280            240            260
+R²                     0.8827         0.7670         0.8461         0.8192
+Adj. R²                0.8811         0.7645         0.8442         0.8171
+===========================================================================
+* p&lt;0.10, ** p&lt;0.05, *** p&lt;0.01</code></pre>
+</div>
+<div class="cell-output cell-output-display" data-execution_count="32">
+<pre><code>'===========================================================================\n                         Tech         Energy         Health        Finance\n                          OLS            OLS            OLS            OLS\n---------------------------------------------------------------------------\nx1                   1.039***      0.8939***       1.036***       0.992***\n                     (0.0697)      (0.08031)      (0.07144)      (0.08088)\nx2                 -0.4486***     -0.5258***     -0.5471***     -0.4957***\n                    (0.06706)      (0.07835)      (0.07259)      (0.07784)\nx_endog              2.328***       2.336***        2.41***       2.268***\n                    (0.06499)      (0.08509)      (0.07378)      (0.07288)\n_cons                1.991***       1.981***       1.681***       1.851***\n                    (0.06909)      (0.08227)       (0.0753)      (0.07461)\n---------------------------------------------------------------------------\n---------------------------------------------------------------------------\nN                         220            280            240            260\nR²                     0.8827         0.7670         0.8461         0.8192\nAdj. R²                0.8811         0.7645         0.8442         0.8171\n===========================================================================\n* p&lt;0.10, ** p&lt;0.05, *** p&lt;0.01'</code></pre>
+</div>
+</div>
+</section>
+<section id="stata-equivalence-generate-stata-code" class="level2">
+<h2 class="anchored" data-anchor-id="stata-equivalence-generate-stata-code">9. Stata Equivalence — Generate Stata Code</h2>
+<p><code>to_stata()</code> translates any <code>polars_reg</code> call into the equivalent Stata command, so you can verify results in Stata or share reproducible code with Stata users.</p>
+<div id="cm18xafclvd" class="cell" data-execution_count="33">
+<div class="sourceCode cell-code" id="cb67"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb67-1"><a href="#cb67-1" aria-hidden="true" tabindex="-1"></a><span class="co"># OLS → reg</span></span>
+<span id="cb67-2"><a href="#cb67-2" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_stata(<span class="st">"ols"</span>, <span class="st">"y ~ x1 + x2"</span>))</span>
+<span id="cb67-3"><a href="#cb67-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>()</span>
+<span id="cb67-4"><a href="#cb67-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb67-5"><a href="#cb67-5" aria-hidden="true" tabindex="-1"></a><span class="co"># OLS with robust SEs → reg, vce(robust)</span></span>
+<span id="cb67-6"><a href="#cb67-6" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_stata(<span class="st">"ols"</span>, <span class="st">"y ~ x1 + x2"</span>, vcov<span class="op">=</span><span class="st">"HC1"</span>))</span>
+<span id="cb67-7"><a href="#cb67-7" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>()</span>
+<span id="cb67-8"><a href="#cb67-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb67-9"><a href="#cb67-9" aria-hidden="true" tabindex="-1"></a><span class="co"># reghdfe with multi-way FE and clustering</span></span>
+<span id="cb67-10"><a href="#cb67-10" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_stata(<span class="st">"ols"</span>, <span class="st">"y ~ x1 + x2 | firm_id + year"</span>, cluster<span class="op">=</span>[<span class="st">"firm_id"</span>, <span class="st">"year"</span>]))</span>
+<span id="cb67-11"><a href="#cb67-11" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>()</span>
+<span id="cb67-12"><a href="#cb67-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb67-13"><a href="#cb67-13" aria-hidden="true" tabindex="-1"></a><span class="co"># 2SLS → ivregress 2sls</span></span>
+<span id="cb67-14"><a href="#cb67-14" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_stata(<span class="st">"iv2sls"</span>, <span class="st">"y ~ x1 + x2 || x_endog ~ z1 + z2"</span>))</span>
+<span id="cb67-15"><a href="#cb67-15" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>()</span>
+<span id="cb67-16"><a href="#cb67-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb67-17"><a href="#cb67-17" aria-hidden="true" tabindex="-1"></a><span class="co"># 2SLS with FE → ivreghdfe</span></span>
+<span id="cb67-18"><a href="#cb67-18" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_stata(<span class="st">"iv2sls"</span>, <span class="st">"y ~ x1 + x2 | firm_id | x_endog ~ z1 + z2"</span>))</span>
+<span id="cb67-19"><a href="#cb67-19" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>()</span>
+<span id="cb67-20"><a href="#cb67-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb67-21"><a href="#cb67-21" aria-hidden="true" tabindex="-1"></a><span class="co"># LIML</span></span>
+<span id="cb67-22"><a href="#cb67-22" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_stata(<span class="st">"liml"</span>, <span class="st">"y ~ x1 + x2 || x_endog ~ z1 + z2"</span>))</span>
+<span id="cb67-23"><a href="#cb67-23" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>()</span>
+<span id="cb67-24"><a href="#cb67-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb67-25"><a href="#cb67-25" aria-hidden="true" tabindex="-1"></a><span class="co"># GMM</span></span>
+<span id="cb67-26"><a href="#cb67-26" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_stata(<span class="st">"gmm_iv"</span>, <span class="st">"y ~ x1 + x2 || x_endog ~ z1 + z2"</span>))</span>
+<span id="cb67-27"><a href="#cb67-27" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>()</span>
+<span id="cb67-28"><a href="#cb67-28" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb67-29"><a href="#cb67-29" aria-hidden="true" tabindex="-1"></a><span class="co"># Panel FE → xtreg, fe</span></span>
+<span id="cb67-30"><a href="#cb67-30" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_stata(<span class="st">"panel_fe"</span>, <span class="st">"y ~ x1 + x2"</span>, entity<span class="op">=</span><span class="st">"firm_id"</span>, time<span class="op">=</span><span class="st">"year"</span>))</span>
+<span id="cb67-31"><a href="#cb67-31" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>()</span>
+<span id="cb67-32"><a href="#cb67-32" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb67-33"><a href="#cb67-33" aria-hidden="true" tabindex="-1"></a><span class="co"># Panel RE → xtreg, re</span></span>
+<span id="cb67-34"><a href="#cb67-34" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_stata(<span class="st">"panel_re"</span>, <span class="st">"y ~ x1 + x2"</span>, entity<span class="op">=</span><span class="st">"firm_id"</span>))</span>
+<span id="cb67-35"><a href="#cb67-35" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>()</span>
+<span id="cb67-36"><a href="#cb67-36" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb67-37"><a href="#cb67-37" aria-hidden="true" tabindex="-1"></a><span class="co"># Panel FD → reg D.y D.x1 D.x2</span></span>
+<span id="cb67-38"><a href="#cb67-38" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_stata(<span class="st">"panel_fd"</span>, <span class="st">"y ~ x1 + x2"</span>, entity<span class="op">=</span><span class="st">"firm_id"</span>, time<span class="op">=</span><span class="st">"year"</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>reg y x1 x2
+
+reg y x1 x2, vce(robust)
+
+reghdfe y x1 x2, absorb(firm_id year) vce(cluster firm_id year)
+
+ivregress 2sls y x1 x2 (x_endog = z1 z2), small
+
+ivreghdfe y x1 x2 (x_endog = z1 z2), absorb(firm_id)
+
+ivregress liml y x1 x2 (x_endog = z1 z2), small
+
+ivregress gmm y x1 x2 (x_endog = z1 z2), wmatrix(robust)
+
+xtset firm_id year
+xtreg y x1 x2, fe
+
+xtset firm_id
+xtreg y x1 x2, re
+
+xtset firm_id year
+reg D.y D.x1 D.x2</code></pre>
+</div>
+</div>
+<div id="cforilxakz" class="cell" data-execution_count="34">
+<div class="sourceCode cell-code" id="cb69"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb69-1"><a href="#cb69-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Generate pystata-compatible Python code for automated comparison</span></span>
+<span id="cb69-2"><a href="#cb69-2" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_stata(<span class="st">"ols"</span>, <span class="st">"y ~ x1 + x2 | firm_id"</span>, cluster<span class="op">=</span>[<span class="st">"firm_id"</span>], pystata<span class="op">=</span><span class="va">True</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>import stata_setup
+stata_setup.config('/path/to/stata', 'mp')  # adjust path and edition
+from pystata import stata
+
+# Load your data first:
+# stata.pdataframe_to_data(df.to_pandas(), force=True)
+
+# Equivalent to polars_reg.ols():
+stata.run("reghdfe y x1 x2, absorb(firm_id) vce(cluster firm_id)")
+
+# Extract results:
+stata.run("matrix list e(b)")
+stata.run("matrix list e(V)")</code></pre>
+</div>
+</div>
+<div id="v2urdsj0uvk" class="cell" data-execution_count="35">
+<div class="sourceCode cell-code" id="cb71"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb71-1"><a href="#cb71-1" aria-hidden="true" tabindex="-1"></a><span class="co"># compare_stata() runs polars_reg and (if pystata is installed) Stata side by side</span></span>
+<span id="cb71-2"><a href="#cb71-2" aria-hidden="true" tabindex="-1"></a><span class="co"># Without pystata, it shows polars_reg results + the Stata command to run manually</span></span>
+<span id="cb71-3"><a href="#cb71-3" aria-hidden="true" tabindex="-1"></a>report <span class="op">=</span> pr.compare_stata(<span class="st">"ols"</span>, <span class="st">"y ~ x1 + x2"</span>, data<span class="op">=</span>df)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>======================================================================
+  polars_reg vs Stata: ols
+======================================================================
+  Stata command: reg y x1 x2
+======================================================================
+  Stata results: not available (pystata not configured)
+  Showing polars_reg results only:
+======================================================================
+                 polars_reg        Stata
+  ------------------------------------------------------------------
+            x1     0.954290            —
+          (SE) (0.084286)                   —
+            x2    -0.543127            —
+          (SE) (0.082650)                   —
+         _cons     1.850166            —
+          (SE) (0.084231)                   —
+  pystata not available. Install and configure pystata to enable automatic comparison. You can run the Stata command manually.
+======================================================================</code></pre>
+</div>
+</div>
+</section>
+<section id="r-equivalence-generate-r-code" class="level2">
+<h2 class="anchored" data-anchor-id="r-equivalence-generate-r-code">10. R Equivalence — Generate R Code</h2>
+<p><code>to_r()</code> translates any <code>polars_reg</code> call into equivalent R code, mapping to <code>lm()</code>, <code>fixest::feols()</code>, <code>AER::ivreg()</code>, or <code>plm::plm()</code> as appropriate.</p>
+<div id="gkroswj7xkl" class="cell" data-execution_count="36">
+<div class="sourceCode cell-code" id="cb73"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb73-1"><a href="#cb73-1" aria-hidden="true" tabindex="-1"></a><span class="co"># OLS → lm()</span></span>
+<span id="cb73-2"><a href="#cb73-2" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_r(<span class="st">"ols"</span>, <span class="st">"y ~ x1 + x2"</span>))</span>
+<span id="cb73-3"><a href="#cb73-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>()</span>
+<span id="cb73-4"><a href="#cb73-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb73-5"><a href="#cb73-5" aria-hidden="true" tabindex="-1"></a><span class="co"># OLS with robust SEs → sandwich::vcovHC</span></span>
+<span id="cb73-6"><a href="#cb73-6" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_r(<span class="st">"ols"</span>, <span class="st">"y ~ x1 + x2"</span>, vcov<span class="op">=</span><span class="st">"HC1"</span>))</span>
+<span id="cb73-7"><a href="#cb73-7" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>()</span>
+<span id="cb73-8"><a href="#cb73-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb73-9"><a href="#cb73-9" aria-hidden="true" tabindex="-1"></a><span class="co"># OLS with clustering → fixest::feols</span></span>
+<span id="cb73-10"><a href="#cb73-10" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_r(<span class="st">"ols"</span>, <span class="st">"y ~ x1 + x2"</span>, cluster<span class="op">=</span>[<span class="st">"firm_id"</span>]))</span>
+<span id="cb73-11"><a href="#cb73-11" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>()</span>
+<span id="cb73-12"><a href="#cb73-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb73-13"><a href="#cb73-13" aria-hidden="true" tabindex="-1"></a><span class="co"># reghdfe-style FE + clustering → fixest::feols</span></span>
+<span id="cb73-14"><a href="#cb73-14" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_r(<span class="st">"ols"</span>, <span class="st">"y ~ x1 + x2 | firm_id + year"</span>, cluster<span class="op">=</span>[<span class="st">"firm_id"</span>, <span class="st">"year"</span>]))</span>
+<span id="cb73-15"><a href="#cb73-15" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>()</span>
+<span id="cb73-16"><a href="#cb73-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb73-17"><a href="#cb73-17" aria-hidden="true" tabindex="-1"></a><span class="co"># 2SLS → fixest::feols with IV syntax</span></span>
+<span id="cb73-18"><a href="#cb73-18" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_r(<span class="st">"iv2sls"</span>, <span class="st">"y ~ x1 + x2 || x_endog ~ z1 + z2"</span>))</span>
+<span id="cb73-19"><a href="#cb73-19" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>()</span>
+<span id="cb73-20"><a href="#cb73-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb73-21"><a href="#cb73-21" aria-hidden="true" tabindex="-1"></a><span class="co"># 2SLS with FE → fixest::feols</span></span>
+<span id="cb73-22"><a href="#cb73-22" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_r(<span class="st">"iv2sls"</span>, <span class="st">"y ~ x1 + x2 | firm_id | x_endog ~ z1 + z2"</span>))</span>
+<span id="cb73-23"><a href="#cb73-23" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>()</span>
+<span id="cb73-24"><a href="#cb73-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb73-25"><a href="#cb73-25" aria-hidden="true" tabindex="-1"></a><span class="co"># LIML → AER::ivreg</span></span>
+<span id="cb73-26"><a href="#cb73-26" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_r(<span class="st">"liml"</span>, <span class="st">"y ~ x1 + x2 || x_endog ~ z1 + z2"</span>))</span>
+<span id="cb73-27"><a href="#cb73-27" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>()</span>
+<span id="cb73-28"><a href="#cb73-28" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb73-29"><a href="#cb73-29" aria-hidden="true" tabindex="-1"></a><span class="co"># GMM → advisory note + feols fallback</span></span>
+<span id="cb73-30"><a href="#cb73-30" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_r(<span class="st">"gmm_iv"</span>, <span class="st">"y ~ x1 + x2 || x_endog ~ z1 + z2"</span>))</span>
+<span id="cb73-31"><a href="#cb73-31" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>()</span>
+<span id="cb73-32"><a href="#cb73-32" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb73-33"><a href="#cb73-33" aria-hidden="true" tabindex="-1"></a><span class="co"># Panel FE → plm with model="within"</span></span>
+<span id="cb73-34"><a href="#cb73-34" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_r(<span class="st">"panel_fe"</span>, <span class="st">"y ~ x1 + x2"</span>, entity<span class="op">=</span><span class="st">"firm_id"</span>, time<span class="op">=</span><span class="st">"year"</span>))</span>
+<span id="cb73-35"><a href="#cb73-35" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>()</span>
+<span id="cb73-36"><a href="#cb73-36" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb73-37"><a href="#cb73-37" aria-hidden="true" tabindex="-1"></a><span class="co"># Panel RE → plm with model="random"</span></span>
+<span id="cb73-38"><a href="#cb73-38" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_r(<span class="st">"panel_re"</span>, <span class="st">"y ~ x1 + x2"</span>, entity<span class="op">=</span><span class="st">"firm_id"</span>))</span>
+<span id="cb73-39"><a href="#cb73-39" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>()</span>
+<span id="cb73-40"><a href="#cb73-40" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb73-41"><a href="#cb73-41" aria-hidden="true" tabindex="-1"></a><span class="co"># Panel FD → plm with model="fd"</span></span>
+<span id="cb73-42"><a href="#cb73-42" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(pr.to_r(<span class="st">"panel_fd"</span>, <span class="st">"y ~ x1 + x2"</span>, entity<span class="op">=</span><span class="st">"firm_id"</span>, time<span class="op">=</span><span class="st">"year"</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>model &lt;- lm(y ~ x1 + x2, data=df)
+summary(model)
+
+library(sandwich)
+library(lmtest)
+
+model &lt;- lm(y ~ x1 + x2, data=df)
+coeftest(model, vcov=vcovHC(model, type="HC1"))
+
+library(fixest)
+
+model &lt;- feols(y ~ x1 + x2, data=df, vcov=~firm_id)
+summary(model)
+
+library(fixest)
+
+model &lt;- feols(y ~ x1 + x2 | firm_id + year, data=df, vcov=~firm_id + year)
+summary(model)
+
+library(fixest)
+
+model &lt;- feols(y ~ x1 + x2 | x_endog ~ z1 + z2, data=df, vcov="iid")
+summary(model)
+
+library(fixest)
+
+model &lt;- feols(y ~ x1 + x2 | firm_id | x_endog ~ z1 + z2, data=df, vcov="iid")
+summary(model)
+
+library(AER)
+
+model &lt;- ivreg(y ~ x1 + x2 + x_endog | x1 + x2 + z1 + z2, data=df, model="liml")
+summary(model)
+
+# No direct single-function R equivalent for two-step efficient GMM.
+# Options:
+#   1. gmm::gmm() with custom moment conditions
+#   2. fixest::feols() for 2SLS (not identical to GMM)
+#
+# For approximate comparison, 2SLS with robust SEs:
+
+library(fixest)
+model &lt;- feols(y ~ x1 + x2 | x_endog ~ z1 + z2, data=df, vcov="HC1")
+summary(model)
+
+library(plm)
+
+model &lt;- plm(y ~ x1 + x2, data=df, model="within", index=c("firm_id", "year"))
+summary(model)
+
+library(plm)
+
+model &lt;- plm(y ~ x1 + x2, data=df, model="random", index=c("firm_id"))
+summary(model)
+
+library(plm)
+
+model &lt;- plm(y ~ x1 + x2, data=df, model="fd", index=c("firm_id", "year"))
+summary(model)</code></pre>
+</div>
+</div>
+<div id="ff3kh98dbr6" class="cell" data-execution_count="37">
+<div class="sourceCode cell-code" id="cb75"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb75-1"><a href="#cb75-1" aria-hidden="true" tabindex="-1"></a><span class="co"># compare_r() runs polars_reg and (if rpy2 is installed) R side by side</span></span>
+<span id="cb75-2"><a href="#cb75-2" aria-hidden="true" tabindex="-1"></a><span class="co"># Without rpy2, it shows polars_reg results + the R code to run manually</span></span>
+<span id="cb75-3"><a href="#cb75-3" aria-hidden="true" tabindex="-1"></a>report <span class="op">=</span> pr.compare_r(<span class="st">"ols"</span>, <span class="st">"y ~ x1 + x2"</span>, data<span class="op">=</span>df)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>======================================================================
+  polars_reg vs R: ols
+======================================================================
+  R code:
+    model &lt;- lm(y ~ x1 + x2, data=df)
+    summary(model)
+======================================================================
+  R results: not available (rpy2 not configured)
+  Showing polars_reg results only:
+======================================================================
+                 polars_reg            R
+  ------------------------------------------------------------------
+            x1     0.954290            —
+          (SE) (0.084286)                   —
+            x2    -0.543127            —
+          (SE) (0.082650)                   —
+         _cons     1.850166            —
+          (SE) (0.084231)                   —
+  rpy2 not available. Install rpy2 and the relevant R packages (fixest, AER, plm, sandwich, lmtest) to enable automatic comparison. You can run the R code manually.
+======================================================================</code></pre>
+</div>
+</div>
+</section>
+<section id="formula-syntax-reference" class="level2">
+<h2 class="anchored" data-anchor-id="formula-syntax-reference">11. Formula Syntax Reference</h2>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 25%">
+<col style="width: 25%">
+<col style="width: 25%">
+<col style="width: 25%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>polars_reg</th>
+<th>Meaning</th>
+<th>Stata</th>
+<th>R</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>y ~ x1 + x2</code></td>
+<td>OLS</td>
+<td><code>reg y x1 x2</code></td>
+<td><code>lm(y ~ x1 + x2)</code></td>
+</tr>
+<tr class="even">
+<td><code>y ~ x1 + x2 - 1</code></td>
+<td>No intercept</td>
+<td><code>reg y x1 x2, noconstant</code></td>
+<td><code>lm(y ~ x1 + x2 - 1)</code></td>
+</tr>
+<tr class="odd">
+<td><code>y ~ x1 \| fe1</code></td>
+<td>Absorbed FE</td>
+<td><code>reghdfe y x1, absorb(fe1)</code></td>
+<td><code>feols(y ~ x1 \| fe1)</code></td>
+</tr>
+<tr class="even">
+<td><code>y ~ x1 \| fe1 + fe2</code></td>
+<td>Multi-way FE</td>
+<td><code>reghdfe y x1, absorb(fe1 fe2)</code></td>
+<td><code>feols(y ~ x1 \| fe1 + fe2)</code></td>
+</tr>
+<tr class="odd">
+<td><code>y ~ x1 \|\| x_end ~ z1 + z2</code></td>
+<td>IV/2SLS</td>
+<td><code>ivregress 2sls y x1 (x_end = z1 z2)</code></td>
+<td><code>ivreg(y ~ x1 + x2 \| x_end \| z1 + z2)</code></td>
+</tr>
+<tr class="even">
+<td><code>y ~ x1 \| fe1 \| x_end ~ z1</code></td>
+<td>IV + FE</td>
+<td><code>ivreghdfe y x1 (x_end = z1), absorb(fe1)</code></td>
+<td><code>feols(y ~ x1 \| fe1 \| x_end ~ z1)</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>R packages:</strong> <code>fixest::feols()</code> for FE/clustering, <code>AER::ivreg()</code> for IV, base <code>lm()</code> for OLS. <code>fixest</code> uses the same <code>|</code> separator convention for fixed effects that polars_reg does.</p>
+</section>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const isCodeAnnotation = (el) => {
+    for (const clz of el.classList) {
+      if (clz.startsWith('code-annotation-')) {                     
+        return true;
+      }
+    }
+    return false;
+  }
+  const onCopySuccess = function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copied!");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copied!");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  }
+  const getTextToCopy = function(trigger) {
+      const codeEl = trigger.previousElementSibling.cloneNode(true);
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+  }
+  const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+    text: getTextToCopy
+  });
+  clipboard.on('success', onCopySuccess);
+  if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+    const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+      text: getTextToCopy,
+      container: window.document.getElementById('quarto-embedded-source-code-modal')
+    });
+    clipboardModal.on('success', onCopySuccess);
+  }
+    var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+    var mailtoRegex = new RegExp(/^mailto:/);
+      var filterRegex = new RegExp('/' + window.location.host + '/');
+    var isInternal = (href) => {
+        return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+    }
+    // Inspect non-navigation links and adorn them if external
+ 	var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+    for (var i=0; i<links.length; i++) {
+      const link = links[i];
+      if (!isInternal(link.href)) {
+        // undo the damage that might have been done by quarto-nav.js in the case of
+        // links that we want to consider external
+        if (link.dataset.originalHref !== undefined) {
+          link.href = link.dataset.originalHref;
+        }
+      }
+    }
+  function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+    const config = {
+      allowHTML: true,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start',
+    };
+    if (contentFn) {
+      config.content = contentFn;
+    }
+    if (onTriggerFn) {
+      config.onTrigger = onTriggerFn;
+    }
+    if (onUntriggerFn) {
+      config.onUntrigger = onUntriggerFn;
+    }
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      if (note) {
+        return note.innerHTML;
+      } else {
+        return "";
+      }
+    });
+  }
+  const xrefs = window.document.querySelectorAll('a.quarto-xref');
+  const processXRef = (id, note) => {
+    // Strip column container classes
+    const stripColumnClz = (el) => {
+      el.classList.remove("page-full", "page-columns");
+      if (el.children) {
+        for (const child of el.children) {
+          stripColumnClz(child);
+        }
+      }
+    }
+    stripColumnClz(note)
+    if (id === null || id.startsWith('sec-')) {
+      // Special case sections, only their first couple elements
+      const container = document.createElement("div");
+      if (note.children && note.children.length > 2) {
+        container.appendChild(note.children[0].cloneNode(true));
+        for (let i = 1; i < note.children.length; i++) {
+          const child = note.children[i];
+          if (child.tagName === "P" && child.innerText === "") {
+            continue;
+          } else {
+            container.appendChild(child.cloneNode(true));
+            break;
+          }
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(container);
+        }
+        return container.innerHTML
+      } else {
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        return note.innerHTML;
+      }
+    } else {
+      // Remove any anchor links if they are present
+      const anchorLink = note.querySelector('a.anchorjs-link');
+      if (anchorLink) {
+        anchorLink.remove();
+      }
+      if (window.Quarto?.typesetMath) {
+        window.Quarto.typesetMath(note);
+      }
+      if (note.classList.contains("callout")) {
+        return note.outerHTML;
+      } else {
+        return note.innerHTML;
+      }
+    }
+  }
+  for (var i=0; i<xrefs.length; i++) {
+    const xref = xrefs[i];
+    tippyHover(xref, undefined, function(instance) {
+      instance.disable();
+      let url = xref.getAttribute('href');
+      let hash = undefined; 
+      if (url.startsWith('#')) {
+        hash = url;
+      } else {
+        try { hash = new URL(url).hash; } catch {}
+      }
+      if (hash) {
+        const id = hash.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note !== null) {
+          try {
+            const html = processXRef(id, note.cloneNode(true));
+            instance.setContent(html);
+          } finally {
+            instance.enable();
+            instance.show();
+          }
+        } else {
+          // See if we can fetch this
+          fetch(url.split('#')[0])
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.getElementById(id);
+            if (note !== null) {
+              const html = processXRef(id, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      } else {
+        // See if we can fetch a full url (with no hash to target)
+        // This is a special case and we should probably do some content thinning / targeting
+        fetch(url)
+        .then(res => res.text())
+        .then(html => {
+          const parser = new DOMParser();
+          const htmlDoc = parser.parseFromString(html, "text/html");
+          const note = htmlDoc.querySelector('main.content');
+          if (note !== null) {
+            // This should only happen for chapter cross references
+            // (since there is no id in the URL)
+            // remove the first header
+            if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+              note.children[0].remove();
+            }
+            const html = processXRef(null, note);
+            instance.setContent(html);
+          } 
+        }).finally(() => {
+          instance.enable();
+          instance.show();
+        });
+      }
+    }, function(instance) {
+    });
+  }
+      let selectedAnnoteEl;
+      const selectorForAnnotation = ( cell, annotation) => {
+        let cellAttr = 'data-code-cell="' + cell + '"';
+        let lineAttr = 'data-code-annotation="' +  annotation + '"';
+        const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+        return selector;
+      }
+      const selectCodeLines = (annoteEl) => {
+        const doc = window.document;
+        const targetCell = annoteEl.getAttribute("data-target-cell");
+        const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+        const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+        const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+        const lineIds = lines.map((line) => {
+          return targetCell + "-" + line;
+        })
+        let top = null;
+        let height = null;
+        let parent = null;
+        if (lineIds.length > 0) {
+            //compute the position of the single el (top and bottom and make a div)
+            const el = window.document.getElementById(lineIds[0]);
+            top = el.offsetTop;
+            height = el.offsetHeight;
+            parent = el.parentElement.parentElement;
+          if (lineIds.length > 1) {
+            const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+            const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+            height = bottom - top;
+          }
+          if (top !== null && height !== null && parent !== null) {
+            // cook up a div (if necessary) and position it 
+            let div = window.document.getElementById("code-annotation-line-highlight");
+            if (div === null) {
+              div = window.document.createElement("div");
+              div.setAttribute("id", "code-annotation-line-highlight");
+              div.style.position = 'absolute';
+              parent.appendChild(div);
+            }
+            div.style.top = top - 2 + "px";
+            div.style.height = height + 4 + "px";
+            div.style.left = 0;
+            let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+            if (gutterDiv === null) {
+              gutterDiv = window.document.createElement("div");
+              gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+              gutterDiv.style.position = 'absolute';
+              const codeCell = window.document.getElementById(targetCell);
+              const gutter = codeCell.querySelector('.code-annotation-gutter');
+              gutter.appendChild(gutterDiv);
+            }
+            gutterDiv.style.top = top - 2 + "px";
+            gutterDiv.style.height = height + 4 + "px";
+          }
+          selectedAnnoteEl = annoteEl;
+        }
+      };
+      const unselectCodeLines = () => {
+        const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+        elementsIds.forEach((elId) => {
+          const div = window.document.getElementById(elId);
+          if (div) {
+            div.remove();
+          }
+        });
+        selectedAnnoteEl = undefined;
+      };
+        // Handle positioning of the toggle
+    window.addEventListener(
+      "resize",
+      throttle(() => {
+        elRect = undefined;
+        if (selectedAnnoteEl) {
+          selectCodeLines(selectedAnnoteEl);
+        }
+      }, 10)
+    );
+    function throttle(fn, ms) {
+    let throttle = false;
+    let timer;
+      return (...args) => {
+        if(!throttle) { // first call gets through
+            fn.apply(this, args);
+            throttle = true;
+        } else { // all the others get throttled
+            if(timer) clearTimeout(timer); // cancel #2
+            timer = setTimeout(() => {
+              fn.apply(this, args);
+              timer = throttle = false;
+            }, ms);
+        }
+      };
+    }
+      // Attach click handler to the DT
+      const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+      for (const annoteDlNode of annoteDls) {
+        annoteDlNode.addEventListener('click', (event) => {
+          const clickedEl = event.target;
+          if (clickedEl !== selectedAnnoteEl) {
+            unselectCodeLines();
+            const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+            if (activeEl) {
+              activeEl.classList.remove('code-annotation-active');
+            }
+            selectCodeLines(clickedEl);
+            clickedEl.classList.add('code-annotation-active');
+          } else {
+            // Unselect the line
+            unselectCodeLines();
+            clickedEl.classList.remove('code-annotation-active');
+          }
+        });
+      }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>
