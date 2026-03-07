@@ -66,6 +66,7 @@ def ols(
     time: str | None = None,
     bandwidth: int | None = None,
     weights: str | None = None,
+    fweights: str | None = None,
     n_boot: int = 999,
     seed: int | None = None,
 ) -> RegressionResult:
@@ -79,23 +80,38 @@ def ols(
         time: Column name for time ordering (required for NW/DK).
         bandwidth: Number of lags for HAC/DK. Default: Newey-West rule of thumb.
         weights: Column name for analytic weights (WLS). Minimizes sum w_i*(y_i - x_i'b)^2.
+        fweights: Column name for frequency weights. Each obs counts f_i times.
         n_boot: Bootstrap replications (default 999). For vcov="bootstrap"/"wildboot".
         seed: Random seed for bootstrap reproducibility.
     """
     if isinstance(cluster, str):
         cluster = [cluster]
+    if weights and fweights:
+        raise ValueError("Cannot specify both weights and fweights")
     data = ensure_polars(data)
 
     spec = parse_formula(formula)
-    arrays = extract_arrays(data, spec, cluster=cluster, time=time, weights=weights)
+    weight_col = weights or fweights
+    arrays = extract_arrays(data, spec, cluster=cluster, time=time, weights=weight_col)
 
     X, y = arrays.X, arrays.y
     w = arrays.weights
     fe_dict = arrays.fe_arrays
     has_fe = len(fe_dict) > 0
 
-    # Normalize weights to sum to N (Stata aweight convention)
-    if w is not None:
+    # Handle frequency weights: expand effective sample size
+    fw = None
+    if fweights and w is not None:
+        fw = w.copy()
+        if np.any(fw < 1) or not np.allclose(fw, np.round(fw)):
+            raise ValueError("Frequency weights must be positive integers")
+        fw = np.round(fw).astype(np.int64)
+        # For fweights, use sqrt(f) as regression weights (equivalent to replicating obs)
+        w = fw.astype(np.float64)
+        w = w * len(w) / w.sum()  # normalize like aweights
+
+    # Normalize analytic weights to sum to N (Stata aweight convention)
+    if weights and w is not None:
         if np.any(w <= 0):
             raise ValueError("Weights must be strictly positive")
         w = w * len(w) / w.sum()
@@ -133,6 +149,9 @@ def ols(
 
     n, k = X.shape
 
+    # For fweights, effective N = sum(f), adjusting DoF accordingly
+    n_eff = int(fw.sum()) if fw is not None else n
+
     # For WLS: pre-multiply by sqrt(w); OLS on transformed data = WLS
     if w is not None:
         sqw = np.sqrt(w)
@@ -156,7 +175,7 @@ def ols(
         y_demean = y - y.mean()
         ss_tot = y_demean @ y_demean
     r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
-    r2_adj = 1.0 - (1.0 - r2) * (n - 1) / (n - k - df_abs)
+    r2_adj = 1.0 - (1.0 - r2) * (n_eff - 1) / (n_eff - k - df_abs)
 
     # Variance-covariance (uses weighted X and residuals for sandwich)
     n_clusters = None
@@ -174,7 +193,7 @@ def ols(
     elif vcov == "bootstrap":
         V = vcov_pairs_bootstrap(Xw, yw, n_boot=n_boot, seed=seed)
         vcov_type = "bootstrap"
-        df_r = n - k - df_abs
+        df_r = n_eff - k - df_abs
     elif vcov == "wildboot":
         if not cluster:
             raise ValueError("vcov='wildboot' requires cluster= parameter")
@@ -191,23 +210,28 @@ def ols(
         else:
             V = vcov_driscoll_kraay(Xw, resid_w, arrays.time_array, bandwidth=bandwidth)
         vcov_type = vcov
-        df_r = n - k - df_abs
+        df_r = n_eff - k - df_abs
     elif vcov == "iid":
         V = vcov_iid(Xw, resid_w, df_abs=df_abs)
         vcov_type = "iid"
-        df_r = n - k - df_abs
+        df_r = n_eff - k - df_abs
     else:
         V = vcov_robust(Xw, resid_w, kind=vcov)
         vcov_type = vcov
-        df_r = n - k - df_abs
+        df_r = n_eff - k - df_abs
 
-    model_type = "WLS" if w is not None else "OLS"
+    if fweights:
+        model_type = "OLS (fweight)"
+    elif w is not None:
+        model_type = "WLS"
+    else:
+        model_type = "OLS"
     result = RegressionResult(
         coefficients=beta,
         vcov=V,
         residuals=resid,
         names=arrays.names,
-        n_obs=n,
+        n_obs=n_eff,
         k=k,
         df_r=df_r,
         r_squared=r2,

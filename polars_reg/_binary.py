@@ -309,3 +309,40 @@ def marginal_effects(
             "p": p.tolist(),
         }
     )
+
+
+def odds_ratios(result: RegressionResult) -> pl.DataFrame:
+    """Compute odds ratios from a logit result.
+
+    OR = exp(beta). Delta-method SE: se(OR) = OR * se(beta).
+
+    Args:
+        result: A Logit RegressionResult.
+
+    Returns:
+        Polars DataFrame with columns: name, or, se, z, p, ci_lower, ci_upper.
+    """
+    if result.model_type != "Logit":
+        raise ValueError("odds_ratios requires a Logit result")
+
+    or_vals = np.exp(result.coefficients)
+    se_or = or_vals * result.se  # delta method
+    z = np.log(or_vals) / result.se  # same as beta / se(beta)
+    p = 2.0 * stats.norm.sf(np.abs(z))
+
+    # CI on log scale, then exponentiate
+    ci = result.confint()
+    ci_lower = np.exp(ci[:, 0])
+    ci_upper = np.exp(ci[:, 1])
+
+    return pl.DataFrame(
+        {
+            "name": result.names,
+            "or": or_vals,
+            "se": se_or,
+            "z": z,
+            "p": p.tolist(),
+            "ci_lower": ci_lower,
+            "ci_upper": ci_upper,
+        }
+    )

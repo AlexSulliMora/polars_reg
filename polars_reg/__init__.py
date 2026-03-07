@@ -19,7 +19,7 @@ except ImportError:
     pass
 
 from polars_reg._arellano_bond import panel_ab
-from polars_reg._binary import logit, marginal_effects, probit
+from polars_reg._binary import logit, marginal_effects, odds_ratios, probit
 from polars_reg._diagnostics import (
     hausman_test,
     kleibergen_paap_from_result,
@@ -28,7 +28,7 @@ from polars_reg._diagnostics import (
 )
 from polars_reg._groupby import GroupRegressionResult, groupby_reg
 from polars_reg._quantile import quantreg
-from polars_reg._regtable import regtable
+from polars_reg._regtable import RegTable, regtable
 from polars_reg.r_equiv import compare_r, to_r
 from polars_reg.stata import compare_stata, to_stata
 
@@ -55,6 +55,8 @@ __all__ = [
     "probit",
     "logit",
     "marginal_effects",
+    "odds_ratios",
+    "RegTable",
     "panel_ab",
     "quantreg",
 ]

@@ -5,6 +5,7 @@ import polars as pl
 import pytest
 
 from polars_reg import groupby_reg, ols, regtable
+from polars_reg._regtable import RegTable
 
 
 def test_regtable_basic(simple_data):
@@ -218,3 +219,47 @@ def test_regtable_html_stars(simple_data):
     r1 = ols("y ~ x1 + x2", data=simple_data)
     table = regtable(r1, format="html", stars=True)
     assert "<sup>" in table
+
+
+def test_regtable_returns_regtable_type(simple_data):
+    """regtable() returns a RegTable instance (str subclass)."""
+    r1 = ols("y ~ x1", data=simple_data)
+    table = regtable(r1)
+    assert isinstance(table, RegTable)
+    assert isinstance(table, str)
+
+
+def test_regtable_repr_html_text_mode(simple_data):
+    """Text-mode regtable has _repr_html_ returning HTML."""
+    r1 = ols("y ~ x1", data=simple_data)
+    table = regtable(r1, format="text")
+    html = table._repr_html_()
+    assert html is not None
+    assert "<table" in html
+    assert "</table>" in html
+
+
+def test_regtable_repr_html_html_mode(simple_data):
+    """HTML-mode regtable has _repr_html_ returning the same HTML."""
+    r1 = ols("y ~ x1", data=simple_data)
+    table = regtable(r1, format="html")
+    html = table._repr_html_()
+    assert html is not None
+    assert html == str(table)
+
+
+def test_regtable_repr_html_latex_mode(simple_data):
+    """LaTeX-mode regtable has no _repr_html_ (returns None)."""
+    r1 = ols("y ~ x1", data=simple_data)
+    table = regtable(r1, format="latex")
+    assert table._repr_html_() is None
+
+
+def test_regtable_str_operations(simple_data):
+    """RegTable works like a regular string for concatenation, slicing, etc."""
+    r1 = ols("y ~ x1", data=simple_data)
+    table = regtable(r1)
+    combined = table + "\n\nAdditional notes"
+    assert "Additional notes" in combined
+    assert table.startswith("=")
+    assert len(table) > 0

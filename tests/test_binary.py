@@ -5,7 +5,7 @@ import polars as pl
 import pytest
 from scipy import stats
 
-from polars_reg import logit, marginal_effects, probit
+from polars_reg import logit, marginal_effects, odds_ratios, probit
 
 
 @pytest.fixture
@@ -196,3 +196,45 @@ def test_logit_coef_table(logit_data):
     assert "coef" in ct.columns
     assert "se" in ct.columns
     assert "p" in ct.columns
+
+
+def test_odds_ratios_basic(logit_data):
+    """Odds ratios from logit: exp(beta), with delta-method SE."""
+    r = logit("y ~ x1 + x2", data=logit_data)
+    ordf = odds_ratios(r)
+    assert "or" in ordf.columns
+    assert "se" in ordf.columns
+    assert "ci_lower" in ordf.columns
+    assert "ci_upper" in ordf.columns
+    assert ordf.shape[0] == 3  # x1, x2, _cons
+    # OR = exp(beta), so all should be positive
+    assert np.all(ordf["or"].to_numpy() > 0)
+    # OR for x1 should be > 1 (positive coefficient)
+    idx_x1 = r.names.index("x1")
+    assert ordf["or"][idx_x1] > 1.0
+
+
+def test_odds_ratios_exp_beta(logit_data):
+    """Odds ratios equal exp(coefficients)."""
+    r = logit("y ~ x1 + x2", data=logit_data)
+    ordf = odds_ratios(r)
+    expected_or = np.exp(r.coefficients)
+    np.testing.assert_allclose(ordf["or"].to_numpy(), expected_or, rtol=1e-10)
+
+
+def test_odds_ratios_ci(logit_data):
+    """CI bounds are exp(ci_lower_beta), exp(ci_upper_beta)."""
+    r = logit("y ~ x1 + x2", data=logit_data)
+    ordf = odds_ratios(r)
+    ci = r.confint()
+    expected_lo = np.exp(ci[:, 0])
+    expected_hi = np.exp(ci[:, 1])
+    np.testing.assert_allclose(ordf["ci_lower"].to_numpy(), expected_lo, rtol=1e-10)
+    np.testing.assert_allclose(ordf["ci_upper"].to_numpy(), expected_hi, rtol=1e-10)
+
+
+def test_odds_ratios_wrong_model(binary_data):
+    """odds_ratios on probit raises error."""
+    r = probit("y ~ x1 + x2", data=binary_data)
+    with pytest.raises(ValueError, match="Logit"):
+        odds_ratios(r)

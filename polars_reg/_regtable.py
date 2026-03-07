@@ -8,6 +8,24 @@ from polars_reg._groupby import GroupRegressionResult
 from polars_reg._results import RegressionResult
 
 
+class RegTable(str):
+    """String subclass with Jupyter-friendly _repr_html_.
+
+    Behaves exactly like a str (print, concatenation, etc.)
+    but auto-renders as HTML in Jupyter notebooks.
+    """
+
+    _html: str | None
+
+    def __new__(cls, text: str, html: str | None = None):
+        obj = super().__new__(cls, text)
+        obj._html = html
+        return obj
+
+    def _repr_html_(self) -> str | None:
+        return self._html
+
+
 @dataclass
 class _TableData:
     """Intermediate structured data for rendering a regression table."""
@@ -398,11 +416,14 @@ def regtable(
     td = _build_table_data(results, labels, precision, stars)
 
     if format == "latex":
-        return _render_latex(td)
+        return RegTable(_render_latex(td))
     elif format == "html":
-        return _render_html(td)
+        html = _render_html(td)
+        return RegTable(html, html=html)
     else:
-        return _render_text(td, precision)
+        text = _render_text(td, precision)
+        html = _render_html(td)
+        return RegTable(text, html=html)
 
 
 # ── Helpers ───────────────────────────────────────────────────────
