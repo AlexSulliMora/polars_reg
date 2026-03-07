@@ -18,6 +18,8 @@ try:
 except ImportError:
     pass
 
+from polars_reg.stata import compare_stata, to_stata
+
 __all__ = [
     "ols",
     "iv2sls",
@@ -27,4 +29,6 @@ __all__ = [
     "panel_re",
     "panel_fd",
     "RegressionResult",
+    "to_stata",
+    "compare_stata",
 ]
