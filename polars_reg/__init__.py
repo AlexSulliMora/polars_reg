@@ -18,6 +18,7 @@ try:
 except ImportError:
     pass
 
+from polars_reg._binary import logit, marginal_effects, probit
 from polars_reg._diagnostics import (
     hausman_test,
     kleibergen_paap_from_result,
@@ -49,4 +50,7 @@ __all__ = [
     "weak_instrument_test",
     "kleibergen_paap_test",
     "kleibergen_paap_from_result",
+    "probit",
+    "logit",
+    "marginal_effects",
 ]
