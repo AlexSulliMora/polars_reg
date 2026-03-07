@@ -19,7 +19,12 @@ from polars_reg._se import (
 from polars_reg._utils import ensure_polars, extract_arrays
 
 try:
-    from polars_reg._native import rust_ols_core as _rust_ols_core
+    from polars_reg._native import (
+        rust_ols_core as _rust_ols_core,
+    )
+    from polars_reg._native import (
+        rust_ols_from_arrays as _rust_ols_from_arrays,
+    )
 
     _HAS_NATIVE = True
 except ImportError:
@@ -63,6 +68,122 @@ def _non_nested_fe_dof(
             n_groups = int(fe_codes.max()) + 1
             non_nested_dof += n_groups - 1  # subtract 1 for identification
     return non_nested_dof
+
+
+def _to_codes_fast(series: pl.Series) -> np.ndarray:
+    """Convert Polars Series to int32 codes via Rust recode. Minimal overhead path."""
+    from polars_reg._native import rust_recode
+
+    arr = series.to_numpy()
+    if arr.dtype != np.int64:
+        arr = arr.astype(np.int64)
+    codes, _ = rust_recode(arr)
+    return np.asarray(codes)
+
+
+def _ols_direct_rust(
+    data: pl.DataFrame | pl.LazyFrame,
+    spec,
+    cluster: list[str] | None,
+    vcov: str,
+) -> RegressionResult:
+    """Ultra-fast path: extract columns and run OLS entirely in Rust.
+
+    Skips extract_arrays, column_stack, and astype overhead.
+    """
+    if isinstance(data, pl.LazyFrame):
+        all_cols = [spec.depvar] + list(spec.exog) + list(spec.fe)
+        if cluster:
+            all_cols += [c for c in cluster if c not in all_cols]
+        all_cols = list(dict.fromkeys(all_cols))
+        data = data.select(all_cols).collect()
+
+    # Drop nulls on numeric columns only
+    numeric_cols = [spec.depvar] + list(spec.exog)
+    df = data.drop_nulls(subset=numeric_cols)
+
+    # Extract y as f64
+    y_col = df[spec.depvar].cast(pl.Float64).to_numpy()
+
+    # Extract X columns as f64 arrays (no column_stack!)
+    x_arrays = [df[c].cast(pl.Float64).to_numpy() for c in spec.exog]
+    x_names = list(spec.exog)
+
+    # Extract FE as int32 codes
+    fe_arrays = [_to_codes_fast(df[c]).astype(np.int32) for c in spec.fe]
+    fe_names = list(spec.fe)
+
+    # Extract cluster as int32 codes
+    cl_arrays = []
+    cl_names = []
+    if cluster:
+        for c in cluster:
+            # Reuse FE codes if same column
+            if c in spec.fe:
+                idx = spec.fe.index(c)
+                cl_arrays.append(fe_arrays[idx])
+            else:
+                cl_arrays.append(_to_codes_fast(df[c]).astype(np.int32))
+            cl_names.append(c)
+
+    (
+        beta,
+        V,
+        resid,
+        r2,
+        r2_adj,
+        n,
+        df_abs,
+        n_dropped,
+        cl_n_groups,
+        _x_names,
+        _fe_names,
+        _cl_names,
+    ) = _rust_ols_from_arrays(
+        np.ascontiguousarray(y_col, dtype=np.float64),
+        [np.ascontiguousarray(a, dtype=np.float64) for a in x_arrays],
+        x_names,
+        [np.ascontiguousarray(a, dtype=np.int32) for a in fe_arrays],
+        fe_names,
+        [np.ascontiguousarray(a, dtype=np.int32) for a in cl_arrays],
+        cl_names,
+        1e-8,
+        100_000,
+    )
+
+    beta = np.asarray(beta)
+    V = np.asarray(V)
+    resid = np.asarray(resid)
+    k = len(beta)
+
+    if cluster:
+        n_clusters = {c: g for c, g in zip(cluster, cl_n_groups)}
+        df_r = min(n_clusters.values()) - 1
+        vcov_type = "cluster"
+    else:
+        n_clusters = None
+        sigma2 = (resid @ resid) / (n - k - df_abs)
+        XtX_inv = V / ((resid @ resid) / (n - k)) if (n - k) > 0 else V
+        V = sigma2 * XtX_inv
+        df_r = n - k - df_abs
+        vcov_type = "iid"
+
+    return RegressionResult(
+        coefficients=beta,
+        vcov=V,
+        residuals=resid,
+        names=x_names,
+        n_obs=n,
+        k=k,
+        df_r=df_r,
+        r_squared=r2,
+        r_squared_adj=r2_adj,
+        model_type="OLS",
+        vcov_type=vcov_type,
+        n_clusters=n_clusters,
+        fe_absorbed=fe_names,
+        df_absorbed=df_abs,
+    )
 
 
 def _ols_rust_path(
@@ -171,6 +292,24 @@ def ols(
     data = ensure_polars(data)
 
     spec = parse_formula(formula)
+
+    # --- Ultra-fast Rust path: skip extract_arrays entirely ---
+    # Eligible when: FE present, no weights, no interactions/indicators,
+    # simple vcov (iid or cluster), no endog/IV, and native available
+    use_direct = (
+        _HAS_NATIVE
+        and spec.fe
+        and not weights
+        and not fweights
+        and not spec.endog
+        and not spec.indicators
+        and not any(":" in c for c in spec.exog)
+        and vcov not in ("bootstrap", "wildboot", "NW", "DK", "HC2", "HC3")
+        and (cluster or vcov == "iid")
+    )
+    if use_direct:
+        return _ols_direct_rust(data, spec, cluster, vcov)
+
     weight_col = weights or fweights
     arrays = extract_arrays(data, spec, cluster=cluster, time=time, weights=weight_col)
 
@@ -179,7 +318,7 @@ def ols(
     fe_dict = arrays.fe_arrays
     has_fe = len(fe_dict) > 0
 
-    # --- Rust fast path: FE + optional clustering, no weights/bootstrap/HAC ---
+    # --- Rust fast path via extract_arrays (for weighted/complex cases with FE) ---
     use_rust = (
         _HAS_NATIVE
         and has_fe
