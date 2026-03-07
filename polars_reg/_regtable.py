@@ -42,12 +42,12 @@ def regtable(
                 all_vars.append(name)
 
     # Collect all FE and cluster names for name column width
-    all_row_labels = list(all_vars) + ["N", "R²", "Adj. R²"]
+    all_row_labels = list(all_vars) + ["N", "R²", "Adj. R²", "Fixed Effects", "Clustering"]
     for r in results:
         if r.fe_absorbed:
-            all_row_labels.extend(f"{fe} FE" for fe in r.fe_absorbed)
+            all_row_labels.extend(f"  {fe}" for fe in r.fe_absorbed)
         if r.n_clusters:
-            all_row_labels.extend(f"Cluster: {cl}" for cl in r.n_clusters)
+            all_row_labels.extend(f"  {cl}" for cl in r.n_clusters)
     name_w = max(14, max(len(lb) for lb in all_row_labels) + 2)
 
     # Build coefficient/SE cells per model per variable
@@ -97,34 +97,39 @@ def regtable(
         lines.append(coef_line)
         lines.append(se_line)
 
-    # FE indicator rows (one per FE variable)
-    lines.append("-" * total_w)
+    # Collect all FE and cluster variable names
     all_fe: list[str] = []
     for r in results:
         if r.fe_absorbed:
             for fe in r.fe_absorbed:
                 if fe not in all_fe:
                     all_fe.append(fe)
-    for fe in all_fe:
-        row = f"{fe + ' FE':<{name_w}}"
-        for r in results:
-            yn = "Y" if r.fe_absorbed and fe in r.fe_absorbed else "N"
-            row += f" {yn:>{col_w}}"
-        lines.append(row)
-
-    # Cluster indicator rows (one per cluster variable)
     all_cl: list[str] = []
     for r in results:
         if r.n_clusters:
             for cl in r.n_clusters:
                 if cl not in all_cl:
                     all_cl.append(cl)
-    for cl in all_cl:
-        row = f"{'Cluster: ' + cl:<{name_w}}"
-        for r in results:
-            yn = "Y" if r.n_clusters and cl in r.n_clusters else "N"
-            row += f" {yn:>{col_w}}"
-        lines.append(row)
+
+    # FE and cluster indicator rows (group headers + indented names)
+    if all_fe or all_cl:
+        lines.append("-" * total_w)
+    if all_fe:
+        lines.append(f"{'Fixed Effects':<{name_w}}")
+        for fe in all_fe:
+            row = f"{'  ' + fe:<{name_w}}"
+            for r in results:
+                yn = "Y" if r.fe_absorbed and fe in r.fe_absorbed else "N"
+                row += f" {yn:>{col_w}}"
+            lines.append(row)
+    if all_cl:
+        lines.append(f"{'Clustering':<{name_w}}")
+        for cl in all_cl:
+            row = f"{'  ' + cl:<{name_w}}"
+            for r in results:
+                yn = "Y" if r.n_clusters and cl in r.n_clusters else "N"
+                row += f" {yn:>{col_w}}"
+            lines.append(row)
 
     # Footer: N, R²
     lines.append("-" * total_w)

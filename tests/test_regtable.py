@@ -81,17 +81,15 @@ def test_regtable_missing_vars(simple_data):
 
 
 def test_regtable_fe_indicator_rows(panel_data):
-    """Each FE gets its own Y/N indicator row."""
+    """Each FE gets its own Y/N indicator row under a 'Fixed Effects' header."""
     r1 = ols("y ~ x1 + x2", data=panel_data)
     r2 = ols("y ~ x1 + x2 | firm_id", data=panel_data)
     r3 = ols("y ~ x1 + x2 | firm_id + year_id", data=panel_data)
     table = regtable(r1, r2, r3)
-    assert "firm_id FE" in table
-    assert "year_id FE" in table
-    # r1 has no FE, r2 has firm_id only, r3 has both
+    assert "Fixed Effects" in table
     lines = table.split("\n")
-    firm_line = [ln for ln in lines if ln.startswith("firm_id FE")][0]
-    year_line = [ln for ln in lines if ln.startswith("year_id FE")][0]
+    firm_line = [ln for ln in lines if "firm_id" in ln and ln.strip().startswith("firm_id")][0]
+    year_line = [ln for ln in lines if "year_id" in ln and ln.strip().startswith("year_id")][0]
     # r1=N, r2=Y, r3=Y for firm_id
     assert firm_line.count("Y") == 2
     assert firm_line.count("N") == 1
@@ -101,13 +99,13 @@ def test_regtable_fe_indicator_rows(panel_data):
 
 
 def test_regtable_cluster_indicator_rows(panel_data):
-    """Each cluster variable gets its own Y/N indicator row."""
+    """Each cluster variable gets its own Y/N indicator row under a 'Clustering' header."""
     r1 = ols("y ~ x1 + x2", data=panel_data)
     r2 = ols("y ~ x1 + x2 | firm_id", data=panel_data, cluster=["firm_id"])
     table = regtable(r1, r2)
-    assert "Cluster: firm_id" in table
+    assert "Clustering" in table
     lines = table.split("\n")
-    cl_line = [ln for ln in lines if "Cluster: firm_id" in ln][0]
+    cl_line = [ln for ln in lines if "firm_id" in ln and "Clustering" not in ln][-1]
     assert cl_line.count("Y") == 1
     assert cl_line.count("N") == 1
 
