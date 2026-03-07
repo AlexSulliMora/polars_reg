@@ -18,7 +18,9 @@ try:
 except ImportError:
     pass
 
+from polars_reg._groupby import GroupRegressionResult, groupby_reg
 from polars_reg._regtable import regtable
+from polars_reg.r_equiv import compare_r, to_r
 from polars_reg.stata import compare_stata, to_stata
 
 __all__ = [
@@ -30,7 +32,11 @@ __all__ = [
     "panel_re",
     "panel_fd",
     "RegressionResult",
+    "GroupRegressionResult",
+    "groupby_reg",
     "regtable",
     "to_stata",
     "compare_stata",
+    "to_r",
+    "compare_r",
 ]
