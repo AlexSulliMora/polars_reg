@@ -81,21 +81,36 @@ def test_regtable_missing_vars(simple_data):
     assert "x2" in x2_line
 
 
-def test_regtable_fe_row(panel_data):
-    """FE row appears when models have absorbed FE."""
+def test_regtable_fe_indicator_rows(panel_data):
+    """Each FE gets its own Y/N indicator row."""
     r1 = ols("y ~ x1 + x2", data=panel_data)
     r2 = ols("y ~ x1 + x2 | firm_id", data=panel_data)
-    table = regtable(r1, r2)
-    assert "FE" in table
-    assert "firm_id" in table
+    r3 = ols("y ~ x1 + x2 | firm_id + year_id", data=panel_data)
+    table = regtable(r1, r2, r3)
+    assert "firm_id FE" in table
+    assert "year_id FE" in table
+    # r1 has no FE, r2 has firm_id only, r3 has both
+    lines = table.split("\n")
+    firm_line = [ln for ln in lines if ln.startswith("firm_id FE")][0]
+    year_line = [ln for ln in lines if ln.startswith("year_id FE")][0]
+    # r1=N, r2=Y, r3=Y for firm_id
+    assert firm_line.count("Y") == 2
+    assert firm_line.count("N") == 1
+    # r1=N, r2=N, r3=Y for year_id
+    assert year_line.count("Y") == 1
+    assert year_line.count("N") == 2
 
 
-def test_regtable_cluster_row(panel_data):
-    """Cluster row appears when models have clusters."""
+def test_regtable_cluster_indicator_rows(panel_data):
+    """Each cluster variable gets its own Y/N indicator row."""
     r1 = ols("y ~ x1 + x2", data=panel_data)
     r2 = ols("y ~ x1 + x2 | firm_id", data=panel_data, cluster=["firm_id"])
     table = regtable(r1, r2)
-    assert "Clusters" in table
+    assert "Cluster: firm_id" in table
+    lines = table.split("\n")
+    cl_line = [ln for ln in lines if "Cluster: firm_id" in ln][0]
+    assert cl_line.count("Y") == 1
+    assert cl_line.count("N") == 1
 
 
 def test_regtable_adj_r2(simple_data):

@@ -33,7 +33,6 @@ def regtable(
         raise ValueError(f"Expected {n_models} labels, got {len(labels)}.")
 
     col_w = max(14, max(len(lb) for lb in labels) + 4)
-    name_w = 14
 
     # Collect all variable names in order of first appearance
     all_vars: list[str] = []
@@ -41,6 +40,15 @@ def regtable(
         for name in r.names:
             if name not in all_vars:
                 all_vars.append(name)
+
+    # Collect all FE and cluster names for name column width
+    all_row_labels = list(all_vars) + ["N", "R²", "Adj. R²"]
+    for r in results:
+        if r.fe_absorbed:
+            all_row_labels.extend(f"{fe} FE" for fe in r.fe_absorbed)
+        if r.n_clusters:
+            all_row_labels.extend(f"Cluster: {cl}" for cl in r.n_clusters)
+    name_w = max(14, max(len(lb) for lb in all_row_labels) + 2)
 
     # Build coefficient/SE cells per model per variable
     cells: dict[str, list[str]] = {}  # var -> list of "coef\n(se)" per model
@@ -89,7 +97,36 @@ def regtable(
         lines.append(coef_line)
         lines.append(se_line)
 
-    # Footer: N, R², FE, clusters
+    # FE indicator rows (one per FE variable)
+    lines.append("-" * total_w)
+    all_fe: list[str] = []
+    for r in results:
+        if r.fe_absorbed:
+            for fe in r.fe_absorbed:
+                if fe not in all_fe:
+                    all_fe.append(fe)
+    for fe in all_fe:
+        row = f"{fe + ' FE':<{name_w}}"
+        for r in results:
+            yn = "Y" if r.fe_absorbed and fe in r.fe_absorbed else "N"
+            row += f" {yn:>{col_w}}"
+        lines.append(row)
+
+    # Cluster indicator rows (one per cluster variable)
+    all_cl: list[str] = []
+    for r in results:
+        if r.n_clusters:
+            for cl in r.n_clusters:
+                if cl not in all_cl:
+                    all_cl.append(cl)
+    for cl in all_cl:
+        row = f"{'Cluster: ' + cl:<{name_w}}"
+        for r in results:
+            yn = "Y" if r.n_clusters and cl in r.n_clusters else "N"
+            row += f" {yn:>{col_w}}"
+        lines.append(row)
+
+    # Footer: N, R²
     lines.append("-" * total_w)
 
     # N
@@ -109,42 +146,6 @@ def regtable(
     for r in results:
         r2a_row += f" {r.r_squared_adj:>{col_w}.4f}"
     lines.append(r2a_row)
-
-    # FE
-    has_any_fe = any(r.fe_absorbed for r in results)
-    if has_any_fe:
-        fe_row = f"{'FE':<{name_w}}"
-        for r in results:
-            if r.fe_absorbed:
-                fe_str = ", ".join(r.fe_absorbed)
-                if len(fe_str) > col_w:
-                    fe_str = "Yes"
-            else:
-                fe_str = "No"
-            fe_row += f" {fe_str:>{col_w}}"
-        lines.append(fe_row)
-
-        # If any were truncated to "Yes", show details on separate line
-        has_detail = any(
-            r.fe_absorbed and len(", ".join(r.fe_absorbed)) > col_w for r in results
-        )
-        if has_detail:
-            for r in results:
-                if r.fe_absorbed and len(", ".join(r.fe_absorbed)) > col_w:
-                    lines.append(f"{'':>{name_w}}   ({', '.join(r.fe_absorbed)})")
-                    break  # only need to list once if all same
-
-    # Clusters
-    has_any_cl = any(r.n_clusters for r in results)
-    if has_any_cl:
-        cl_row = f"{'Clusters':<{name_w}}"
-        for r in results:
-            if r.n_clusters:
-                cl_str = ", ".join(r.n_clusters.keys())
-            else:
-                cl_str = "No"
-            cl_row += f" {cl_str:>{col_w}}"
-        lines.append(cl_row)
 
     lines.append(sep)
 
