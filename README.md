@@ -1,6 +1,6 @@
 # polars_reg
 
-Econometric regression methods using [Polars](https://pola.rs/) DataFrames.
+Econometric regression methods using [Polars](https://pola.rs/) DataFrames. Also accepts pandas DataFrames.
 
 ## Features
 
@@ -9,7 +9,11 @@ Econometric regression methods using [Polars](https://pola.rs/) DataFrames.
 - **2SLS / IV** with first-stage F-statistics
 - **LIML** (limited information maximum likelihood)
 - **GMM-IV** with Hansen J overidentification test
-- **Panel FE** (within estimator)
+- **Panel estimators**: fixed effects (within), random effects (Swamy-Arora GLS), first-difference
+- **GroupBy regression**: run the same regression per group (e.g., per stock, per industry)
+- **regtable**: side-by-side regression comparison tables (estout/esttab-style)
+- **Diagnostics**: Wald test, Hausman test (FE vs RE)
+- **Stata/R equivalence**: generate equivalent Stata or R code for any specification
 
 All estimators are validated against Stata output to 5+ decimal places.
 
@@ -37,23 +41,37 @@ result = pr.ols("y ~ x1 + x2 | firm_id + year_id", data=df, cluster=["firm_id"])
 # IV / 2SLS
 result = pr.iv2sls("y ~ x_exog || x_endog ~ z1 + z2", data=df)
 
+# Panel fixed effects
+result = pr.panel_fe("y ~ x1 + x2", data=df, entity="firm_id", time="year_id")
+
+# GroupBy: run regression per industry
+grp = pr.groupby_reg(pr.ols, "y ~ x1 + x2", df, group_by="industry")
+grp.coef_table()  # stacked Polars DataFrame
+
+# Side-by-side comparison table
+pr.regtable(m1, m2, m3, labels=["OLS", "Robust", "FE"])
+
 # Access results
 result.coefficients  # coefficient vector
 result.se            # standard errors
 result.tstat         # t-statistics
 result.pvalue        # p-values
 result.confint()     # confidence intervals
-result.r_squared     # R-squared
+result.coef_table()  # Polars DataFrame
+result.wald_test(R)  # Wald test for linear restrictions
 ```
 
 ## Formula Syntax
 
-| Formula | Stata equivalent |
-|---------|-----------------|
-| `y ~ x1 + x2` | `reg y x1 x2` |
-| `y ~ x1 + x2 - 1` | `reg y x1 x2, noconstant` |
-| `y ~ x1 \| fe1 + fe2` | `reghdfe y x1, absorb(fe1 fe2)` |
-| `y ~ x_exog \|\| x_endog ~ z1 + z2` | `ivregress 2sls y x_exog (x_endog = z1 z2)` |
+| Formula | Meaning | Stata | R |
+|---------|---------|-------|---|
+| `y ~ x1 + x2` | OLS | `reg y x1 x2` | `lm(y ~ x1 + x2)` |
+| `y ~ x1 + x2 - 1` | No intercept | `reg y x1 x2, noconstant` | `lm(y ~ x1 + x2 - 1)` |
+| `y ~ x1 \| fe1 + fe2` | Absorbed FE | `reghdfe y x1, absorb(fe1 fe2)` | `feols(y ~ x1 \| fe1 + fe2)` |
+| `y ~ x1 \|\| x_end ~ z1 + z2` | IV/2SLS | `ivregress 2sls y x1 (x_end = z1 z2)` | `feols(y ~ x1 \| 0 \| x_end ~ z1 + z2)` |
+| `y ~ x1 \| fe1 \| x_end ~ z1` | IV + FE | `ivreghdfe y x1 (x_end = z1), absorb(fe1)` | `feols(y ~ x1 \| fe1 \| x_end ~ z1)` |
+| `y ~ x1*x2` | Full factorial | `reg y c.x1##c.x2` | `lm(y ~ x1 * x2)` |
+| `y ~ x1:x2` | Interaction only | `reg y c.x1#c.x2` | `lm(y ~ x1:x2)` |
 
 ## Estimators
 
@@ -64,6 +82,11 @@ result.r_squared     # R-squared
 | `liml()` | Limited information maximum likelihood |
 | `gmm_iv()` | Two-step efficient GMM |
 | `panel_fe()` | Panel fixed effects (within) |
+| `panel_re()` | Panel random effects (Swamy-Arora GLS) |
+| `panel_fd()` | Panel first-difference |
+| `groupby_reg()` | Run any estimator per group |
+| `regtable()` | Side-by-side regression table |
+| `hausman_test()` | Hausman specification test (FE vs RE) |
 
 ## Standard Error Options
 
@@ -73,9 +96,29 @@ result.r_squared     # R-squared
 - `cluster=["firm_id"]` — one-way clustered
 - `cluster=["firm_id", "year_id"]` — two-way clustered (Cameron-Gelbach-Miller)
 
+## Stata / R Equivalence
+
+Generate equivalent code to verify results in Stata or R:
+
+```python
+# Stata code
+print(pr.to_stata("ols", "y ~ x1 + x2 | firm_id", cluster=["firm_id"]))
+# → reghdfe y x1 x2, absorb(firm_id) vce(cluster firm_id)
+
+# R code
+print(pr.to_r("ols", "y ~ x1 + x2 | firm_id", cluster=["firm_id"]))
+# → library(fixest)
+#   model <- feols(y ~ x1 + x2 | firm_id, data=df, vcov=~firm_id)
+```
+
+## Showcase Notebook
+
+See [`notebooks/showcase.ipynb`](notebooks/showcase.ipynb) for a full tour of all features.
+
 ## Requirements
 
 - Python >= 3.11
 - Polars >= 1.0
 - NumPy >= 1.24
 - SciPy >= 1.10
+- pandas (optional — for pandas DataFrame input)
