@@ -1,6 +1,7 @@
 use numpy::ndarray::{Array1, Array2};
 use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::prelude::*;
+use rayon::prelude::*;
 
 /// Compute group counts (equivalent to np.bincount).
 fn group_counts(codes: &[i32], n_groups: usize) -> Vec<f64> {
@@ -11,46 +12,161 @@ fn group_counts(codes: &[i32], n_groups: usize) -> Vec<f64> {
     counts
 }
 
-/// Subtract group means from each column of x, in-place.
-/// x is n x k, codes is n, denom is G.
-fn subtract_group_means(x: &mut Array2<f64>, codes: &[i32], denom: &[f64]) {
-    let n = x.nrows();
-    let k = x.ncols();
-    let n_groups = denom.len();
+/// Subtract group means from a contiguous column slice, in-place.
+#[inline]
+fn demean_col(col: &mut [f64], codes: &[i32], denom: &[f64], n_groups: usize) {
+    let mut sums = vec![0.0_f64; n_groups];
+    for (i, &c) in codes.iter().enumerate() {
+        sums[c as usize] += col[i];
+    }
+    for (i, &c) in codes.iter().enumerate() {
+        let g = c as usize;
+        col[i] -= sums[g] / denom[g];
+    }
+}
 
-    for j in 0..k {
-        // Sum by group
-        let mut sums = vec![0.0_f64; n_groups];
-        for i in 0..n {
-            sums[codes[i] as usize] += x[[i, j]];
+/// Column-major matrix: data stored as Vec<f64> with n rows and k columns.
+/// Column j spans data[j*n .. (j+1)*n], so each column is a contiguous slice.
+struct ColMajorMatrix {
+    data: Vec<f64>,
+    n: usize,
+    k: usize,
+}
+
+impl ColMajorMatrix {
+    fn from_row_major(x: &Array2<f64>) -> Self {
+        let n = x.nrows();
+        let k = x.ncols();
+        let mut data = vec![0.0_f64; n * k];
+        for j in 0..k {
+            for i in 0..n {
+                data[j * n + i] = x[[i, j]];
+            }
         }
-        // Compute means and subtract
-        for i in 0..n {
-            let g = codes[i] as usize;
-            x[[i, j]] -= sums[g] / denom[g];
+        ColMajorMatrix { data, n, k }
+    }
+
+    fn to_row_major(&self) -> Array2<f64> {
+        let mut x = Array2::<f64>::zeros((self.n, self.k));
+        for j in 0..self.k {
+            for i in 0..self.n {
+                x[[i, j]] = self.data[j * self.n + i];
+            }
         }
+        x
+    }
+
+    fn col_mut(&mut self, j: usize) -> &mut [f64] {
+        &mut self.data[j * self.n..(j + 1) * self.n]
+    }
+
+    /// Get mutable slices to all columns simultaneously (safe because they don't overlap).
+    fn cols_mut(&mut self) -> Vec<&mut [f64]> {
+        let n = self.n;
+        let k = self.k;
+        let ptr = self.data.as_mut_ptr();
+        // SAFETY: each column slice is non-overlapping (j*n..(j+1)*n)
+        (0..k)
+            .map(|j| unsafe { std::slice::from_raw_parts_mut(ptr.add(j * n), n) })
+            .collect()
+    }
+
+    /// Sum of squares of all elements.
+    fn sum_sq(&self) -> f64 {
+        self.data.iter().map(|v| v * v).sum()
+    }
+
+    /// Dot product with another ColMajorMatrix.
+    fn dot(&self, other: &ColMajorMatrix) -> f64 {
+        self.data
+            .iter()
+            .zip(other.data.iter())
+            .map(|(a, b)| a * b)
+            .sum()
+    }
+
+    /// self += alpha * other
+    fn scaled_add(&mut self, alpha: f64, other: &ColMajorMatrix) {
+        for (a, b) in self.data.iter_mut().zip(other.data.iter()) {
+            *a += alpha * b;
+        }
+    }
+
+    /// self = other + beta * self
+    fn update_from(&mut self, other: &ColMajorMatrix, beta: f64) {
+        for (a, b) in self.data.iter_mut().zip(other.data.iter()) {
+            *a = *b + beta * *a;
+        }
+    }
+
+    fn assign_from(&mut self, other: &ColMajorMatrix) {
+        self.data.copy_from_slice(&other.data);
+    }
+
+    fn clone_cm(&self) -> ColMajorMatrix {
+        ColMajorMatrix {
+            data: self.data.clone(),
+            n: self.n,
+            k: self.k,
+        }
+    }
+
+    fn sub(&self, other: &ColMajorMatrix) -> ColMajorMatrix {
+        let data: Vec<f64> = self
+            .data
+            .iter()
+            .zip(other.data.iter())
+            .map(|(a, b)| a - b)
+            .collect();
+        ColMajorMatrix {
+            data,
+            n: self.n,
+            k: self.k,
+        }
+    }
+}
+
+/// Subtract group means for all columns, parallelized across columns.
+fn subtract_group_means_par(cm: &mut ColMajorMatrix, codes: &[i32], denom: &[f64]) {
+    let n_groups = denom.len();
+    let cols = cm.cols_mut();
+    cols.into_par_iter().for_each(|col| {
+        demean_col(col, codes, denom, n_groups);
+    });
+}
+
+/// Subtract group means for all columns, sequential.
+fn subtract_group_means_seq(cm: &mut ColMajorMatrix, codes: &[i32], denom: &[f64]) {
+    let n_groups = denom.len();
+    for j in 0..cm.k {
+        demean_col(cm.col_mut(j), codes, denom, n_groups);
     }
 }
 
 /// One symmetric Kaczmarz sweep: forward then backward through FE dimensions.
 fn symmetric_kaczmarz(
-    x: &mut Array2<f64>,
+    cm: &mut ColMajorMatrix,
     fe_list: &[Vec<i32>],
     denoms: &[Vec<f64>],
+    par: bool,
 ) {
     let d = fe_list.len();
+    let demean_fn = if par {
+        subtract_group_means_par
+    } else {
+        subtract_group_means_seq
+    };
     // Forward
     for dim in 0..d {
-        subtract_group_means(x, &fe_list[dim], &denoms[dim]);
+        demean_fn(cm, &fe_list[dim], &denoms[dim]);
     }
     // Backward (skip last)
     for dim in (0..d - 1).rev() {
-        subtract_group_means(x, &fe_list[dim], &denoms[dim]);
+        demean_fn(cm, &fe_list[dim], &denoms[dim]);
     }
 }
 
 /// CG-accelerated demeaning with symmetric Kaczmarz.
-/// Returns demeaned array.
 fn demean_cg(
     x_in: &Array2<f64>,
     fe_list: &[Vec<i32>],
@@ -58,6 +174,11 @@ fn demean_cg(
     tol: f64,
     max_iter: usize,
 ) -> Array2<f64> {
+    let n = x_in.nrows();
+    let k = x_in.ncols();
+    // Parallelize when N is large enough AND k > 1
+    let par = n >= 50_000 && k > 1;
+
     // Precompute group counts
     let denoms: Vec<Vec<f64>> = fe_list
         .iter()
@@ -65,27 +186,28 @@ fn demean_cg(
         .map(|(codes, &ng)| group_counts(codes, ng))
         .collect();
 
-    let mut x = x_in.clone();
-    let mut tmp = x.clone();
+    // Convert to column-major for contiguous column access
+    let mut x = ColMajorMatrix::from_row_major(x_in);
+    let mut tmp = x.clone_cm();
 
     // Initial residual: r = T(x) - x
-    symmetric_kaczmarz(&mut tmp, fe_list, &denoms);
-    let mut r = &tmp - &x;
-    let mut u = r.clone();
-    let mut ssr: f64 = r.iter().map(|v| v * v).sum();
+    symmetric_kaczmarz(&mut tmp, fe_list, &denoms, par);
+    let mut r = tmp.sub(&x);
+    let mut u = r.clone_cm();
+    let mut ssr: f64 = r.sum_sq();
 
     for _ in 0..max_iter {
-        let x_norm: f64 = x.iter().map(|v| v * v).sum();
+        let x_norm: f64 = x.sum_sq();
         if ssr < tol * tol * x_norm.max(1e-16) {
             break;
         }
 
         // v = u - T(u)
-        tmp.assign(&u);
-        symmetric_kaczmarz(&mut tmp, fe_list, &denoms);
-        let v = &u - &tmp;
+        tmp.assign_from(&u);
+        symmetric_kaczmarz(&mut tmp, fe_list, &denoms, par);
+        let v = u.sub(&tmp);
 
-        let uv: f64 = u.iter().zip(v.iter()).map(|(a, b)| a * b).sum();
+        let uv: f64 = u.dot(&v);
         if uv.abs() < 1e-30 {
             break;
         }
@@ -94,24 +216,34 @@ fn demean_cg(
         x.scaled_add(alpha, &u);
         r.scaled_add(-alpha, &v);
 
-        let ssr_new: f64 = r.iter().map(|v| v * v).sum();
+        let ssr_new: f64 = r.sum_sq();
         let beta = ssr_new / ssr;
 
-        // u = r + beta * u
-        u.mapv_inplace(|ui| ui * beta);
-        u += &r;
+        u.update_from(&r, beta);
         ssr = ssr_new;
     }
 
-    x
+    x.to_row_major()
+}
+
+/// Subtract group means from each column of an Array2, in-place (single FE path).
+fn subtract_group_means_array(x: &mut Array2<f64>, codes: &[i32], denom: &[f64]) {
+    let n = x.nrows();
+    let k = x.ncols();
+    let n_groups = denom.len();
+    for j in 0..k {
+        let mut sums = vec![0.0_f64; n_groups];
+        for i in 0..n {
+            sums[codes[i] as usize] += x[[i, j]];
+        }
+        for i in 0..n {
+            let g = codes[i] as usize;
+            x[[i, j]] -= sums[g] / denom[g];
+        }
+    }
 }
 
 /// Full demean function callable from Python.
-/// X: n x k array
-/// fe_codes_list: list of 1D int32 arrays (FE group codes)
-/// n_groups_list: list of group counts per FE dimension
-/// tol: convergence tolerance
-/// max_iter: max iterations
 #[pyfunction]
 fn rust_demean<'py>(
     py: Python<'py>,
@@ -131,10 +263,10 @@ fn rust_demean<'py>(
     let n_fe = fe_list.len();
 
     if n_fe == 1 {
-        // Single FE: exact in one pass
+        // Single FE: exact in one pass, no need for CG or col-major
         let mut result = x_arr;
         let denom = group_counts(&fe_list[0], n_groups_list[0]);
-        subtract_group_means(&mut result, &fe_list[0], &denom);
+        subtract_group_means_array(&mut result, &fe_list[0], &denom);
         result.into_pyarray(py)
     } else {
         let result = demean_cg(&x_arr, &fe_list, &n_groups_list, tol, max_iter);
