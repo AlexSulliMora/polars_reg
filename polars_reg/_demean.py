@@ -7,29 +7,64 @@ import scipy.sparse
 import scipy.sparse.csgraph
 from numpy.typing import NDArray
 
+try:
+    from polars_reg._native import rust_demean as _rust_demean
+
+    _HAS_NATIVE = True
+except ImportError:
+    _HAS_NATIVE = False
+
+
+def _group_counts(codes: NDArray, n_groups: int, w: NDArray | None = None) -> NDArray:
+    """Precompute group counts/weight sums (cached outside the hot loop)."""
+    if w is None:
+        return np.bincount(codes, minlength=n_groups).astype(np.float64)
+    return np.bincount(codes, weights=w, minlength=n_groups)
+
+
+def _subtract_group_means(
+    x: NDArray, codes: NDArray, n_groups: int, denom: NDArray, w: NDArray | None = None
+) -> NDArray:
+    """Subtract group means from x in-place. x can be 1D or 2D.
+
+    Uses pre-computed denominators to avoid recomputing group counts each call.
+    """
+    if x.ndim == 1:
+        if w is None:
+            sums = np.bincount(codes, weights=x, minlength=n_groups)
+        else:
+            sums = np.bincount(codes, weights=w * x, minlength=n_groups)
+        x -= (sums / denom)[codes]
+        return x
+    k = x.shape[1]
+    for j in range(k):
+        col = x[:, j]
+        if w is None:
+            sums = np.bincount(codes, weights=col, minlength=n_groups)
+        else:
+            sums = np.bincount(codes, weights=w * col, minlength=n_groups)
+        col -= (sums / denom)[codes]
+    return x
+
 
 def _group_means(x: NDArray, codes: NDArray, n_groups: int, w: NDArray | None = None) -> NDArray:
     """Compute (optionally weighted) group means. x can be 1D or 2D."""
-    if w is None:
-        denom = np.bincount(codes, minlength=n_groups).astype(np.float64)
-    else:
-        denom = np.bincount(codes, weights=w, minlength=n_groups)
+    denom = _group_counts(codes, n_groups, w)
     if x.ndim == 1:
         if w is None:
             sums = np.bincount(codes, weights=x, minlength=n_groups)
         else:
             sums = np.bincount(codes, weights=w * x, minlength=n_groups)
         return sums / denom
-    else:
-        k = x.shape[1]
-        means = np.empty((n_groups, k))
-        for j in range(k):
-            if w is None:
-                sums = np.bincount(codes, weights=x[:, j], minlength=n_groups)
-            else:
-                sums = np.bincount(codes, weights=w * x[:, j], minlength=n_groups)
-            means[:, j] = sums / denom
-        return means
+    k = x.shape[1]
+    means = np.empty((n_groups, k))
+    for j in range(k):
+        if w is None:
+            sums = np.bincount(codes, weights=x[:, j], minlength=n_groups)
+        else:
+            sums = np.bincount(codes, weights=w * x[:, j], minlength=n_groups)
+        means[:, j] = sums / denom
+    return means
 
 
 def demean(
@@ -57,11 +92,25 @@ def demean(
     fe_list = list(fe_dict.values())
     n_groups_list = [int(codes.max()) + 1 for codes in fe_list]
 
+    # Use Rust native path for unweighted demeaning
+    if _HAS_NATIVE and weights is None:
+        fe_codes_list = [np.ascontiguousarray(c, dtype=np.int32) for c in fe_list]
+        result = np.asarray(
+            _rust_demean(
+                np.ascontiguousarray(X),
+                fe_codes_list,
+                n_groups_list,
+                tol,
+                max_iter,
+            )
+        )
+        return result.squeeze(axis=1) if squeeze else result
+
     if len(fe_list) == 1:
         codes = fe_list[0]
         n_g = n_groups_list[0]
-        means = _group_means(X, codes, n_g, w=weights)
-        X -= means[codes]
+        denom = _group_counts(codes, n_g, w=weights)
+        _subtract_group_means(X, codes, n_g, denom, w=weights)
         return X.squeeze(axis=1) if squeeze else X
 
     result = _demean_cg(X, fe_list, n_groups_list, tol, max_iter, weights=weights)
@@ -72,17 +121,21 @@ def _symmetric_kaczmarz(
     X: NDArray,
     fe_list: list[NDArray],
     n_groups_list: list[int],
+    denoms: list[NDArray],
     w: NDArray | None = None,
 ) -> NDArray:
-    """One sweep of symmetric Kaczmarz: forward then backward."""
+    """One sweep of symmetric Kaczmarz: forward then backward.
+
+    Uses pre-computed group counts (denoms) to avoid redundant bincount calls.
+    """
     # Forward
-    for codes, n_g in zip(fe_list, n_groups_list):
-        means = _group_means(X, codes, n_g, w=w)
-        X = X - means[codes]
+    for codes, n_g, denom in zip(fe_list, n_groups_list, denoms):
+        _subtract_group_means(X, codes, n_g, denom, w=w)
     # Backward (skip last since forward already did it)
-    for codes, n_g in zip(reversed(fe_list[:-1]), reversed(n_groups_list[:-1])):
-        means = _group_means(X, codes, n_g, w=w)
-        X = X - means[codes]
+    for codes, n_g, denom in zip(
+        reversed(fe_list[:-1]), reversed(n_groups_list[:-1]), reversed(denoms[:-1])
+    ):
+        _subtract_group_means(X, codes, n_g, denom, w=w)
     return X
 
 
@@ -95,28 +148,36 @@ def _demean_cg(
     weights: NDArray | None = None,
 ) -> NDArray:
     """CG-accelerated demeaning with symmetric Kaczmarz transform."""
+    # Precompute group counts once (avoids redundant bincount in every iteration)
+    denoms = [_group_counts(codes, n_g, w=weights) for codes, n_g in zip(fe_list, n_groups_list)]
+
+    # Pre-allocate work arrays to avoid copies in the hot loop
     x = X.copy()
+    tmp = np.empty_like(x)
 
     # Initial residual: r = T(x) - x
-    r = _symmetric_kaczmarz(x.copy(), fe_list, n_groups_list, w=weights) - x
+    np.copyto(tmp, x)
+    _symmetric_kaczmarz(tmp, fe_list, n_groups_list, denoms, w=weights)
+    r = tmp - x
     u = r.copy()
-    ssr = np.sum(r**2)
+    ssr = np.sum(r * r)
 
     for _ in range(max_iter):
-        x_norm = np.sum(x**2)
+        x_norm = np.sum(x * x)
         if ssr < tol**2 * max(x_norm, 1e-16):
             break
 
         # v = u - T(u) = A*u where A = I - T
-        Tu = _symmetric_kaczmarz(u.copy(), fe_list, n_groups_list, w=weights)
-        v = u - Tu
+        np.copyto(tmp, u)
+        _symmetric_kaczmarz(tmp, fe_list, n_groups_list, denoms, w=weights)
+        v = u - tmp
         uv = np.sum(u * v)
         if abs(uv) < 1e-30:
             break
         alpha = ssr / uv
-        x = x + alpha * u
-        r = r - alpha * v
-        ssr_new = np.sum(r**2)
+        x += alpha * u
+        r -= alpha * v
+        ssr_new = np.sum(r * r)
         beta = ssr_new / ssr
         u = r + beta * u
         ssr = ssr_new
@@ -167,10 +228,20 @@ def absorbed_dof(fe_dict: dict[str, NDArray]) -> int:
 
 
 def _connected_components(codes_a: NDArray, n_a: int, codes_b: NDArray, n_b: int) -> int:
-    """Count connected components in bipartite graph of two FE dimensions."""
+    """Count connected components in bipartite graph of two FE dimensions.
+
+    Builds a sparse adjacency using only unique edges (deduplicated) to reduce
+    the size of the sparse matrix construction + sort_indices bottleneck.
+    """
+    # Deduplicate edges: only keep unique (a, b) pairs
+    edge_codes = codes_a.astype(np.int64) * n_b + codes_b.astype(np.int64)
+    unique_edges = np.unique(edge_codes)
+    ua = (unique_edges // n_b).astype(np.int32)
+    ub = (unique_edges % n_b).astype(np.int32)
+
     total = n_a + n_b
     graph = scipy.sparse.coo_matrix(
-        (np.ones(len(codes_a)), (codes_a, n_a + codes_b)),
+        (np.ones(len(ua)), (ua, n_a + ub)),
         shape=(total, total),
     )
     graph = graph + graph.T

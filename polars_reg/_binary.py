@@ -132,8 +132,10 @@ def _binary_model(
             scores = X * score_resid[:, None]
 
         if len(cluster_arrays_list) == 1:
-            meat = _clustered_meat(X, score_resid, cluster_arrays_list[0])
-            G = len(np.unique(cluster_arrays_list[0]))
+            from polars_reg._se import _recode_to_contiguous
+
+            codes, G = _recode_to_contiguous(cluster_arrays_list[0])
+            meat = _clustered_meat(X, score_resid, codes, G)
             dfc = (G / (G - 1)) * ((n - 1) / (n - k))
             V = dfc * H_inv @ meat @ H_inv
         else:
@@ -198,9 +200,8 @@ def _mle_multiway_clustered(X, score_resid, cluster_list, H_inv, n, k):
         sign = (-1) ** (size + 1)
         for subset in combinations(dims, size):
             subset_arrays = [cluster_list[d] for d in subset]
-            interaction = _interaction_codes(*subset_arrays)
-            meat = _clustered_meat(X, score_resid, interaction)
-            G = len(np.unique(interaction))
+            interaction, G = _interaction_codes(*subset_arrays)
+            meat = _clustered_meat(X, score_resid, interaction, G)
             dfc = (G / (G - 1)) * ((n - 1) / (n - k))
             V += sign * dfc * H_inv @ meat @ H_inv
 

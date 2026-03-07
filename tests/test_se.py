@@ -101,7 +101,7 @@ def test_vcov_twoway_clustered():
 
     V_firm = vcov_clustered(X, resid, firm, df_correction=True)
     V_year = vcov_clustered(X, resid, year, df_correction=True)
-    interaction = _interaction_codes(firm, year)
+    interaction, _ = _interaction_codes(firm, year)
     V_inter = vcov_clustered(X, resid, interaction, df_correction=True)
     expected = V_firm + V_year - V_inter
 

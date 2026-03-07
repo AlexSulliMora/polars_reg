@@ -1,6 +1,7 @@
 """Integration tests: end-to-end usage of the public API."""
 
 import numpy as np
+import polars as pl
 import pytest
 
 import polars_reg
@@ -38,6 +39,16 @@ def test_ols_lazyframe(simple_data):
     lazy = simple_data.lazy()
     result = polars_reg.ols("y ~ x1 + x2", data=lazy)
     assert result.n_obs == 1000
+
+
+def test_lazyframe_column_pushdown(simple_data):
+    """LazyFrame with extra columns should produce identical results to DataFrame."""
+    # Add many extra columns that should NOT be materialized
+    wide = simple_data.with_columns([pl.lit(i).alias(f"unused_{i}") for i in range(50)])
+    r_df = polars_reg.ols("y ~ x1 + x2", data=wide)
+    r_lazy = polars_reg.ols("y ~ x1 + x2", data=wide.lazy())
+    np.testing.assert_allclose(r_lazy.coefficients, r_df.coefficients)
+    np.testing.assert_allclose(r_lazy.se, r_df.se)
 
 
 @pytest.mark.skipif(not hasattr(polars_reg, "iv2sls"), reason="iv2sls not yet available")

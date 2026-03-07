@@ -5,6 +5,14 @@ from itertools import combinations
 import numpy as np
 from numpy.typing import NDArray
 
+try:
+    from polars_reg._native import rust_clustered_meat as _rust_clustered_meat
+    from polars_reg._native import rust_recode as _rust_recode
+
+    _HAS_NATIVE = True
+except ImportError:
+    _HAS_NATIVE = False
+
 # Webb 6-point distribution for wild bootstrap
 _WEBB6 = np.array([-np.sqrt(3 / 2), -1.0, -np.sqrt(1 / 2), np.sqrt(1 / 2), 1.0, np.sqrt(3 / 2)])
 
@@ -52,22 +60,40 @@ def vcov_robust(X: NDArray, resid: NDArray, kind: str = "HC1") -> NDArray:
         raise ValueError(f"Unknown robust SE kind: {kind}")
 
 
-def _clustered_meat(X: NDArray, resid: NDArray, clusters: NDArray) -> NDArray:
+def _recode_to_contiguous(arr: NDArray) -> tuple[NDArray, int]:
+    """Remap arbitrary integer codes to contiguous 0..G-1.
+
+    Uses Rust native extension when available.
+    """
+    if _HAS_NATIVE:
+        codes, n_groups = _rust_recode(arr.astype(np.int64))
+        return codes, n_groups
+    _, codes = np.unique(arr, return_inverse=True)
+    return codes, int(codes.max()) + 1
+
+
+def _clustered_meat(
+    X: NDArray, resid: NDArray, codes: NDArray, n_groups: int
+) -> NDArray:
     """Compute the clustered sandwich meat: sum_g (s_g s_g').
 
-    Uses np.bincount to aggregate scores by cluster in O(n*k) instead of
-    looping over groups in Python.
+    Uses Rust native extension when available for O(n*k) aggregation.
+    Expects pre-computed contiguous codes and group count.
     """
+    if _HAS_NATIVE:
+        return np.asarray(
+            _rust_clustered_meat(
+                np.ascontiguousarray(X, dtype=np.float64),
+                np.ascontiguousarray(resid, dtype=np.float64),
+                np.ascontiguousarray(codes, dtype=np.int32),
+                n_groups,
+            )
+        )
     k = X.shape[1]
     score = X * resid[:, None]
-    # Remap clusters to contiguous 0..G-1 codes
-    _, codes = np.unique(clusters, return_inverse=True)
-    G = codes.max() + 1
-    # Aggregate scores by cluster: S[g, j] = sum of score[i, j] for i in cluster g
-    S = np.empty((G, k))
+    S = np.empty((n_groups, k))
     for j in range(k):
-        S[:, j] = np.bincount(codes, weights=score[:, j], minlength=G)
-    # meat = S' @ S = sum_g outer(s_g, s_g)
+        S[:, j] = np.bincount(codes, weights=score[:, j], minlength=n_groups)
     return S.T @ S
 
 
@@ -94,8 +120,8 @@ def vcov_clustered(
     """
     n, k = X.shape
     XtX_inv = np.linalg.inv(X.T @ X)
-    meat = _clustered_meat(X, resid, clusters)
-    G = len(np.unique(clusters))
+    codes, G = _recode_to_contiguous(clusters)
+    meat = _clustered_meat(X, resid, codes, G)
     if df_correction:
         if df_a_non_nested >= 0:
             # reghdfe-style: G/(G-1) * N/(N-d-k) where d = non-nested FE DoF
@@ -186,17 +212,20 @@ def vcov_driscoll_kraay(
     return dfc * XtX_inv @ S @ XtX_inv
 
 
-def _interaction_codes(*arrays: NDArray) -> NDArray:
-    """Create unique integer codes for the interaction of multiple cluster arrays."""
+def _interaction_codes(*arrays: NDArray) -> tuple[NDArray, int]:
+    """Create unique integer codes for the interaction of multiple cluster arrays.
+
+    Returns (codes, n_groups) tuple with contiguous 0..G-1 codes.
+    """
     if len(arrays) == 1:
-        return arrays[0]
-    n = len(arrays[0])
-    dtype = [(f"f{i}", arr.dtype) for i, arr in enumerate(arrays)]
-    structured = np.empty(n, dtype=dtype)
-    for i, arr in enumerate(arrays):
-        structured[f"f{i}"] = arr
-    _, codes = np.unique(structured, return_inverse=True)
-    return codes
+        return _recode_to_contiguous(arrays[0])
+    # Fast interaction coding: combine arrays into a single code via
+    # multiplied offsets (avoids expensive structured array + np.unique).
+    combined = arrays[0].astype(np.int64)
+    for arr in arrays[1:]:
+        max_val = combined.max() + 1
+        combined = combined * (int(arr.max()) + 1) + arr.astype(np.int64)
+    return _recode_to_contiguous(combined)
 
 
 def vcov_multiway_clustered(
@@ -228,20 +257,29 @@ def vcov_multiway_clustered(
     V = np.zeros((k, k))
     dims = list(range(D))
 
+    # Precompute contiguous codes for each individual cluster dimension
+    precomputed: list[tuple[NDArray, int]] = []
+    for cl in cluster_list:
+        precomputed.append(_recode_to_contiguous(cl))
+
     if df_a_non_nested >= 0:
         # reghdfe-style: single dfc using min G across individual cluster dims
-        G_min = min(len(np.unique(cl)) for cl in cluster_list)
-        dfc = (G_min / (G_min - 1)) * (n / (n - df_a_non_nested - k))
+        G_min = min(g for _, g in precomputed)
+        dfc_global = (G_min / (G_min - 1)) * (n / (n - df_a_non_nested - k))
 
     for size in range(1, D + 1):
         sign = (-1) ** (size + 1)
         for subset in combinations(dims, size):
-            subset_arrays = [cluster_list[d] for d in subset]
-            interaction = _interaction_codes(*subset_arrays)
-            meat = _clustered_meat(X, resid, interaction)
-            if df_a_non_nested < 0:
+            if len(subset) == 1:
+                codes, G = precomputed[subset[0]]
+            else:
+                subset_arrays = [cluster_list[d] for d in subset]
+                codes, G = _interaction_codes(*subset_arrays)
+            meat = _clustered_meat(X, resid, codes, G)
+            if df_a_non_nested >= 0:
+                dfc = dfc_global
+            else:
                 # Standard: per-term G/(G-1) * (N-1)/(N-k)
-                G = len(np.unique(interaction))
                 dfc = (G / (G - 1)) * ((n - 1) / (n - k))
             V += sign * dfc * XtX_inv @ meat @ XtX_inv
 

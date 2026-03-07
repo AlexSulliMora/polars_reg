@@ -180,7 +180,7 @@ def kleibergen_paap_test(
         if len(cluster_arrays) == 1:
             clusters = cluster_arrays[0]
         else:
-            clusters = _interaction_codes(*cluster_arrays)
+            clusters, _ = _interaction_codes(*cluster_arrays)
         _, codes = np.unique(clusters, return_inverse=True)
         G = codes.max() + 1
         dfc = G / (G - 1)

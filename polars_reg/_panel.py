@@ -182,7 +182,7 @@ def panel_re(
 
     # Extract entity codes from the data directly
     if isinstance(data, pl.LazyFrame):
-        data = data.collect()
+        data = data.select(spec.exog + [spec.depvar, entity]).collect()
     entity_codes = (
         data[entity].cast(pl.Utf8).cast(pl.Categorical).to_physical().to_numpy().astype(np.int32)
     )
@@ -296,12 +296,13 @@ def panel_fd(
     all_needed = [spec.depvar] + spec.exog + [entity, time]
     if cluster:
         all_needed += [c for c in cluster if c not in all_needed]
+    all_needed = list(dict.fromkeys(all_needed))
 
     if isinstance(data, pl.LazyFrame):
-        data = data.collect()
+        data = data.select(all_needed).collect()
 
     # Sort by entity then time, compute first differences
-    df_sorted = data.select(list(dict.fromkeys(all_needed))).sort([entity, time])
+    df_sorted = data.select(all_needed).sort([entity, time])
 
     # Compute differences within entities using Polars
     diff_exprs = []

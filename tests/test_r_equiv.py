@@ -133,6 +133,34 @@ def test_to_r_panel_fd_no_time():
         to_r("panel_fd", "y ~ x1", entity="firm")
 
 
+# ── to_r: indicators and interactions ─────────────────────────────
+
+
+def test_to_r_ols_indicator():
+    """Indicator variables should use factor() in R."""
+    code = to_r("ols", "y ~ x1 + i.group")
+    assert "factor(group)" in code
+
+
+def test_to_r_ols_interaction():
+    """Interaction terms should use : in R."""
+    code = to_r("ols", "y ~ x1 + x1:x2")
+    assert "x1:x2" in code
+
+
+def test_to_r_ols_indicator_interaction():
+    """Indicator interacted with continuous should use factor():x in R."""
+    code = to_r("ols", "y ~ x1 + i.group:x2")
+    assert "factor(group):x2" in code
+
+
+def test_to_r_feols_fe_noconstant():
+    """FE model with -1 should pass through - 1."""
+    code = to_r("ols", "y ~ x1 - 1 | fe1", cluster=["fe1"])
+    assert "- 1" in code
+    assert "feols" in code
+
+
 # ── compare_r: smoke test (no rpy2) ──────────────────────────────
 
 

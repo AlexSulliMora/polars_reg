@@ -9,6 +9,7 @@ from polars_reg._results import RegressionResult
 from polars_reg._se import (
     _clustered_meat,
     _interaction_codes,
+    _recode_to_contiguous,
     vcov_wild_bootstrap,
 )
 from polars_reg._utils import ensure_polars, extract_arrays
@@ -307,8 +308,8 @@ def _iv_vcov_clustered(
     Uses score vector X_hat * resid and bread (X_hat'X)^{-1}.
     """
     n, k = X_hat.shape
-    meat = _clustered_meat(X_hat, resid, clusters)
-    G = len(np.unique(clusters))
+    codes, G = _recode_to_contiguous(clusters)
+    meat = _clustered_meat(X_hat, resid, codes, G)
     dfc = (G / (G - 1)) * ((n - 1) / (n - k))
     return dfc * XhX_inv @ meat @ XhX_inv
 
@@ -331,9 +332,8 @@ def _iv_vcov_multiway(
         sign = (-1) ** (size + 1)
         for subset in combinations(dims, size):
             subset_arrays = [cluster_list[d] for d in subset]
-            interaction = _interaction_codes(*subset_arrays)
-            G = len(np.unique(interaction))
-            meat = _clustered_meat(X_hat, resid, interaction)
+            interaction, G = _interaction_codes(*subset_arrays)
+            meat = _clustered_meat(X_hat, resid, interaction, G)
             dfc = (G / (G - 1)) * ((n - 1) / (n - k))
             V += sign * dfc * XhX_inv @ meat @ XhX_inv
 

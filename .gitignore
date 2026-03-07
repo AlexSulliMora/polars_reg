@@ -7,3 +7,7 @@ build/
 .pytest_cache/
 .ruff_cache/
 *.log
+docs/api/
+target/
+*.so
+Miniforge3-Linux-x86_64.sh

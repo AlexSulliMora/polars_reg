@@ -23,6 +23,19 @@ Econometric regression methods using [Polars](https://pola.rs/) DataFrames. Also
 
 All estimators are validated against Stata output to 5+ decimal places.
 
+## Performance
+
+![Benchmarks](benchmarks/benchmark_chart.png)
+
+Wall-clock time across dataset sizes (1K–1M rows), compared to statsmodels, pyfixest, linearmodels, R/fixest, and Stata. Key findings:
+
+- **Plain OLS**: statsmodels and Stata are faster at small N (lower overhead); R/fixest is competitive throughout
+- **Fixed effects + clustering**: polars_reg and R/fixest are fastest; both 2-5x faster than pyfixest, 4-8x faster than linearmodels
+- **2SLS / IV**: polars_reg is 4-6x faster than linearmodels across all scales
+- **High-dimensional FE** (5K groups + 2-way clustering): polars_reg and R/fixest scale well; Stata BE slows at large N (single-threaded)
+
+Reproduce with `python benchmarks/generate_chart.py` (requires R with fixest; Stata optional).
+
 ## Installation
 
 ```bash
@@ -142,9 +155,10 @@ print(pr.to_r("ols", "y ~ x1 + x2 | firm_id", cluster=["firm_id"]))
 #   model <- feols(y ~ x1 + x2 | firm_id, data=df, vcov=~firm_id)
 ```
 
-## Showcase
+## Documentation
 
-See the [showcase notebook](notebooks/showcase.ipynb) for a full tour of all features, or view the [rendered PDF](notebooks/showcase.pdf) with all outputs included.
+- **[Showcase notebook](notebooks/showcase.ipynb)** — full tour of all features ([rendered PDF](notebooks/showcase.pdf))
+- **API reference** — generate locally with `uv run pdoc polars_reg --docformat google` (serves at http://localhost:8080), or build static HTML with `uv run pdoc polars_reg -o docs/api --docformat google`
 
 ## Requirements
 

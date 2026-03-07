@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
 
 [project]
 name = "polars_reg"
@@ -29,11 +29,17 @@ dev = [
     "pytest>=7.0",
     "ruff>=0.4",
     "mypy>=1.0",
+    "pdoc>=14.0",
 ]
 
 [project.urls]
 Homepage = "https://github.com/AlexSulliMora/polars_reg"
 Repository = "https://github.com/AlexSulliMora/polars_reg"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "."
+module-name = "polars_reg._native"
 
 [tool.ruff]
 line-length = 100

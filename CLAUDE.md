@@ -40,6 +40,12 @@ ruff format .
 
 # Type checking
 mypy polars_reg/
+
+# Generate API reference docs (output: docs/api/)
+uv run pdoc polars_reg -o docs/api --docformat google
+
+# Serve API docs locally
+uv run pdoc polars_reg --docformat google
 ```
 
 ## Architecture

@@ -38,16 +38,16 @@ def panel_ab(
         twostep: If True, use two-step efficient GMM
     """
     data = ensure_polars(data)
-    if isinstance(data, pl.LazyFrame):
-        data = data.collect()
 
     spec = parse_formula(formula)
     depvar = spec.depvar
     # Filter out "0" from exog (used for no-intercept, not a real variable)
     exog = [v for v in spec.exog if v != "0"]
 
-    # Determine columns needed
+    # Determine columns needed and push selection into LazyFrame
     cols_needed = list(dict.fromkeys([depvar] + exog + [entity, time]))
+    if isinstance(data, pl.LazyFrame):
+        data = data.select(cols_needed).collect()
     df = data.select(cols_needed).sort([entity, time])
 
     # Determine max available lag for instruments
@@ -219,14 +219,14 @@ def panel_sys_gmm(
         twostep: If True, use two-step efficient GMM
     """
     data = ensure_polars(data)
-    if isinstance(data, pl.LazyFrame):
-        data = data.collect()
 
     spec = parse_formula(formula)
     depvar = spec.depvar
     exog = [v for v in spec.exog if v != "0"]
 
     cols_needed = list(dict.fromkeys([depvar] + exog + [entity, time]))
+    if isinstance(data, pl.LazyFrame):
+        data = data.select(cols_needed).collect()
     df = data.select(cols_needed).sort([entity, time])
 
     n_times = df[time].n_unique()

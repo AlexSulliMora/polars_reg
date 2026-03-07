@@ -7,6 +7,44 @@ import polars as pl
 
 from polars_reg._formula import FormulaSpec
 
+try:
+    from polars_reg._native import rust_recode as _rust_recode
+
+    _HAS_NATIVE = True
+except ImportError:
+    _HAS_NATIVE = False
+
+
+def _to_codes(series: pl.Series) -> np.ndarray:
+    """Convert a Polars Series to contiguous integer group codes (0..G-1).
+
+    Uses Rust native extension when available for integer types.
+    Falls back to Polars categorical for strings and other types.
+    """
+    dtype = series.dtype
+    if dtype in (
+        pl.Int8, pl.Int16, pl.Int32, pl.Int64,
+        pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64,
+    ):
+        arr = series.to_numpy().astype(np.int64)
+        if _HAS_NATIVE:
+            codes, _ = _rust_recode(arr)
+            return codes
+        # Pure Python fallback
+        mn = arr.min()
+        mx = arr.max()
+        rng = mx - mn
+        if rng < 2 * len(arr):
+            lut = np.full(rng + 1, -1, dtype=np.int32)
+            uniq_shifted = np.unique(arr - mn)
+            lut[uniq_shifted] = np.arange(len(uniq_shifted), dtype=np.int32)
+            return lut[arr - mn]
+        _, codes = np.unique(arr, return_inverse=True)
+        return codes.astype(np.int32)
+    # String/other types: use Polars categorical encoding
+    codes = series.cast(pl.Utf8).cast(pl.Categorical).to_physical().to_numpy()
+    return codes.astype(np.int32)
+
 
 def ensure_polars(data: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFrame:
     """Convert pandas DataFrame to Polars if needed. Passes through Polars data unchanged."""
@@ -44,9 +82,6 @@ def extract_arrays(
     weights: str | None = None,
 ) -> ExtractedArrays:
     """Extract NumPy arrays from a Polars DataFrame given a FormulaSpec."""
-    if isinstance(df, pl.LazyFrame):
-        df = df.collect()
-
     # Determine all columns needed (expand interaction terms to constituent columns)
     exog_cols: list[str] = []
     for col in spec.exog:
@@ -64,6 +99,12 @@ def extract_arrays(
         all_cols.append(weights)
     all_cols = list(dict.fromkeys(all_cols))  # dedupe preserving order
 
+    # Push column selection into LazyFrame before collecting (avoids materializing unused columns)
+    if isinstance(df, pl.LazyFrame):
+        df = df.select(all_cols).collect()
+    else:
+        df = df.select(all_cols)
+
     # Drop rows with nulls in numeric columns (exclude indicator cols from null check)
     numeric_cols = [
         c
@@ -72,7 +113,7 @@ def extract_arrays(
     ]
     if weights:
         numeric_cols.append(weights)
-    df_clean = df.select(all_cols).drop_nulls(subset=numeric_cols)
+    df_clean = df.drop_nulls(subset=numeric_cols)
 
     n_obs = len(df_clean)
 
@@ -136,15 +177,17 @@ def extract_arrays(
     # Extract FE as integer codes
     fe_arrays: dict[str, np.ndarray] = {}
     for col in spec.fe:
-        codes = df_clean[col].cast(pl.Utf8).cast(pl.Categorical).to_physical().to_numpy()
-        fe_arrays[col] = codes.astype(np.int32)
+        fe_arrays[col] = _to_codes(df_clean[col])
 
     # Extract cluster codes
     cluster_arrays: dict[str, np.ndarray] = {}
     if cluster:
         for col in cluster:
-            codes = df_clean[col].cast(pl.Utf8).cast(pl.Categorical).to_physical().to_numpy()
-            cluster_arrays[col] = codes.astype(np.int32)
+            if col in fe_arrays:
+                # Reuse FE codes if same column (avoids redundant conversion)
+                cluster_arrays[col] = fe_arrays[col]
+            else:
+                cluster_arrays[col] = _to_codes(df_clean[col])
 
     # Extract endogenous and instruments
     endog = None

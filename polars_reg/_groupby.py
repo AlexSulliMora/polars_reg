@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 import polars as pl
 
+from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
 from polars_reg._utils import ensure_polars
 
@@ -98,11 +99,33 @@ def groupby_reg(
         GroupRegressionResult with results keyed by group value(s)
     """
     data = ensure_polars(data)
-    if isinstance(data, pl.LazyFrame):
-        data = data.collect()
 
     if isinstance(group_by, str):
         group_by = [group_by]
+
+    # Push column selection into LazyFrame before collecting
+    if isinstance(data, pl.LazyFrame):
+        spec = parse_formula(formula)
+        exog_cols = []
+        for col in spec.exog:
+            if ":" in col:
+                exog_cols.extend(col.split(":"))
+            else:
+                exog_cols.append(col)
+        needed = [spec.depvar] + exog_cols + spec.fe + spec.endog + spec.instruments + group_by
+        cluster_kw = kwargs.get("cluster")
+        if isinstance(cluster_kw, str):
+            needed.append(cluster_kw)
+        elif isinstance(cluster_kw, list):
+            needed.extend(cluster_kw)
+        entity_kw = kwargs.get("entity")
+        if entity_kw:
+            needed.append(entity_kw)
+        time_kw = kwargs.get("time")
+        if time_kw:
+            needed.append(time_kw)
+        needed = list(dict.fromkeys(needed))
+        data = data.select(needed).collect()
 
     result = GroupRegressionResult()
 
