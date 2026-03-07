@@ -1,21 +1,26 @@
 """Stata parity testing infrastructure.
 
 Translates polars_reg regression calls into equivalent Stata commands,
-runs both via pystata, and compares results to machine precision.
+runs both (polars_reg in Python, Stata via batch mode over WSL2),
+and compares results to machine precision.
 
 Usage:
     result = assert_stata_parity("ols", "y ~ x1 + x2 | fe1", data, cluster=["fe1"])
 
 Requires:
-    - Stata installed with a valid license
-    - pystata configured via stata_setup.config() or STATA_SETUP env vars
+    - Stata installed (Windows side, accessible via WSL2)
+    - Set STATA_EXE env var to the Stata executable path if not at default location
     - reghdfe installed in Stata (for FE absorption): ssc install reghdfe
 """
 
 from __future__ import annotations
 
 import os
+import subprocess
+import tempfile
+import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
@@ -28,33 +33,144 @@ from polars_reg._formula import FormulaSpec, parse_formula
 # Stata availability check
 # ---------------------------------------------------------------------------
 
+# Default Stata paths to try (Windows paths accessed via WSL)
+_DEFAULT_STATA_PATHS = [
+    "/mnt/c/Program Files/Stata18/StataBE-64.exe",
+    "/mnt/c/Program Files/Stata18/StataMP-64.exe",
+    "/mnt/c/Program Files/Stata18/StataSE-64.exe",
+    "/mnt/c/Program Files/Stata17/StataBE-64.exe",
+    "/mnt/c/Program Files/Stata17/StataMP-64.exe",
+    "/mnt/c/Program Files/Stata17/StataSE-64.exe",
+]
+
+_STATA_EXE: str | None = None
 _STATA_AVAILABLE: bool | None = None
 
 
+def _find_stata_exe() -> str | None:
+    """Find the Stata executable."""
+    # Check env var first
+    env_exe = os.environ.get("STATA_EXE")
+    if env_exe and os.path.isfile(env_exe):
+        return env_exe
+
+    # Try default paths
+    for path in _DEFAULT_STATA_PATHS:
+        if os.path.isfile(path):
+            return path
+
+    return None
+
+
 def stata_available() -> bool:
-    """Check if pystata is importable and Stata is configured."""
-    global _STATA_AVAILABLE
+    """Check if Stata is available via batch mode."""
+    global _STATA_AVAILABLE, _STATA_EXE
     if _STATA_AVAILABLE is not None:
         return _STATA_AVAILABLE
-    try:
-        _configure_stata()
-        _STATA_AVAILABLE = True
-    except (ImportError, OSError, Exception):
-        _STATA_AVAILABLE = False
+
+    _STATA_EXE = _find_stata_exe()
+    _STATA_AVAILABLE = _STATA_EXE is not None
     return _STATA_AVAILABLE
 
 
-def _configure_stata() -> None:
-    """Configure pystata. Reads STATA_DIR and STATA_EDITION env vars."""
-    import stata_setup  # type: ignore[import-untyped]
+# ---------------------------------------------------------------------------
+# Batch mode Stata execution
+# ---------------------------------------------------------------------------
 
-    stata_dir = os.environ.get("STATA_DIR", "/usr/local/stata")
-    stata_edition = os.environ.get("STATA_EDITION", "mp")
-    stata_setup.config(stata_dir, stata_edition)
+# Use a persistent temp directory on the Windows side for Stata I/O
+_STATA_WORKDIR = Path("/mnt/c/tmp/polars_reg_stata")
+
+
+def _ensure_workdir() -> Path:
+    """Create the working directory on the Windows side."""
+    _STATA_WORKDIR.mkdir(parents=True, exist_ok=True)
+    return _STATA_WORKDIR
+
+
+def _wsl_to_win(path: str | Path) -> str:
+    """Convert a WSL path to a Windows path."""
+    result = subprocess.run(
+        ["wslpath", "-w", str(path)],
+        capture_output=True, text=True, check=True,
+    )
+    return result.stdout.strip()
+
+
+def _load_data_to_stata(df: pl.DataFrame) -> str:
+    """Save a Polars DataFrame as CSV for Stata to import.
+
+    Returns the Windows path to the CSV file.
+    """
+    workdir = _ensure_workdir()
+    csv_path = workdir / "data.csv"
+    df.to_pandas().to_csv(csv_path, index=False)
+    return _wsl_to_win(csv_path)
+
+
+def _run_stata_do(do_content: str, timeout: int = 120) -> None:
+    """Write a .do file and execute it in Stata batch mode.
+
+    Stata is run with /e flag which executes the do-file and exits.
+    We poll for a sentinel file to know when execution is complete.
+    """
+    global _STATA_EXE
+    if _STATA_EXE is None:
+        raise RuntimeError("Stata executable not found")
+
+    workdir = _ensure_workdir()
+    do_path = workdir / "run.do"
+    sentinel = workdir / "done.txt"
+    error_file = workdir / "error.txt"
+
+    # Clean up previous sentinel/error files
+    sentinel.unlink(missing_ok=True)
+    error_file.unlink(missing_ok=True)
+
+    # Wrap do content: add error handling and sentinel file
+    win_sentinel = _wsl_to_win(sentinel)
+    win_error = _wsl_to_win(error_file)
+
+    wrapped = f"""capture noisily {{
+{do_content}
+}}
+if _rc != 0 {{
+    file open errfh using "{win_error}", write replace
+    file write errfh "ERROR: " (_rc) _n
+    file close errfh
+}}
+file open donefh using "{win_sentinel}", write replace
+file write donefh "done" _n
+file close donefh
+"""
+    do_path.write_text(wrapped)
+
+    win_do = _wsl_to_win(do_path)
+
+    # Launch Stata in background
+    subprocess.Popen(
+        [_STATA_EXE, "/e", "do", win_do],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    # Poll for sentinel file
+    start = time.monotonic()
+    while not sentinel.exists():
+        if time.monotonic() - start > timeout:
+            raise TimeoutError(
+                f"Stata did not complete within {timeout}s. "
+                f"Check {do_path} for issues."
+            )
+        time.sleep(0.5)
+
+    # Check for errors
+    if error_file.exists():
+        error_msg = error_file.read_text().strip()
+        raise RuntimeError(f"Stata returned an error: {error_msg}")
 
 
 # ---------------------------------------------------------------------------
-# Stata result extraction
+# Stata result extraction (from CSV written by .do file)
 # ---------------------------------------------------------------------------
 
 
@@ -64,121 +180,143 @@ class StataResult:
 
     coefficients: NDArray
     se: NDArray
-    vcov: NDArray
     names: list[str]
     n_obs: int
     r_squared: float
     r_squared_adj: float
     df_r: int
-    f_stat: float | None = None
     # reghdfe-specific
     r_squared_within: float | None = None
     df_absorbed: int | None = None
     # IV-specific
-    first_stage_f: float | None = None
     j_stat: float | None = None
     j_pvalue: float | None = None
 
 
-def _run_stata(command: str) -> None:
-    """Execute a Stata command via pystata."""
-    from pystata import stata  # type: ignore[import-untyped]
+def _build_results_do(stata_cmd: str, model_type: str, win_csv_path: str) -> str:
+    """Build the full .do file content: import data, run regression, save results."""
+    workdir = _ensure_workdir()
+    win_results = _wsl_to_win(workdir / "results.csv")
 
-    stata.run(command, quietly=True)
+    # Build the results extraction block
+    extract_lines = [
+        f'import delimited "{win_csv_path}", clear',
+        stata_cmd,
+        "",
+        f'file open fh using "{win_results}", write replace',
+        'file write fh "param,coef,se" _n',
+        "",
+        "matrix b = e(b)",
+        "matrix V = e(V)",
+        "local names : colnames b",
+        "local k = colsof(b)",
+        "forvalues i = 1/`k' {",
+        '    local name : word `i\' of `names\'',
+        "    local coef = b[1,`i']",
+        "    local se = sqrt(V[`i',`i'])",
+        '    file write fh "`name\',`coef\',`se\'" _n',
+        "}",
+        "",
+        '* Write scalar metadata',
+        'file write fh "___N___," %20.0f (e(N)) ",0" _n',
+        'file write fh "___df_r___," %20.0f (e(df_r)) ",0" _n',
+    ]
 
+    # R-squared (may not exist for all models)
+    extract_lines += [
+        'capture local r2_val = e(r2)',
+        'if _rc == 0 {',
+        '    file write fh "___r2___," %20.12f (e(r2)) ",0" _n',
+        '}',
+        'capture local r2a_val = e(r2_a)',
+        'if _rc == 0 {',
+        '    file write fh "___r2_a___," %20.12f (e(r2_a)) ",0" _n',
+        '}',
+    ]
 
-def _load_data_to_stata(df: pl.DataFrame) -> None:
-    """Load a Polars DataFrame into Stata's active dataset."""
-    from pystata import stata  # type: ignore[import-untyped]
+    # reghdfe-specific
+    if model_type == "reghdfe":
+        extract_lines += [
+            'capture {',
+            '    file write fh "___r2_within___," %20.12f (e(r2_within)) ",0" _n',
+            '    file write fh "___df_a___," %20.0f (e(df_a)) ",0" _n',
+            '}',
+        ]
 
-    pdf = df.to_pandas()
-    stata.pdataframe_to_data(pdf, force=True)
+    # GMM J-test
+    if model_type == "ivregress_gmm":
+        extract_lines += [
+            'capture {',
+            '    file write fh "___J___," %20.12f (e(J)) ",0" _n',
+            '    file write fh "___J_p___," %20.12f (e(J_p)) ",0" _n',
+            '}',
+        ]
+
+    extract_lines.append('file close fh')
+
+    return "\n".join(extract_lines)
 
 
 def _extract_stata_results(model_type: str) -> StataResult:
-    """Extract regression results from Stata's e() return values."""
-    from sfi import Matrix, Scalar  # type: ignore[import-untyped]
+    """Parse the results CSV written by Stata."""
+    workdir = _ensure_workdir()
+    results_path = workdir / "results.csv"
 
-    # Coefficient vector: e(b) is 1 x k matrix
-    b_raw = Matrix.get("e(b)")
-    coefs = np.array(b_raw).flatten()
+    if not results_path.exists():
+        raise FileNotFoundError(f"Stata results file not found: {results_path}")
 
-    # VCV matrix: e(V) is k x k
-    V_raw = Matrix.get("e(V)")
-    vcov = np.array(V_raw)
+    lines = results_path.read_text().strip().split("\n")
+    if not lines or lines[0].strip() != "param,coef,se":
+        raise ValueError(f"Unexpected results file format: {lines[:3]}")
 
-    se = np.sqrt(np.diag(vcov))
-
-    # Coefficient names from e(b) column names
-    n_coefs = len(coefs)
     names = []
-    for i in range(n_coefs):
-        name = Matrix.getColNames("e(b)", i)
-        # Stata returns "varname:equation" format; strip equation prefix
-        if ":" in name:
-            name = name.split(":")[-1]
-        names.append(name)
+    coefs = []
+    ses = []
+    metadata: dict[str, float] = {}
 
-    n_obs = int(Scalar.getValue("e(N)"))
-    df_r = int(Scalar.getValue("e(df_r)"))
+    for line in lines[1:]:
+        parts = line.strip().split(",")
+        if len(parts) != 3:
+            continue
+        name, coef_str, se_str = parts
 
-    # R-squared — may not exist for all models
-    try:
-        r2 = float(Scalar.getValue("e(r2)"))
-    except Exception:
-        r2 = float("nan")
-    try:
-        r2_adj = float(Scalar.getValue("e(r2_a)"))
-    except Exception:
-        r2_adj = float("nan")
+        if name.startswith("___") and name.endswith("___"):
+            val = coef_str.strip()
+            # Stata uses "." for missing values
+            if val == ".":
+                metadata[name] = float("nan")
+            else:
+                metadata[name] = float(val)
+        else:
+            # Strip Stata's equation prefix (e.g., "y1:x1" -> "x1")
+            if ":" in name:
+                name = name.split(":")[-1]
+            names.append(name)
+            coefs.append(float(coef_str.strip()))
+            ses.append(float(se_str.strip()))
 
-    # F-stat
-    try:
-        f_stat = float(Scalar.getValue("e(F)"))
-    except Exception:
-        f_stat = None
-
-    # reghdfe-specific
-    r2_within = None
-    df_absorbed = None
-    if model_type == "reghdfe":
-        try:
-            r2_within = float(Scalar.getValue("e(r2_within)"))
-        except Exception:
-            pass
-        try:
-            df_absorbed = int(Scalar.getValue("e(df_a)"))
-        except Exception:
-            pass
-
-    # IV-specific
-    first_stage_f = None
-    j_stat = None
-    j_pvalue = None
-    if model_type in ("ivregress_2sls", "ivregress_liml", "ivregress_gmm"):
-        # First-stage F is available via estat firststage after ivregress
-        # For now, skip — it requires additional Stata commands
-        pass
-    if model_type == "ivregress_gmm":
-        try:
-            j_stat = float(Scalar.getValue("e(J)"))
-            j_pvalue = float(Scalar.getValue("e(J_p)"))
-        except Exception:
-            pass
+    n_obs = int(metadata.get("___N___", 0))
+    df_r_val = metadata.get("___df_r___", 0)
+    df_r = 0 if np.isnan(df_r_val) else int(df_r_val)
+    r2 = metadata.get("___r2___", float("nan"))
+    r2_adj = metadata.get("___r2_a___", float("nan"))
+    r2_within = metadata.get("___r2_within___")
+    df_absorbed = int(metadata["___df_a___"]) if "___df_a___" in metadata else None
+    j_stat_val = metadata.get("___J___")
+    j_stat = None if j_stat_val is None or np.isnan(j_stat_val) else j_stat_val
+    j_pvalue_val = metadata.get("___J_p___")
+    j_pvalue = None if j_pvalue_val is None or np.isnan(j_pvalue_val) else j_pvalue_val
 
     return StataResult(
-        coefficients=coefs,
-        se=se,
-        vcov=vcov,
+        coefficients=np.array(coefs),
+        se=np.array(ses),
         names=names,
         n_obs=n_obs,
         r_squared=r2,
         r_squared_adj=r2_adj,
         df_r=df_r,
-        f_stat=f_stat,
         r_squared_within=r2_within,
         df_absorbed=df_absorbed,
-        first_stage_f=first_stage_f,
         j_stat=j_stat,
         j_pvalue=j_pvalue,
     )
@@ -213,7 +351,6 @@ def to_stata_command(
 
     spec = parse_formula(formula)
     has_fe = len(spec.fe) > 0
-    has_iv = len(spec.endog) > 0
 
     # Build the VCE option string
     vce_opt = _build_vce_option(vcov, cluster)
@@ -246,27 +383,22 @@ def _build_vce_option(vcov: str, cluster: list[str] | None) -> str:
             # Multi-way clustering: only reghdfe supports this natively
             return f"vce(cluster {' '.join(cluster)})"
 
-    vce_map = {
-        "iid": "",
-        "HC0": "vce(hc2)",  # Stata's hc2 is NOT HC2; see note below
-        "HC1": "vce(robust)",
-        "HC2": "vce(hc2)",
-        "HC3": "vce(hc3)",
-    }
-
     # IMPORTANT: Stata's reg command vce options:
     #   vce(robust)  = HC1 (White with small-sample correction n/(n-k))
     #   vce(hc2)     = HC2 (leverage-adjusted)
     #   vce(hc3)     = HC3 (jackknife-like)
     # There is no direct HC0 option in Stata's reg. HC0 = robust without
-    # the n/(n-k) correction. Closest workaround is manual computation.
-    # For parity testing, we test HC1, HC2, HC3 which have direct Stata
-    # equivalents. HC0 tests use a manual post-estimation correction.
+    # the n/(n-k) correction. We run HC1 and correct in comparison.
 
     if vcov == "HC0":
-        # HC0 has no direct Stata equivalent. Use robust and back out:
-        # HC0 = HC1 * (n-k)/n. We handle this in the comparison function.
         return "vce(robust)"
+
+    vce_map = {
+        "iid": "",
+        "HC1": "vce(robust)",
+        "HC2": "vce(hc2)",
+        "HC3": "vce(hc3)",
+    }
 
     return vce_map.get(vcov, "")
 
@@ -326,13 +458,12 @@ def _iv_to_ivregress(spec: FormulaSpec, method: str, vce_opt: str) -> str:
         parts.append(exog_str)
     parts.append(f"({endog_str} = {instr_str})")
 
-    opts = []
+    opts = ["small"]  # small-sample correction to match our n-k dof
     if not spec.add_intercept:
         opts.append("noconstant")
     if vce_opt:
         opts.append(vce_opt)
-    if opts:
-        parts.append(", " + " ".join(opts))
+    parts.append(", " + " ".join(opts))
 
     return " ".join(parts)
 
@@ -352,7 +483,7 @@ def _iv_to_ivregress_gmm(spec: FormulaSpec, vce_opt: str) -> str:
         parts.append(exog_str)
     parts.append(f"({endog_str} = {instr_str})")
 
-    opts = ["wmatrix(robust)"]
+    opts = ["wmatrix(robust)"]  # GMM uses large-sample VCV by default
     if not spec.add_intercept:
         opts.append("noconstant")
     if vce_opt:
@@ -515,8 +646,10 @@ def compare_results(
                 )
 
     # R-squared comparison
+    # Skip for no-intercept models: Stata uses uncentered R², we use centered
+    has_intercept = "_cons" in names
     r2_rdiff = None
-    if not np.isnan(stata_result.r_squared):
+    if has_intercept and not np.isnan(stata_result.r_squared):
         r2_rdiff = abs(polars_result.r_squared - stata_result.r_squared) / max(
             abs(stata_result.r_squared), 1e-15
         )
@@ -557,12 +690,12 @@ def assert_stata_parity(
     Args:
         estimator: One of "ols", "iv2sls", "liml", "gmm_iv"
         formula: polars_reg formula string
-        data: Polars DataFrame (will be converted to pandas for Stata)
+        data: Polars DataFrame (will be saved as CSV for Stata)
         vcov: Variance-covariance type
         cluster: Clustering variable(s)
         rtol: Relative tolerance for comparisons (default 1e-6)
         stata_pre_commands: Extra Stata commands to run before the regression
-            (e.g., ["ssc install reghdfe", "set matsize 10000"])
+            (e.g., ["set matsize 10000"])
 
     Returns:
         ComparisonResult with detailed comparison
@@ -594,19 +727,22 @@ def assert_stata_parity(
     # 2. Translate to Stata
     stata_cmd, model_type = to_stata_command(estimator, formula, vcov, cluster)
 
-    # 3. Load data and run Stata
-    _load_data_to_stata(data)
+    # 3. Load data (save as CSV) and build do-file
+    win_csv = _load_data_to_stata(data)
 
+    pre_cmds = ""
     if stata_pre_commands:
-        for cmd in stata_pre_commands:
-            _run_stata(cmd)
+        pre_cmds = "\n".join(stata_pre_commands) + "\n"
 
-    _run_stata(stata_cmd)
+    do_content = pre_cmds + _build_results_do(stata_cmd, model_type, win_csv)
 
-    # 4. Extract Stata results
+    # 4. Run Stata
+    _run_stata_do(do_content)
+
+    # 5. Extract Stata results
     stata_result = _extract_stata_results(model_type)
 
-    # 5. Compare
+    # 6. Compare
     comparison = compare_results(
         estimator, formula, stata_cmd, polars_result, stata_result, rtol, vcov
     )

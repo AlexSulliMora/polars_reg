@@ -223,13 +223,14 @@ def gmm_iv(
     # Step 2 residuals
     resid = y - X_full @ beta_2
 
-    # VCV: (X'Z S^{-1} Z'X)^{-1}
+    # VCV: n * (X'Z S^{-1} Z'X)^{-1}
+    # where S = (1/n) Z' diag(e^2) Z, so V = n * (X'Z S_inv Z'X)^{-1}
     # Recompute S with step-2 residuals for final VCV and J test
     S_final = (Z * (resid**2)[:, None]).T @ Z / n
     S_final_inv = np.linalg.inv(S_final)
 
     A_final = XtZ @ S_final_inv @ XtZ.T
-    V = np.linalg.inv(A_final) / n
+    V = np.linalg.inv(A_final) * n
 
     # Override with cluster VCV if requested
     if cluster:

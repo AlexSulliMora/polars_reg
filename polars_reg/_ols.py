@@ -10,6 +10,44 @@ from polars_reg._se import vcov_clustered, vcov_iid, vcov_multiway_clustered, vc
 from polars_reg._utils import extract_arrays
 
 
+def _is_nested(fe_codes: np.ndarray, cluster_codes: np.ndarray) -> bool:
+    """Check if FE groups are nested within cluster groups.
+
+    An FE is nested in a cluster if every FE group maps to exactly one cluster.
+    """
+    # For each FE group, check if all observations map to the same cluster
+    unique_fe = np.unique(fe_codes)
+    for g in unique_fe:
+        mask = fe_codes == g
+        if len(np.unique(cluster_codes[mask])) > 1:
+            return False
+    return True
+
+
+def _non_nested_fe_dof(
+    fe_dict: dict[str, np.ndarray],
+    cluster_arrays: dict[str, np.ndarray],
+    cluster: list[str],
+) -> int:
+    """Compute absorbed DoF from FE dimensions not nested in any cluster.
+
+    reghdfe excludes nested FE from the dfc adjustment because the cluster
+    correction already accounts for those degrees of freedom.
+    """
+    non_nested_dof = 0
+    for fe_name, fe_codes in fe_dict.items():
+        nested = False
+        for cl_name in cluster:
+            if cl_name in cluster_arrays:
+                if _is_nested(fe_codes, cluster_arrays[cl_name]):
+                    nested = True
+                    break
+        if not nested:
+            n_groups = int(fe_codes.max()) + 1
+            non_nested_dof += n_groups - 1  # subtract 1 for identification
+    return non_nested_dof
+
+
 def ols(
     formula: str,
     data: pl.DataFrame | pl.LazyFrame,
@@ -81,15 +119,17 @@ def ols(
     # Variance-covariance
     if cluster:
         cluster_arrays = [arrays.cluster_arrays[c] for c in cluster]
+        # Compute non-nested FE DoF for reghdfe-style dfc adjustment
+        df_a_nn = _non_nested_fe_dof(fe_dict, arrays.cluster_arrays, cluster) if has_fe else -1
         if len(cluster_arrays) == 1:
-            V = vcov_clustered(X, resid, cluster_arrays[0])
+            V = vcov_clustered(X, resid, cluster_arrays[0], df_a_non_nested=df_a_nn)
         else:
-            V = vcov_multiway_clustered(X, resid, cluster_arrays)
+            V = vcov_multiway_clustered(X, resid, cluster_arrays, df_a_non_nested=df_a_nn)
         vcov_type = "cluster"
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1
     elif vcov == "iid":
-        V = vcov_iid(X, resid)
+        V = vcov_iid(X, resid, df_abs=df_abs)
         vcov_type = "iid"
         n_clusters = None
         df_r = n - k - df_abs

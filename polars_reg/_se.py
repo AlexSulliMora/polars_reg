@@ -6,11 +6,15 @@ import numpy as np
 from numpy.typing import NDArray
 
 
-def vcov_iid(X: NDArray, resid: NDArray) -> NDArray:
-    """Homoskedastic VCV: sigma^2 * (X'X)^{-1}."""
+def vcov_iid(X: NDArray, resid: NDArray, df_abs: int = 0) -> NDArray:
+    """Homoskedastic VCV: sigma^2 * (X'X)^{-1}.
+
+    Args:
+        df_abs: Additional absorbed degrees of freedom (e.g., from fixed effects).
+    """
     n, k = X.shape
     XtX_inv = np.linalg.inv(X.T @ X)
-    sigma2 = resid @ resid / (n - k)
+    sigma2 = resid @ resid / (n - k - df_abs)
     return sigma2 * XtX_inv
 
 
@@ -63,18 +67,33 @@ def vcov_clustered(
     resid: NDArray,
     clusters: NDArray,
     df_correction: bool = True,
+    df_a_non_nested: int = -1,
 ) -> NDArray:
     """One-way cluster-robust VCV (CRV1).
 
     V = dfc * (X'X)^{-1} * meat * (X'X)^{-1}
-    where dfc = G/(G-1) * (n-1)/(n-k)
+
+    Without absorbed FE: dfc = G/(G-1) * (n-1)/(n-k)      (matches Stata reg)
+    With absorbed FE:    dfc = G/(G-1) * (n-d)/(n-d-k)     (matches Stata reghdfe)
+        where d = DoF from FE dimensions NOT nested in the cluster.
+
+    Args:
+        df_a_non_nested: DoF absorbed by FE not nested in the cluster variable.
+            When > -1, indicates FE are absorbed and reghdfe-style dfc is used:
+            dfc = G/(G-1) * (n-d)/(n-d-k) where d = df_a_non_nested.
+            When -1 (default), standard Stata reg dfc: G/(G-1) * (n-1)/(n-k).
     """
     n, k = X.shape
     XtX_inv = np.linalg.inv(X.T @ X)
     meat = _clustered_meat(X, resid, clusters)
     G = len(np.unique(clusters))
     if df_correction:
-        dfc = (G / (G - 1)) * ((n - 1) / (n - k))
+        if df_a_non_nested >= 0:
+            # reghdfe-style: G/(G-1) * N/(N-d-k) where d = non-nested FE DoF
+            dfc = (G / (G - 1)) * (n / (n - df_a_non_nested - k))
+        else:
+            # Standard Stata reg: (n-1)/(n-k)
+            dfc = (G / (G - 1)) * ((n - 1) / (n - k))
     else:
         dfc = 1.0
     return dfc * XtX_inv @ meat @ XtX_inv
@@ -97,6 +116,7 @@ def vcov_multiway_clustered(
     X: NDArray,
     resid: NDArray,
     cluster_list: list[NDArray],
+    df_a_non_nested: int = -1,
 ) -> NDArray:
     """Multi-way clustered VCV via Cameron-Gelbach-Miller inclusion-exclusion.
 
@@ -105,6 +125,14 @@ def vcov_multiway_clustered(
 
     For D=2: V = V_A + V_B - V_{A*B}
     For D=3: V = V_A + V_B + V_C - V_AB - V_AC - V_BC + V_ABC
+
+    Uses a single dfc (based on min cluster count) for all CGM terms,
+    matching reghdfe behavior.
+
+    Args:
+        df_a_non_nested: DoF absorbed by FE not nested in any cluster dimension.
+            When >= 0, uses reghdfe-style dfc: G_min/(G_min-1) * N/(N-d-k).
+            When -1 (default), uses per-term dfc: G/(G-1) * (N-1)/(N-k).
     """
     D = len(cluster_list)
     n, k = X.shape
@@ -113,14 +141,21 @@ def vcov_multiway_clustered(
     V = np.zeros((k, k))
     dims = list(range(D))
 
+    if df_a_non_nested >= 0:
+        # reghdfe-style: single dfc using min G across individual cluster dims
+        G_min = min(len(np.unique(cl)) for cl in cluster_list)
+        dfc = (G_min / (G_min - 1)) * (n / (n - df_a_non_nested - k))
+
     for size in range(1, D + 1):
         sign = (-1) ** (size + 1)
         for subset in combinations(dims, size):
             subset_arrays = [cluster_list[d] for d in subset]
             interaction = _interaction_codes(*subset_arrays)
-            G = len(np.unique(interaction))
             meat = _clustered_meat(X, resid, interaction)
-            dfc = (G / (G - 1)) * ((n - 1) / (n - k))
+            if df_a_non_nested < 0:
+                # Standard: per-term G/(G-1) * (N-1)/(N-k)
+                G = len(np.unique(interaction))
+                dfc = (G / (G - 1)) * ((n - 1) / (n - k))
             V += sign * dfc * XtX_inv @ meat @ XtX_inv
 
     return V
