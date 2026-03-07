@@ -142,7 +142,7 @@ def ols(
         n_clusters = None
         df_r = n - k - df_abs
 
-    return RegressionResult(
+    result = RegressionResult(
         coefficients=beta,
         vcov=V,
         residuals=resid,
@@ -158,3 +158,6 @@ def ols(
         fe_absorbed=fe_absorbed,
         df_absorbed=df_abs,
     )
+    result._X = X
+    result._y = y
+    return result

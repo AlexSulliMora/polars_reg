@@ -31,14 +31,20 @@ def extract_arrays(
     if isinstance(df, pl.LazyFrame):
         df = df.collect()
 
-    # Determine all columns needed
-    all_cols = [spec.depvar] + spec.exog + spec.fe + spec.endog + spec.instruments
+    # Determine all columns needed (expand interaction terms to constituent columns)
+    exog_cols: list[str] = []
+    for col in spec.exog:
+        if ":" in col:
+            exog_cols.extend(col.split(":"))
+        else:
+            exog_cols.append(col)
+    all_cols = [spec.depvar] + exog_cols + spec.fe + spec.endog + spec.instruments
     if cluster:
         all_cols += [c for c in cluster if c not in all_cols]
     all_cols = list(dict.fromkeys(all_cols))  # dedupe preserving order
 
     # Drop rows with nulls in numeric columns
-    numeric_cols = [spec.depvar] + spec.exog + spec.endog + spec.instruments
+    numeric_cols = [spec.depvar] + exog_cols + spec.endog + spec.instruments
     df_clean = df.select(all_cols).drop_nulls(subset=numeric_cols)
 
     n_obs = len(df_clean)
@@ -50,7 +56,15 @@ def extract_arrays(
     names: list[str] = []
     x_cols: list[np.ndarray] = []
     for col in spec.exog:
-        x_cols.append(df_clean[col].to_numpy(allow_copy=False).astype(np.float64))
+        if ":" in col:
+            # Interaction term: elementwise product of constituent columns
+            parts = col.split(":")
+            arr = np.ones(n_obs, dtype=np.float64)
+            for p in parts:
+                arr = arr * df_clean[p].to_numpy(allow_copy=False).astype(np.float64)
+            x_cols.append(arr)
+        else:
+            x_cols.append(df_clean[col].to_numpy(allow_copy=False).astype(np.float64))
         names.append(col)
     if spec.add_intercept:
         x_cols.append(np.ones(n_obs, dtype=np.float64))

@@ -13,6 +13,21 @@ class FormulaSpec:
     add_intercept: bool = True
 
 
+def _expand_star(term: str) -> list[str]:
+    """Expand x1*x2 into [x1, x2, x1:x2]. Handles arbitrary order."""
+    if "*" not in term:
+        return [term]
+    parts = [p.strip() for p in term.split("*")]
+    result: list[str] = []
+    # All non-empty subsets of parts, ordered by size
+    for size in range(1, len(parts) + 1):
+        from itertools import combinations
+
+        for subset in combinations(parts, size):
+            result.append(":".join(subset))
+    return result
+
+
 def parse_formula(formula: str) -> FormulaSpec:
     """Parse a formula string into a FormulaSpec.
 
@@ -22,6 +37,8 @@ def parse_formula(formula: str) -> FormulaSpec:
         y ~ x1 | fe1 | x_endog ~ z1 + z2   (IV with FE)
         y ~ x1 + x2 - 1                    (no intercept)
         y ~ x_exog || x_endog ~ z1          (IV, no FE, empty FE slot)
+        y ~ x1*x2                           (expands to x1 + x2 + x1:x2)
+        y ~ x1:x2                           (interaction term only)
     """
     formula = formula.strip()
     parts = [p.strip() for p in formula.split("|")]
@@ -38,11 +55,16 @@ def parse_formula(formula: str) -> FormulaSpec:
         add_intercept = False
         rhs = rhs.rsplit("-", 1)[0].strip().rstrip("+").strip()
 
-    # Parse exog variables
+    # Parse exog variables, expanding * interactions
     if rhs in ("1", ""):
         exog: list[str] = []
     else:
-        exog = [v.strip() for v in rhs.split("+") if v.strip() and v.strip() != "1"]
+        raw_terms = [v.strip() for v in rhs.split("+") if v.strip() and v.strip() != "1"]
+        exog = []
+        for term in raw_terms:
+            for expanded in _expand_star(term):
+                if expanded not in exog:
+                    exog.append(expanded)
 
     # Second part (optional): fixed effects
     fe: list[str] = []
