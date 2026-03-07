@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Econometric regression methods using Polars DataFrames"
 readme = "README.md"
 license = "MIT"
+authors = [{name = "Alex Sullivan Mora"}]
 requires-python = ">=3.11"
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -29,6 +30,10 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/AlexSulliMora/polars_reg"
+Repository = "https://github.com/AlexSulliMora/polars_reg"
 
 [tool.ruff]
 line-length = 100
