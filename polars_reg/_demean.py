@@ -8,7 +8,12 @@ import scipy.sparse.csgraph
 from numpy.typing import NDArray
 
 try:
-    from polars_reg._native import rust_demean as _rust_demean, rust_absorbed_dof as _rust_absorbed_dof
+    from polars_reg._native import (
+        rust_absorbed_dof as _rust_absorbed_dof,
+    )
+    from polars_reg._native import (
+        rust_demean as _rust_demean,
+    )
 
     _HAS_NATIVE = True
 except ImportError:

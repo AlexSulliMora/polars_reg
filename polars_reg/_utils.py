@@ -23,8 +23,14 @@ def _to_codes(series: pl.Series) -> np.ndarray:
     """
     dtype = series.dtype
     if dtype in (
-        pl.Int8, pl.Int16, pl.Int32, pl.Int64,
-        pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64,
+        pl.Int8,
+        pl.Int16,
+        pl.Int32,
+        pl.Int64,
+        pl.UInt8,
+        pl.UInt16,
+        pl.UInt32,
+        pl.UInt64,
     ):
         arr = series.to_numpy().astype(np.int64)
         if _HAS_NATIVE:

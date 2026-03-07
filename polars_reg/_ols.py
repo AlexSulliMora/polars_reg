@@ -95,8 +95,8 @@ def _ols_rust_path(
         fe_codes_list,
         n_groups_list,
         cl_codes_list,
-        1e-8,       # tol
-        100_000,    # max_iter
+        1e-8,  # tol
+        100_000,  # max_iter
     )
 
     beta = np.asarray(beta)
@@ -189,7 +189,11 @@ def ols(
     )
     if use_rust:
         return _ols_rust_path(
-            arrays, spec, fe_dict, cluster, vcov,
+            arrays,
+            spec,
+            fe_dict,
+            cluster,
+            vcov,
         )
 
     # Handle frequency weights: expand effective sample size

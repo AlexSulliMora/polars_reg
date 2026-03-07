@@ -72,9 +72,7 @@ def _recode_to_contiguous(arr: NDArray) -> tuple[NDArray, int]:
     return codes, int(codes.max()) + 1
 
 
-def _clustered_meat(
-    X: NDArray, resid: NDArray, codes: NDArray, n_groups: int
-) -> NDArray:
+def _clustered_meat(X: NDArray, resid: NDArray, codes: NDArray, n_groups: int) -> NDArray:
     """Compute the clustered sandwich meat: sum_g (s_g s_g').
 
     Uses Rust native extension when available for O(n*k) aggregation.
@@ -223,7 +221,6 @@ def _interaction_codes(*arrays: NDArray) -> tuple[NDArray, int]:
     # multiplied offsets (avoids expensive structured array + np.unique).
     combined = arrays[0].astype(np.int64)
     for arr in arrays[1:]:
-        max_val = combined.max() + 1
         combined = combined * (int(arr.max()) + 1) + arr.astype(np.int64)
     return _recode_to_contiguous(combined)
 
