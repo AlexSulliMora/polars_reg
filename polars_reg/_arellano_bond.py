@@ -249,9 +249,7 @@ def panel_sys_gmm(
 
     # Instrument for level equation: lagged first difference Δy_{t-1}
     lag_exprs.append(
-        (pl.col(depvar).shift(1) - pl.col(depvar).shift(2))
-        .over(entity)
-        .alias(f"DL1_iv_{depvar}")
+        (pl.col(depvar).shift(1) - pl.col(depvar).shift(2)).over(entity).alias(f"DL1_iv_{depvar}")
     )
 
     # First-difference exogenous vars
