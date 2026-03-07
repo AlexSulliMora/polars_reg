@@ -111,9 +111,9 @@ print(pr.to_r("ols", "y ~ x1 + x2 | firm_id", cluster=["firm_id"]))
 #   model <- feols(y ~ x1 + x2 | firm_id, data=df, vcov=~firm_id)
 ```
 
-## Showcase Notebook
+## Showcase
 
-See [`notebooks/showcase.ipynb`](notebooks/showcase.ipynb) for a full tour of all features.
+See the [showcase notebook](notebooks/showcase.ipynb) for a full tour of all features, or view the [rendered PDF](notebooks/showcase.pdf) with all outputs included.
 
 ## Requirements
 
