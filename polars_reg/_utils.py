@@ -66,7 +66,7 @@ def extract_arrays(
     n_obs = len(df_clean)
 
     # Extract y
-    y = df_clean[spec.depvar].to_numpy(allow_copy=False).astype(np.float64)
+    y = df_clean[spec.depvar].to_numpy().astype(np.float64)
 
     # Extract X with optional intercept
     names: list[str] = []
@@ -77,10 +77,10 @@ def extract_arrays(
             parts = col.split(":")
             arr = np.ones(n_obs, dtype=np.float64)
             for p in parts:
-                arr = arr * df_clean[p].to_numpy(allow_copy=False).astype(np.float64)
+                arr = arr * df_clean[p].to_numpy().astype(np.float64)
             x_cols.append(arr)
         else:
-            x_cols.append(df_clean[col].to_numpy(allow_copy=False).astype(np.float64))
+            x_cols.append(df_clean[col].to_numpy().astype(np.float64))
         names.append(col)
     if spec.add_intercept:
         x_cols.append(np.ones(n_obs, dtype=np.float64))
@@ -106,13 +106,11 @@ def extract_arrays(
     endog_names = None
     instrument_names = None
     if spec.endog:
-        endog_cols = [df_clean[c].to_numpy(allow_copy=False).astype(np.float64) for c in spec.endog]
+        endog_cols = [df_clean[c].to_numpy().astype(np.float64) for c in spec.endog]
         endog = np.column_stack(endog_cols)
         endog_names = list(spec.endog)
     if spec.instruments:
-        iv_cols = [
-            df_clean[c].to_numpy(allow_copy=False).astype(np.float64) for c in spec.instruments
-        ]
+        iv_cols = [df_clean[c].to_numpy().astype(np.float64) for c in spec.instruments]
         instruments = np.column_stack(iv_cols)
         instrument_names = list(spec.instruments)
 
