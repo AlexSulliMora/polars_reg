@@ -54,6 +54,7 @@ def extract_arrays(
             exog_cols.extend(col.split(":"))
         else:
             exog_cols.append(col)
+    # Indicator columns are already in exog_cols (without i. prefix)
     all_cols = [spec.depvar] + exog_cols + spec.fe + spec.endog + spec.instruments
     if cluster:
         all_cols += [c for c in cluster if c not in all_cols]
@@ -63,8 +64,12 @@ def extract_arrays(
         all_cols.append(weights)
     all_cols = list(dict.fromkeys(all_cols))  # dedupe preserving order
 
-    # Drop rows with nulls in numeric columns
-    numeric_cols = [spec.depvar] + exog_cols + spec.endog + spec.instruments
+    # Drop rows with nulls in numeric columns (exclude indicator cols from null check)
+    numeric_cols = [
+        c
+        for c in ([spec.depvar] + exog_cols + spec.endog + spec.instruments)
+        if c not in spec.indicators
+    ]
     if weights:
         numeric_cols.append(weights)
     df_clean = df.select(all_cols).drop_nulls(subset=numeric_cols)
@@ -74,20 +79,55 @@ def extract_arrays(
     # Extract y
     y = df_clean[spec.depvar].to_numpy().astype(np.float64)
 
+    # Pre-compute indicator dummy matrices (sorted levels, drop first as reference)
+    _indicator_cache: dict[str, tuple[list[str], np.ndarray]] = {}
+    for ind_col in spec.indicators:
+        series = df_clean[ind_col]
+        levels = sorted(series.unique().to_list())
+        if len(levels) < 2:
+            raise ValueError(f"Indicator variable '{ind_col}' has fewer than 2 levels")
+        # Drop first level (reference category)
+        kept = levels[1:]
+        raw = series.to_numpy()
+        dummies = np.column_stack([(raw == lv).astype(np.float64) for lv in kept])
+        dummy_names = [f"{ind_col}={lv}" for lv in kept]
+        _indicator_cache[ind_col] = (dummy_names, dummies)
+
     # Extract X with optional intercept
     names: list[str] = []
     x_cols: list[np.ndarray] = []
     for col in spec.exog:
         if ":" in col:
             # Interaction term: elementwise product of constituent columns
+            # Each part may be an indicator (expand) or continuous (single col)
             parts = col.split(":")
-            arr = np.ones(n_obs, dtype=np.float64)
+            # Build list of (names, arrays) for each part
+            part_expansions: list[list[tuple[str, np.ndarray]]] = []
             for p in parts:
-                arr = arr * df_clean[p].to_numpy().astype(np.float64)
-            x_cols.append(arr)
+                if p in _indicator_cache:
+                    ind_names, ind_arr = _indicator_cache[p]
+                    part_expansions.append([(nm, ind_arr[:, j]) for j, nm in enumerate(ind_names)])
+                else:
+                    part_expansions.append([(p, df_clean[p].to_numpy().astype(np.float64))])
+            # Cartesian product of all parts
+            combos = part_expansions[0]
+            for pe in part_expansions[1:]:
+                new_combos = []
+                for n1, a1 in combos:
+                    for n2, a2 in pe:
+                        new_combos.append((f"{n1}:{n2}", a1 * a2))
+                combos = new_combos
+            for nm, arr in combos:
+                names.append(nm)
+                x_cols.append(arr)
+        elif col in _indicator_cache:
+            ind_names, ind_arr = _indicator_cache[col]
+            for j, nm in enumerate(ind_names):
+                names.append(nm)
+                x_cols.append(ind_arr[:, j])
         else:
             x_cols.append(df_clean[col].to_numpy().astype(np.float64))
-        names.append(col)
+            names.append(col)
     if spec.add_intercept:
         x_cols.append(np.ones(n_obs, dtype=np.float64))
         names.append("_cons")

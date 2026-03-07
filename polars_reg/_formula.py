@@ -11,6 +11,8 @@ class FormulaSpec:
     endog: list[str] = field(default_factory=list)
     instruments: list[str] = field(default_factory=list)
     add_intercept: bool = True
+    indicators: set[str] = field(default_factory=set)
+    """Column names that should be expanded as indicator (dummy) variables."""
 
 
 def _expand_star(term: str) -> list[str]:
@@ -28,6 +30,13 @@ def _expand_star(term: str) -> list[str]:
     return result
 
 
+def _strip_indicator(term: str) -> tuple[str, bool]:
+    """Strip i. prefix from a term. Returns (clean_name, is_indicator)."""
+    if term.startswith("i."):
+        return term[2:], True
+    return term, False
+
+
 def parse_formula(formula: str) -> FormulaSpec:
     """Parse a formula string into a FormulaSpec.
 
@@ -39,6 +48,8 @@ def parse_formula(formula: str) -> FormulaSpec:
         y ~ x_exog || x_endog ~ z1          (IV, no FE, empty FE slot)
         y ~ x1*x2                           (expands to x1 + x2 + x1:x2)
         y ~ x1:x2                           (interaction term only)
+        y ~ i.x1 + x2                      (x1 as indicator dummies)
+        y ~ i.x1*x2                        (indicator + continuous interaction)
     """
     formula = formula.strip()
     parts = [p.strip() for p in formula.split("|")]
@@ -55,13 +66,39 @@ def parse_formula(formula: str) -> FormulaSpec:
         add_intercept = False
         rhs = rhs.rsplit("-", 1)[0].strip().rstrip("+").strip()
 
-    # Parse exog variables, expanding * interactions
+    # Parse exog variables, expanding * interactions and i. indicators
+    indicators: set[str] = set()
     if rhs in ("1", ""):
         exog: list[str] = []
     else:
         raw_terms = [v.strip() for v in rhs.split("+") if v.strip() and v.strip() != "1"]
         exog = []
         for term in raw_terms:
+            # Strip i. prefix before expanding * (e.g. i.x1*x2)
+            # Process each sub-part of * for i. prefix
+            if "*" in term:
+                sub_parts = [p.strip() for p in term.split("*")]
+                clean_parts = []
+                for sp in sub_parts:
+                    clean, is_ind = _strip_indicator(sp)
+                    if is_ind:
+                        indicators.add(clean)
+                    clean_parts.append(clean)
+                term = "*".join(clean_parts)
+            elif ":" in term:
+                # Handle i. prefix inside colon terms (e.g. i.group:x)
+                colon_parts = term.split(":")
+                clean_colon = []
+                for cp in colon_parts:
+                    clean, is_ind = _strip_indicator(cp.strip())
+                    if is_ind:
+                        indicators.add(clean)
+                    clean_colon.append(clean)
+                term = ":".join(clean_colon)
+            else:
+                term, is_ind = _strip_indicator(term)
+                if is_ind:
+                    indicators.add(term)
             for expanded in _expand_star(term):
                 if expanded not in exog:
                     exog.append(expanded)
@@ -88,4 +125,5 @@ def parse_formula(formula: str) -> FormulaSpec:
         endog=endog,
         instruments=instruments,
         add_intercept=add_intercept,
+        indicators=indicators,
     )

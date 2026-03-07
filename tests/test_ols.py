@@ -157,3 +157,75 @@ def test_three_way_interaction():
     r = ols("y ~ x1*x2*x3", data=df)
     expected = ["x1", "x2", "x3", "x1:x2", "x1:x3", "x2:x3", "x1:x2:x3", "_cons"]
     assert r.names == expected
+
+
+# ── Indicator variables ──────────────────────────────────────────
+
+
+@pl.StringCache()
+def test_indicator_basic():
+    """i.group expands to K-1 dummy variables."""
+    rng = np.random.default_rng(42)
+    n = 300
+    x = rng.standard_normal(n)
+    group = rng.choice([1, 2, 3, 4], n)
+    y = 1.0 + 0.5 * x + (group == 2) + (group == 3) * 2 + (group == 4) * 3
+    y = y + rng.standard_normal(n) * 0.3
+    df = pl.DataFrame({"y": y, "x": x, "group": group})
+    r = ols("y ~ x + i.group", data=df)
+    # 3 dummies (group=2, 3, 4) + x + _cons = 5 coefficients
+    assert len(r.coefficients) == 5
+    assert "group=2" in r.names
+    assert "group=3" in r.names
+    assert "group=4" in r.names
+    # Coefficients close to true values
+    np.testing.assert_allclose(r.coefficients[r.names.index("group=2")], 1.0, atol=0.2)
+    np.testing.assert_allclose(r.coefficients[r.names.index("group=4")], 3.0, atol=0.2)
+
+
+@pl.StringCache()
+def test_indicator_string_levels():
+    """i. works with string categories."""
+    rng = np.random.default_rng(42)
+    n = 300
+    x = rng.standard_normal(n)
+    group = rng.choice(["A", "B", "C"], n)
+    y = 1.0 + x + (group == "B") * 2.0 + (group == "C") * 4.0 + rng.standard_normal(n) * 0.3
+    df = pl.DataFrame({"y": y, "x": x, "group": group})
+    r = ols("y ~ x + i.group", data=df)
+    # A is reference (sorted first)
+    assert "group=B" in r.names
+    assert "group=C" in r.names
+    assert "group=A" not in r.names
+
+
+@pl.StringCache()
+def test_indicator_star_interaction():
+    """i.group*x gives dummies + continuous + dummy:continuous."""
+    rng = np.random.default_rng(42)
+    n = 400
+    x = rng.standard_normal(n)
+    group = rng.choice([1, 2, 3], n)
+    y = x + (group == 2) + (group == 3) * 2 + rng.standard_normal(n) * 0.3
+    df = pl.DataFrame({"y": y, "x": x, "group": group})
+    r = ols("y ~ i.group*x", data=df)
+    # group=2, group=3, x, group=2:x, group=3:x, _cons = 6
+    assert len(r.coefficients) == 6
+    assert "group=2:x" in r.names
+    assert "group=3:x" in r.names
+
+
+@pl.StringCache()
+def test_indicator_with_fe():
+    """Indicator variables work with absorbed FE."""
+    rng = np.random.default_rng(42)
+    n = 500
+    x = rng.standard_normal(n)
+    group = rng.choice([1, 2, 3], n)
+    fe = rng.integers(0, 10, n)
+    y = x + (group == 2) + (group == 3) * 2 + fe * 0.1 + rng.standard_normal(n) * 0.3
+    df = pl.DataFrame({"y": y, "x": x, "group": group, "fe": fe})
+    r = ols("y ~ x + i.group | fe", data=df)
+    assert "group=2" in r.names
+    assert "group=3" in r.names
+    assert np.all(r.se > 0)

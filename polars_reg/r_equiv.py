@@ -101,6 +101,22 @@ def _translate(
         )
 
 
+def _r_varname(name: str, indicators: set[str] | None = None) -> str:
+    """Convert variable name to R syntax, wrapping indicators with factor()."""
+    ind = indicators or set()
+    if ":" in name:
+        parts = name.split(":")
+        return ":".join(f"factor({p})" if p in ind else p for p in parts)
+    if name in ind:
+        return f"factor({name})"
+    return name
+
+
+def _r_varlist(names: list[str], indicators: set[str] | None = None) -> str:
+    """Join variable names for R formula, applying factor() to indicators."""
+    return " + ".join(_r_varname(n, indicators) for n in names)
+
+
 # ---------------------------------------------------------------------------
 # OLS: lm() or fixest::feols()
 # ---------------------------------------------------------------------------
@@ -108,7 +124,7 @@ def _translate(
 
 def _to_lm(spec: Any, vcov: str) -> str:
     """OLS without FE or clustering → base R lm()."""
-    r_formula = f"{spec.depvar} ~ {' + '.join(spec.exog)}"
+    r_formula = f"{spec.depvar} ~ {_r_varlist(spec.exog, spec.indicators)}"
     if not spec.add_intercept:
         r_formula += " - 1"
 
@@ -128,7 +144,7 @@ def _to_feols(spec: Any, vcov: str, cluster: list[str] | None) -> str:
     """OLS with FE and/or clustering → fixest::feols()."""
     lines = ["library(fixest)", ""]
 
-    r_formula = f"{spec.depvar} ~ {' + '.join(spec.exog)}"
+    r_formula = f"{spec.depvar} ~ {_r_varlist(spec.exog, spec.indicators)}"
     if not spec.add_intercept:
         r_formula += " - 1"
     if spec.fe:
@@ -153,7 +169,7 @@ def _to_feols_iv(spec: Any, vcov: str, cluster: list[str] | None) -> str:
     """2SLS with optional FE → fixest::feols() with IV syntax."""
     lines = ["library(fixest)", ""]
 
-    exog_str = " + ".join(spec.exog) if spec.exog else "1"
+    exog_str = _r_varlist(spec.exog, spec.indicators) if spec.exog else "1"
     endog_str = " + ".join(spec.endog)
     instr_str = " + ".join(spec.instruments)
 
@@ -178,7 +194,7 @@ def _to_ivreg(spec: Any, vcov: str, method: str = "liml") -> str:
     """LIML → AER::ivreg()."""
     lines = ["library(AER)", ""]
 
-    exog_str = " + ".join(spec.exog) if spec.exog else "1"
+    exog_str = _r_varlist(spec.exog, spec.indicators) if spec.exog else "1"
     endog_str = " + ".join(spec.endog)
     instr_str = " + ".join(spec.instruments)
 
@@ -212,7 +228,7 @@ def _to_gmm(spec: Any) -> str:
         "",
     ]
 
-    exog_str = " + ".join(spec.exog) if spec.exog else "1"
+    exog_str = _r_varlist(spec.exog, spec.indicators) if spec.exog else "1"
     endog_str = " + ".join(spec.endog)
     instr_str = " + ".join(spec.instruments)
     r_formula = f"{spec.depvar} ~ {exog_str} | {endog_str} ~ {instr_str}"
@@ -244,7 +260,7 @@ def _to_plm(
 
     lines = ["library(plm)", ""]
 
-    r_formula = f"{spec.depvar} ~ {' + '.join(spec.exog)}"
+    r_formula = f"{spec.depvar} ~ {_r_varlist(spec.exog, spec.indicators)}"
 
     index_parts = [f'"{entity}"']
     if time:

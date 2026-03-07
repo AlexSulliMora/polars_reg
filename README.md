@@ -90,6 +90,8 @@ result.wald_test(R)  # Wald test for linear restrictions
 | `y ~ x1 \| fe1 \| x_end ~ z1` | IV + FE | `ivreghdfe y x1 (x_end = z1), absorb(fe1)` | `feols(y ~ x1 \| fe1 \| x_end ~ z1)` |
 | `y ~ x1*x2` | Full factorial | `reg y c.x1##c.x2` | `lm(y ~ x1 * x2)` |
 | `y ~ x1:x2` | Interaction only | `reg y c.x1#c.x2` | `lm(y ~ x1:x2)` |
+| `y ~ i.group + x1` | Indicator dummies | `reg y i.group x1` | `lm(y ~ factor(group) + x1)` |
+| `y ~ i.group*x1` | Indicator × continuous | `reg y i.group#c.x1` | `lm(y ~ factor(group) * x1)` |
 
 ## Estimators
 

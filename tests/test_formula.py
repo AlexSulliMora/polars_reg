@@ -86,3 +86,33 @@ def test_interaction_with_fe():
     spec = parse_formula("y ~ x1*x2 | fe1")
     assert spec.exog == ["x1", "x2", "x1:x2"]
     assert spec.fe == ["fe1"]
+
+
+# ── Indicator variables ──────────────────────────────────────────
+
+
+def test_indicator_basic():
+    spec = parse_formula("y ~ x + i.group")
+    assert spec.exog == ["x", "group"]
+    assert "group" in spec.indicators
+
+
+def test_indicator_star():
+    """i.group*x expands with group marked as indicator."""
+    spec = parse_formula("y ~ i.group*x")
+    assert "group" in spec.indicators
+    assert "x" not in spec.indicators
+    assert spec.exog == ["group", "x", "group:x"]
+
+
+def test_indicator_colon():
+    """i.group:x marks group as indicator in colon term."""
+    spec = parse_formula("y ~ x + i.group:x")
+    assert "group" in spec.indicators
+    assert spec.exog == ["x", "group:x"]
+
+
+def test_indicator_multiple():
+    spec = parse_formula("y ~ i.a + i.b + x")
+    assert spec.indicators == {"a", "b"}
+    assert spec.exog == ["a", "b", "x"]
