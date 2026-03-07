@@ -56,6 +56,27 @@ def _fmt_p_col(values: list[float], width: int) -> list[str]:
     return result
 
 
+def _append_wrapped(lines: list[str], label: str, text: str, width: int) -> None:
+    """Append a metadata line, wrapping at commas if it exceeds table width."""
+    prefix = f"  {label:<18} "
+    if len(prefix + text) <= width:
+        lines.append(prefix + text)
+        return
+    indent = " " * len(prefix)
+    avail = width - len(prefix)
+    parts = text.split(", ")
+    current = parts[0]
+    for part in parts[1:]:
+        candidate = current + ", " + part
+        if len(candidate) <= avail:
+            current = candidate
+        else:
+            lines.append(prefix + current + ",")
+            prefix = indent
+            current = part
+    lines.append(prefix + current)
+
+
 @dataclass
 class RegressionResult:
     coefficients: NDArray
@@ -156,30 +177,31 @@ class RegressionResult:
             f"{'=' * w}",
         ]
 
-        # Model info in two columns
+        # Model info in two columns (left col 40 chars, right col 38 chars)
+        lw, rw = 40, 38
         depvar = self.names[0] if len(self.names) == 1 else "y"
-        left = [
-            f"{'Dep. Variable:':<18} {depvar:>6}",
-            f"{'No. Observations:':<18} {self.n_obs:>6}",
-            f"{'Df Residuals:':<18} {self.df_r:>6}",
-        ]
-        right = [
-            f"R-squared:     {self.r_squared:>8.4f}",
-            f"Adj. R-squared:{self.r_squared_adj:>8.4f}",
-            f"SE type:  {self.vcov_type:>12}",
-        ]
-        for l_line, r_line in zip(left, right):
-            lines.append(f"  {l_line:<38} {r_line}")
+
+        def _row(l_label: str, l_val: str, r_label: str, r_val: str) -> str:
+            left = f"{l_label:<18} {l_val:>6}"
+            right = f"{r_label:<16} {r_val:>8}"
+            return f"  {left:<{lw}}{right:>{rw}}"
+
+        lines.append(_row("Dep. Variable:", depvar, "R-squared:", f"{self.r_squared:.4f}"))
+        r2a = f"{self.r_squared_adj:.4f}"
+        lines.append(_row("No. Observations:", str(self.n_obs), "Adj. R-squared:", r2a))
+        lines.append(_row("Df Residuals:", str(self.df_r), "SE type:", self.vcov_type))
 
         if self.fe_absorbed:
-            lines.append(f"  Absorbed FE: {', '.join(self.fe_absorbed)} ({self.df_absorbed} DoF)")
+            dof_suffix = f" ({self.df_absorbed} DoF)"
+            fe_str = ", ".join(self.fe_absorbed) + dof_suffix
+            _append_wrapped(lines, "Absorbed FE:", fe_str, w)
         if self.n_clusters:
             cl_info = ", ".join(f"{name}: {g}" for name, g in self.n_clusters.items())
-            lines.append(f"  Clusters: {cl_info}")
+            _append_wrapped(lines, "Clusters:", cl_info, w)
         if self.first_stage_f is not None:
-            lines.append(f"  First-stage F: {self.first_stage_f:.2f}")
+            lines.append(f"  {'First-stage F:':<18} {self.first_stage_f:.2f}")
         if self.j_stat is not None and self.j_pvalue is not None:
-            lines.append(f"  Hansen J: {self.j_stat:.4f} (p = {self.j_pvalue:.4f})")
+            lines.append(f"  {'Hansen J:':<18} {self.j_stat:.4f} (p = {self.j_pvalue:.4f})")
 
         lines.append(f"{'=' * w}")
 
