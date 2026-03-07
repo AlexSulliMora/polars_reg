@@ -18,6 +18,7 @@ try:
 except ImportError:
     pass
 
+from polars_reg._diagnostics import hausman_test
 from polars_reg._groupby import GroupRegressionResult, groupby_reg
 from polars_reg._regtable import regtable
 from polars_reg.r_equiv import compare_r, to_r
@@ -39,4 +40,5 @@ __all__ = [
     "compare_stata",
     "to_r",
     "compare_r",
+    "hausman_test",
 ]

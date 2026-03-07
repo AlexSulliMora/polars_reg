@@ -23,17 +23,20 @@ def panel_fe(
     Demeans by entity (and optionally time), then OLS on demeaned data.
     Default clusters SEs by entity.
     """
-    if cluster is None:
-        cluster = [entity]
-    elif isinstance(cluster, str):
+    if isinstance(cluster, str):
         cluster = [cluster]
+    elif isinstance(cluster, list) and len(cluster) == 0:
+        # Explicit empty list → iid SEs (useful for Hausman test)
+        pass
+    elif cluster is None:
+        cluster = [entity]
     data = ensure_polars(data)
 
     spec = parse_formula(formula)
     spec.fe = [entity] + ([time] if time else [])
     spec.add_intercept = False
 
-    arrays = extract_arrays(data, spec, cluster=cluster)
+    arrays = extract_arrays(data, spec, cluster=cluster if cluster else None)
     y, X = arrays.y, arrays.X
     fe_dict = arrays.fe_arrays
 
@@ -63,12 +66,20 @@ def panel_fe(
     r2 = 1.0 - ss_res / ss_tot
     r2_adj = 1.0 - (1.0 - r2) * (n - 1) / (n - k - df_abs)
 
-    cluster_arrays_list = [arrays.cluster_arrays[c] for c in cluster]
-    if len(cluster_arrays_list) == 1:
-        V = vcov_clustered(X_dm, resid, cluster_arrays_list[0])
+    if cluster:
+        cluster_arrays_list = [arrays.cluster_arrays[c] for c in cluster]
+        if len(cluster_arrays_list) == 1:
+            V = vcov_clustered(X_dm, resid, cluster_arrays_list[0])
+        else:
+            V = vcov_multiway_clustered(X_dm, resid, cluster_arrays_list)
+        n_clusters_dict = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
+        df_r = min(n_clusters_dict.values()) - 1
+        vcov_type_str = "cluster"
     else:
-        V = vcov_multiway_clustered(X_dm, resid, cluster_arrays_list)
-    n_clusters_dict = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
+        V = vcov_iid(X_dm, resid, df_abs=df_abs)
+        n_clusters_dict = None
+        df_r = n - k - df_abs
+        vcov_type_str = "iid"
 
     return RegressionResult(
         coefficients=beta,
@@ -77,11 +88,11 @@ def panel_fe(
         names=arrays.names,
         n_obs=n,
         k=k,
-        df_r=min(n_clusters_dict.values()) - 1,
+        df_r=df_r,
         r_squared=r2,
         r_squared_adj=r2_adj,
         model_type="Panel FE",
-        vcov_type="cluster",
+        vcov_type=vcov_type_str,
         n_clusters=n_clusters_dict,
         fe_absorbed=list(fe_dict.keys()),
         df_absorbed=df_abs,

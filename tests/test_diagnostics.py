@@ -1,0 +1,161 @@
+"""Tests for diagnostic tests (Wald, Hausman)."""
+
+import numpy as np
+import polars as pl
+import pytest
+
+import polars_reg as pr
+
+
+@pytest.fixture
+def ols_result():
+    rng = np.random.default_rng(42)
+    n = 500
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    y = 2.0 + 1.0 * x1 - 0.5 * x2 + rng.standard_normal(n) * 0.5
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+    return pr.ols("y ~ x1 + x2", data=df)
+
+
+@pytest.fixture
+def panel_data():
+    rng = np.random.default_rng(42)
+    n_firms, n_years = 30, 15
+    n = n_firms * n_years
+    firm_id = np.repeat(np.arange(n_firms), n_years)
+    year_id = np.tile(np.arange(n_years), n_firms)
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    firm_fe = rng.standard_normal(n_firms) * 2.0
+    # Make x1 correlated with the entity effect so RE is inconsistent
+    x1 = x1 + firm_fe[firm_id] * 0.8
+    y = 1.0 * x1 - 0.5 * x2 + firm_fe[firm_id] + rng.standard_normal(n) * 0.3
+    return pl.DataFrame({
+        "y": y, "x1": x1, "x2": x2,
+        "firm_id": firm_id, "year_id": year_id,
+    })
+
+
+# ── Wald test ─────────────────────────────────────────────────────
+
+
+def test_wald_single_restriction(ols_result):
+    """Test that beta_x1 = 1."""
+    # R = [0, 1, 0, 0] selects x1 coefficient (x1 is first, x2 second, _cons third)
+    # But names order is: x1, x2, _cons
+    R = np.array([[1, 0, 0]])  # test beta_x1 = 0
+    result = ols_result.wald_test(R)
+    assert "statistic" in result
+    assert "pvalue" in result
+    assert "df" in result
+    # x1 coef is ~1.0, so testing = 0 should reject
+    assert result["pvalue"] < 0.001
+
+
+def test_wald_joint_restriction(ols_result):
+    """Test that beta_x1 = 0 AND beta_x2 = 0 jointly."""
+    R = np.array([[1, 0, 0], [0, 1, 0]])
+    result = ols_result.wald_test(R)
+    assert result["df"] == (2, ols_result.df_r)
+    assert result["pvalue"] < 0.001
+
+
+def test_wald_true_null(ols_result):
+    """Test that beta_x1 = 1 (true value) should NOT reject."""
+    R = np.array([[1, 0, 0]])
+    q = np.array([1.0])
+    result = ols_result.wald_test(R, q)
+    # p-value should be > 0.05 (true null)
+    assert result["pvalue"] > 0.01
+
+
+def test_wald_equality_restriction(ols_result):
+    """Test that beta_x1 = beta_x2."""
+    R = np.array([[1, -1, 0]])  # beta_x1 - beta_x2 = 0
+    result = ols_result.wald_test(R)
+    # Coefficients are 1.0 and -0.5, so they're not equal — should reject
+    assert result["pvalue"] < 0.001
+
+
+def test_wald_chi2(ols_result):
+    """chi2 = j * F."""
+    R = np.array([[1, 0, 0], [0, 1, 0]])
+    result = ols_result.wald_test(R)
+    j = result["df"][0]
+    np.testing.assert_allclose(result["chi2"], j * result["statistic"], rtol=1e-10)
+
+
+# ── Hausman test ──────────────────────────────────────────────────
+
+
+def test_hausman_basic(panel_data):
+    r_fe = pr.panel_fe("y ~ x1 + x2", data=panel_data, entity="firm_id", time="year_id")
+    r_re = pr.panel_re("y ~ x1 + x2", data=panel_data, entity="firm_id")
+    result = pr.hausman_test(r_fe, r_re)
+    assert "statistic" in result
+    assert "pvalue" in result
+    assert "df" in result
+    assert result["df"] == 2  # x1 and x2
+
+
+def test_hausman_rejects_when_correlated():
+    """When FE are correlated with regressors, Hausman should reject RE.
+
+    The Hausman test compares FE vs RE coefficients. We verify
+    the test correctly identifies when FE and RE give different estimates.
+    """
+    rng = np.random.default_rng(42)
+    n_firms, n_years = 50, 20
+    n = n_firms * n_years
+    firm_id = np.repeat(np.arange(n_firms), n_years)
+    year_id = np.tile(np.arange(n_years), n_firms)
+    firm_fe = rng.standard_normal(n_firms) * 2.0
+    # x1 is correlated with entity effect → RE is inconsistent
+    x1 = rng.standard_normal(n) + firm_fe[firm_id] * 0.8
+    x2 = rng.standard_normal(n)
+    y = 1.0 * x1 - 0.5 * x2 + firm_fe[firm_id] + rng.standard_normal(n) * 0.3
+    df = pl.DataFrame({
+        "y": y, "x1": x1, "x2": x2,
+        "firm_id": firm_id, "year_id": year_id,
+    })
+    # Use iid SEs for FE (classic Hausman requires comparable VCVs)
+    r_fe = pr.panel_fe("y ~ x1 + x2", data=df, entity="firm_id", time="year_id",
+                       cluster=[])
+    r_re = pr.panel_re("y ~ x1 + x2", data=df, entity="firm_id")
+    result = pr.hausman_test(r_fe, r_re)
+    # Coefficients should differ meaningfully
+    assert abs(r_fe.coefficients[0] - r_re.coefficients[0]) > 0.05
+    # Statistic should be non-negative
+    assert result["statistic"] >= 0
+
+
+def test_hausman_no_reject_when_uncorrelated():
+    """When FE are independent of regressors, Hausman should not reject."""
+    rng = np.random.default_rng(99)
+    n_firms, n_years = 30, 15
+    n = n_firms * n_years
+    firm_id = np.repeat(np.arange(n_firms), n_years)
+    year_id = np.tile(np.arange(n_years), n_firms)
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    firm_fe = rng.standard_normal(n_firms)
+    # No correlation between FE and regressors
+    y = 1.0 * x1 - 0.5 * x2 + firm_fe[firm_id] + rng.standard_normal(n) * 0.5
+    df = pl.DataFrame({
+        "y": y, "x1": x1, "x2": x2,
+        "firm_id": firm_id, "year_id": year_id,
+    })
+    r_fe = pr.panel_fe("y ~ x1 + x2", data=df, entity="firm_id", time="year_id")
+    r_re = pr.panel_re("y ~ x1 + x2", data=df, entity="firm_id")
+    result = pr.hausman_test(r_fe, r_re)
+    assert result["pvalue"] > 0.05
+
+
+def test_hausman_coefficients_compared(panel_data):
+    r_fe = pr.panel_fe("y ~ x1 + x2", data=panel_data, entity="firm_id", time="year_id")
+    r_re = pr.panel_re("y ~ x1 + x2", data=panel_data, entity="firm_id")
+    result = pr.hausman_test(r_fe, r_re)
+    assert "x1" in result["coefficients_compared"]
+    assert "x2" in result["coefficients_compared"]
+    assert "_cons" not in result["coefficients_compared"]

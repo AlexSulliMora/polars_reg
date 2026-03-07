@@ -228,6 +228,35 @@ class RegressionResult:
         lines.append(f"{'=' * w}")
         return "\n".join(lines)
 
+    def wald_test(self, R: NDArray, q: NDArray | None = None) -> dict:
+        """Wald test for linear restrictions R @ beta = q.
+
+        Args:
+            R: (j, k) constraint matrix, where j = number of restrictions
+            q: (j,) vector of restriction values. Defaults to zero vector.
+
+        Returns:
+            dict with 'statistic' (F or chi2), 'pvalue', 'df' (j, df_r)
+        """
+        R = np.atleast_2d(R)
+        j = R.shape[0]
+        if q is None:
+            q = np.zeros(j)
+        q = np.asarray(q, dtype=float)
+
+        diff = R @ self.coefficients - q
+        middle = R @ self.vcov @ R.T
+        chi2_stat = float(diff @ np.linalg.solve(middle, diff))
+        f_stat = chi2_stat / j
+        f_pvalue = float(1.0 - stats.f.cdf(f_stat, j, self.df_r))
+
+        return {
+            "statistic": f_stat,
+            "pvalue": f_pvalue,
+            "df": (j, self.df_r),
+            "chi2": chi2_stat,
+        }
+
     def __repr__(self) -> str:
         return (
             f"<{self.model_type}Result n={self.n_obs} k={self.k} "
