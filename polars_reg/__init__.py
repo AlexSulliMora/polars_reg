@@ -18,6 +18,7 @@ try:
 except ImportError:
     pass
 
+from polars_reg._regtable import regtable
 from polars_reg.stata import compare_stata, to_stata
 
 __all__ = [
@@ -29,6 +30,7 @@ __all__ = [
     "panel_re",
     "panel_fd",
     "RegressionResult",
+    "regtable",
     "to_stata",
     "compare_stata",
 ]
