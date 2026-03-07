@@ -1,8 +1,10 @@
 """Tests for regtable (estout-style side-by-side regression table)."""
 
+import numpy as np
+import polars as pl
 import pytest
 
-from polars_reg import ols, regtable
+from polars_reg import groupby_reg, ols, regtable
 
 
 def test_regtable_basic(simple_data):
@@ -126,3 +128,38 @@ def test_regtable_precision(simple_data):
     # Just check both run without error
     assert len(t2) > 0
     assert len(t6) > 0
+
+
+def test_regtable_groupby_expansion():
+    """GroupRegressionResult is auto-expanded with group keys as labels."""
+    rng = np.random.default_rng(42)
+    n = 300
+    group = np.repeat(["A", "B", "C"], n // 3)
+    x1 = rng.standard_normal(n)
+    y = 1.0 + 2.0 * x1 + rng.standard_normal(n) * 0.5
+    df = pl.DataFrame({"y": y, "x1": x1, "group": group})
+    grp = groupby_reg(ols, "y ~ x1", df, group_by="group")
+    table = regtable(grp)
+    # Should have 3 columns labeled by group keys
+    assert "A" in table
+    assert "B" in table
+    assert "C" in table
+    # Should have coefficient rows
+    assert "x1" in table
+
+
+def test_regtable_groupby_mixed(simple_data):
+    """Mix of RegressionResult and GroupRegressionResult works."""
+    rng = np.random.default_rng(42)
+    n = 200
+    group = np.repeat(["X", "Y"], n // 2)
+    x1 = rng.standard_normal(n)
+    y = 1.0 + 2.0 * x1 + rng.standard_normal(n) * 0.5
+    df = pl.DataFrame({"y": y, "x1": x1, "group": group})
+    grp = groupby_reg(ols, "y ~ x1", df, group_by="group")
+    r_all = ols("y ~ x1", data=df)
+    table = regtable(r_all, grp)
+    # First column auto-labeled (1), then group keys
+    assert "(1)" in table
+    assert "X" in table
+    assert "Y" in table

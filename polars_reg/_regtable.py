@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from polars_reg._groupby import GroupRegressionResult
 from polars_reg._results import RegressionResult
 
 
 def regtable(
-    *results: RegressionResult,
+    *results: RegressionResult | GroupRegressionResult,
     labels: list[str] | None = None,
     precision: int = 4,
     stars: bool = True,
@@ -14,8 +15,11 @@ def regtable(
     """Display multiple regressions side-by-side in a compact table.
 
     Args:
-        *results: RegressionResult objects to compare.
-        labels: Column labels. Defaults to (1), (2), ...
+        *results: RegressionResult or GroupRegressionResult objects.
+            GroupRegressionResult is automatically expanded, using group
+            keys as column labels.
+        labels: Column labels. Defaults to group keys for GroupRegressionResult,
+            (1), (2), ... for individual results.
         precision: Significant figures for coefficients/SEs (default 4).
         stars: Show significance stars (default True).
             * p<0.10, ** p<0.05, *** p<0.01
@@ -26,9 +30,24 @@ def regtable(
     if not results:
         raise ValueError("At least one RegressionResult is required.")
 
+    # Expand GroupRegressionResult into individual results
+    expanded: list[RegressionResult] = []
+    auto_labels: list[str] = []
+    for r in results:
+        if isinstance(r, GroupRegressionResult):
+            for key, val in r.items():
+                expanded.append(val)
+                auto_labels.append(str(key))
+        else:
+            expanded.append(r)
+            auto_labels.append("")
+    results = tuple(expanded)
+
     n_models = len(results)
     if labels is None:
-        labels = [f"({i + 1})" for i in range(n_models)]
+        labels = [
+            lb if lb else f"({i + 1})" for i, lb in enumerate(auto_labels)
+        ]
     if len(labels) != n_models:
         raise ValueError(f"Expected {n_models} labels, got {len(labels)}.")
 
@@ -158,7 +177,6 @@ def regtable(
         lines.append("* p<0.10, ** p<0.05, *** p<0.01")
 
     table = "\n".join(lines)
-    print(table)
     return table
 
 
