@@ -52,3 +52,30 @@ def test_ols_no_intercept(simple_data):
     result = ols("y ~ x1 + x2 - 1", data=simple_data)
     assert "_cons" not in result.names
     assert len(result.coefficients) == 2
+
+
+def test_ols_with_fe(panel_data):
+    """OLS with absorbed FE should recover coefficients without FE bias."""
+    result = ols("y ~ x1 + x2 | firm_id + year_id", data=panel_data)
+    assert result.fe_absorbed == ["firm_id", "year_id"]
+    np.testing.assert_allclose(result.coefficients[0], 1.0, atol=0.15)  # x1
+    np.testing.assert_allclose(result.coefficients[1], -2.0, atol=0.15)  # x2
+    assert len(result.names) == 2  # no intercept when FE absorbed
+    assert result.df_absorbed > 0
+
+
+def test_ols_fe_clustered(panel_data):
+    result = ols("y ~ x1 + x2 | firm_id + year_id", data=panel_data, cluster=["firm_id"])
+    assert result.vcov_type == "cluster"
+    assert result.n_clusters == {"firm_id": 50}
+    assert result.fe_absorbed == ["firm_id", "year_id"]
+
+
+def test_ols_fe_twoway_clustered(panel_data):
+    result = ols(
+        "y ~ x1 + x2 | firm_id + year_id",
+        data=panel_data,
+        cluster=["firm_id", "year_id"],
+    )
+    assert result.vcov_type == "cluster"
+    assert result.n_clusters == {"firm_id": 50, "year_id": 20}

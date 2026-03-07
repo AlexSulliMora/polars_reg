@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import polars as pl
 
+from polars_reg._demean import absorbed_dof, demean, drop_singletons
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
 from polars_reg._se import vcov_clustered, vcov_iid, vcov_multiway_clustered, vcov_robust
@@ -18,7 +19,7 @@ def ols(
     """Ordinary Least Squares regression.
 
     Args:
-        formula: Formula string, e.g. "y ~ x1 + x2"
+        formula: Formula string, e.g. "y ~ x1 + x2" or "y ~ x1 + x2 | fe1 + fe2"
         data: Polars DataFrame or LazyFrame
         vcov: "iid", "HC0", "HC1", "HC2", or "HC3"
         cluster: Column name(s) for clustered SEs. Overrides vcov.
@@ -30,6 +31,38 @@ def ols(
     arrays = extract_arrays(data, spec, cluster=cluster)
 
     X, y = arrays.X, arrays.y
+    fe_dict = arrays.fe_arrays
+    has_fe = len(fe_dict) > 0
+
+    if has_fe:
+        # Drop singletons
+        keep = drop_singletons(fe_dict)
+        if not keep.all():
+            y = y[keep]
+            X = X[keep]
+            fe_dict = {k: v[keep] for k, v in fe_dict.items()}
+            if cluster:
+                arrays.cluster_arrays = {
+                    k: v[keep] for k, v in arrays.cluster_arrays.items()
+                }
+
+        # Remove intercept (absorbed by FE)
+        if spec.add_intercept and arrays.names[-1] == "_cons":
+            X = X[:, :-1]
+            arrays.names = arrays.names[:-1]
+
+        # Demean y and X
+        all_vars = np.column_stack([y.reshape(-1, 1), X])
+        demeaned = demean(all_vars, fe_dict)
+        y = demeaned[:, 0]
+        X = demeaned[:, 1:]
+
+        df_abs = absorbed_dof(fe_dict)
+        fe_absorbed = list(fe_dict.keys())
+    else:
+        df_abs = 0
+        fe_absorbed = None
+
     n, k = X.shape
 
     # Solve OLS: beta = (X'X)^{-1} X'y
@@ -38,12 +71,12 @@ def ols(
     beta = np.linalg.solve(XtX, Xty)
     resid = y - X @ beta
 
-    # R-squared
+    # R-squared (within-R² when FE are absorbed)
     ss_res = resid @ resid
     y_demean = y - y.mean()
     ss_tot = y_demean @ y_demean
     r2 = 1.0 - ss_res / ss_tot
-    r2_adj = 1.0 - (1.0 - r2) * (n - 1) / (n - k)
+    r2_adj = 1.0 - (1.0 - r2) * (n - 1) / (n - k - df_abs)
 
     # Variance-covariance
     if cluster:
@@ -59,12 +92,12 @@ def ols(
         V = vcov_iid(X, resid)
         vcov_type = "iid"
         n_clusters = None
-        df_r = n - k
+        df_r = n - k - df_abs
     else:
         V = vcov_robust(X, resid, kind=vcov)
         vcov_type = vcov
         n_clusters = None
-        df_r = n - k
+        df_r = n - k - df_abs
 
     return RegressionResult(
         coefficients=beta,
@@ -79,4 +112,6 @@ def ols(
         model_type="OLS",
         vcov_type=vcov_type,
         n_clusters=n_clusters,
+        fe_absorbed=fe_absorbed,
+        df_absorbed=df_abs,
     )
