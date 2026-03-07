@@ -187,7 +187,7 @@ def kleibergen_paap_test(
 
         Vcov_pi = np.zeros((k2, n_excl, n_excl))
         for m in range(k2):
-            score_m = Z_tilde * V_hat[:, m:m+1]
+            score_m = Z_tilde * V_hat[:, m : m + 1]
             Sm = np.zeros((G, n_excl))
             for j in range(n_excl):
                 Sm[:, j] = np.bincount(codes, weights=score_m[:, j], minlength=G)
@@ -211,7 +211,7 @@ def kleibergen_paap_test(
 
         Vcov_pi = np.zeros((k2, n_excl, n_excl))
         for m in range(k2):
-            score_m = Z_tilde * V_hat[:, m:m+1]
+            score_m = Z_tilde * V_hat[:, m : m + 1]
             meat_m = score_m.T @ score_m
             Vcov_pi[m] = dfc * ZtZ_inv @ meat_m @ ZtZ_inv
 

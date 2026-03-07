@@ -288,9 +288,15 @@ def test_kp_clustered():
     x_end = 0.8 * z1 + 0.6 * z2 + 0.3 * u
     y = 1.0 + 2.0 * x_end + u
     cluster = np.random.randint(0, 50, n)
-    df = pl.DataFrame({
-        "y": y, "x_end": x_end, "z1": z1, "z2": z2, "cl": cluster,
-    })
+    df = pl.DataFrame(
+        {
+            "y": y,
+            "x_end": x_end,
+            "z1": z1,
+            "z2": z2,
+            "cl": cluster,
+        }
+    )
     r = pr.iv2sls("y ~ 1 || x_end ~ z1 + z2", data=df, cluster=["cl"])
     result = pr.kleibergen_paap_from_result(r)
     assert result["rk_stat"] is not None

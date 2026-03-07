@@ -170,9 +170,7 @@ def iv2sls(
     result._iv_X_exog = X_exog
     result._iv_X_endog = X_endog
     result._iv_Z_excl = Z_excl
-    result._iv_cluster_arrays = (
-        [arrays.cluster_arrays[c] for c in cluster] if cluster else None
-    )
+    result._iv_cluster_arrays = [arrays.cluster_arrays[c] for c in cluster] if cluster else None
     return result
 
 

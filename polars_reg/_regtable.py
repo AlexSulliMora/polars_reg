@@ -45,9 +45,7 @@ def regtable(
 
     n_models = len(results)
     if labels is None:
-        labels = [
-            lb if lb else f"({i + 1})" for i, lb in enumerate(auto_labels)
-        ]
+        labels = [lb if lb else f"({i + 1})" for i, lb in enumerate(auto_labels)]
     if len(labels) != n_models:
         raise ValueError(f"Expected {n_models} labels, got {len(labels)}.")
 

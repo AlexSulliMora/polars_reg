@@ -22,9 +22,7 @@ def ts_data():
         e[t] = 0.7 * e[t - 1] + rng.standard_normal()
 
     y = 1.0 + 2.0 * x1 - 0.5 * x2 + e
-    return pl.DataFrame(
-        {"y": y, "x1": x1, "x2": x2, "time": np.arange(T)}
-    )
+    return pl.DataFrame({"y": y, "x1": x1, "x2": x2, "time": np.arange(T)})
 
 
 @pytest.fixture
