@@ -8,7 +8,7 @@ import scipy.sparse.csgraph
 from numpy.typing import NDArray
 
 try:
-    from polars_reg._native import rust_demean as _rust_demean
+    from polars_reg._native import rust_demean as _rust_demean, rust_absorbed_dof as _rust_absorbed_dof
 
     _HAS_NATIVE = True
 except ImportError:
@@ -212,6 +212,10 @@ def absorbed_dof(fe_dict: dict[str, NDArray]) -> int:
     Single FE: number of groups.
     Two+ FE: sum of groups minus connected components (pairwise method).
     """
+    if _HAS_NATIVE:
+        fe_codes_list = [np.ascontiguousarray(v, dtype=np.int32) for v in fe_dict.values()]
+        return _rust_absorbed_dof(fe_codes_list)
+
     fe_list = list(fe_dict.values())
     n_groups = [int(codes.max()) + 1 for codes in fe_list]
     total_dof = n_groups[0]

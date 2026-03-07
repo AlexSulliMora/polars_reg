@@ -18,6 +18,13 @@ from polars_reg._se import (
 )
 from polars_reg._utils import ensure_polars, extract_arrays
 
+try:
+    from polars_reg._native import rust_ols_core as _rust_ols_core
+
+    _HAS_NATIVE = True
+except ImportError:
+    _HAS_NATIVE = False
+
 
 def _is_nested(fe_codes: np.ndarray, cluster_codes: np.ndarray) -> bool:
     """Check if FE groups are nested within cluster groups.
@@ -56,6 +63,79 @@ def _non_nested_fe_dof(
             n_groups = int(fe_codes.max()) + 1
             non_nested_dof += n_groups - 1  # subtract 1 for identification
     return non_nested_dof
+
+
+def _ols_rust_path(
+    arrays,
+    spec,
+    fe_dict: dict[str, np.ndarray],
+    cluster: list[str] | None,
+    vcov: str,
+) -> RegressionResult:
+    """Fast Rust path for OLS with FE + optional clustering."""
+    X, y = arrays.X, arrays.y
+
+    # Remove intercept (absorbed by FE)
+    if spec.add_intercept and arrays.names[-1] == "_cons":
+        X = X[:, :-1]
+        arrays.names = arrays.names[:-1]
+
+    fe_codes_list = [np.ascontiguousarray(v, dtype=np.int32) for v in fe_dict.values()]
+    n_groups_list = [int(c.max()) + 1 for c in fe_codes_list]
+
+    cl_codes_list = []
+    if cluster:
+        cl_codes_list = [
+            np.ascontiguousarray(arrays.cluster_arrays[c], dtype=np.int32) for c in cluster
+        ]
+
+    beta, V, resid, r2, r2_adj, n, df_abs, n_dropped, cl_n_groups = _rust_ols_core(
+        np.ascontiguousarray(y, dtype=np.float64),
+        np.ascontiguousarray(X, dtype=np.float64),
+        fe_codes_list,
+        n_groups_list,
+        cl_codes_list,
+        1e-8,       # tol
+        100_000,    # max_iter
+    )
+
+    beta = np.asarray(beta)
+    V = np.asarray(V)
+    resid = np.asarray(resid)
+    k = len(beta)
+
+    if cluster:
+        n_clusters = {c: g for c, g in zip(cluster, cl_n_groups)}
+        df_r = min(n_clusters.values()) - 1
+        vcov_type = "cluster"
+    else:
+        n_clusters = None
+        # Rust computed iid VCV with sigma^2/(n-k), adjust for df_abs
+        sigma2 = (resid @ resid) / (n - k - df_abs)
+        XtX_inv = V / ((resid @ resid) / (n - k)) if (n - k) > 0 else V
+        V = sigma2 * XtX_inv
+        df_r = n - k - df_abs
+        vcov_type = "iid"
+
+    result = RegressionResult(
+        coefficients=beta,
+        vcov=V,
+        residuals=resid,
+        names=arrays.names,
+        n_obs=n,
+        k=k,
+        df_r=df_r,
+        r_squared=r2,
+        r_squared_adj=r2_adj,
+        model_type="OLS",
+        vcov_type=vcov_type,
+        n_clusters=n_clusters,
+        fe_absorbed=list(fe_dict.keys()),
+        df_absorbed=df_abs,
+    )
+    result._X = np.asarray(resid)  # placeholder (demeaned X not easily recoverable)
+    result._y = np.asarray(resid)  # placeholder
+    return result
 
 
 def ols(
@@ -98,6 +178,19 @@ def ols(
     w = arrays.weights
     fe_dict = arrays.fe_arrays
     has_fe = len(fe_dict) > 0
+
+    # --- Rust fast path: FE + optional clustering, no weights/bootstrap/HAC ---
+    use_rust = (
+        _HAS_NATIVE
+        and has_fe
+        and w is None
+        and vcov not in ("bootstrap", "wildboot", "NW", "DK", "HC2", "HC3")
+        and (cluster or vcov == "iid")
+    )
+    if use_rust:
+        return _ols_rust_path(
+            arrays, spec, fe_dict, cluster, vcov,
+        )
 
     # Handle frequency weights: expand effective sample size
     fw = None
