@@ -1,0 +1,126 @@
+from __future__ import annotations
+
+from itertools import combinations
+
+import numpy as np
+from numpy.typing import NDArray
+
+
+def vcov_iid(X: NDArray, resid: NDArray) -> NDArray:
+    """Homoskedastic VCV: sigma^2 * (X'X)^{-1}."""
+    n, k = X.shape
+    XtX_inv = np.linalg.inv(X.T @ X)
+    sigma2 = resid @ resid / (n - k)
+    return sigma2 * XtX_inv
+
+
+def vcov_robust(X: NDArray, resid: NDArray, kind: str = "HC1") -> NDArray:
+    """Heteroskedasticity-robust VCV (HC0, HC1, HC2, HC3).
+
+    All use sandwich form: (X'X)^{-1} X' diag(w) X (X'X)^{-1}
+    HC0: w_i = e_i^2
+    HC1: w_i = e_i^2 * n/(n-k)
+    HC2: w_i = e_i^2 / (1 - h_ii)
+    HC3: w_i = e_i^2 / (1 - h_ii)^2
+    where h_ii = x_i' (X'X)^{-1} x_i (hat matrix diagonal)
+    """
+    n, k = X.shape
+    XtX_inv = np.linalg.inv(X.T @ X)
+
+    if kind == "HC0":
+        meat = X.T @ (X * (resid**2)[:, None])
+        return XtX_inv @ meat @ XtX_inv
+    elif kind == "HC1":
+        meat = X.T @ (X * (resid**2)[:, None])
+        return (n / (n - k)) * XtX_inv @ meat @ XtX_inv
+    elif kind in ("HC2", "HC3"):
+        hat = np.einsum("ij,jk,ik->i", X, XtX_inv, X)
+        if kind == "HC2":
+            weights = resid**2 / (1.0 - hat)
+        else:
+            weights = resid**2 / (1.0 - hat) ** 2
+        meat = X.T @ (X * weights[:, None])
+        return XtX_inv @ meat @ XtX_inv
+    else:
+        raise ValueError(f"Unknown robust SE kind: {kind}")
+
+
+def _clustered_meat(X: NDArray, resid: NDArray, clusters: NDArray) -> NDArray:
+    """Compute the clustered sandwich meat: sum_g (s_g s_g')."""
+    k = X.shape[1]
+    score = X * resid[:, None]
+    unique_clusters = np.unique(clusters)
+    meat = np.zeros((k, k))
+    for g in unique_clusters:
+        mask = clusters == g
+        sg = score[mask].sum(axis=0)
+        meat += np.outer(sg, sg)
+    return meat
+
+
+def vcov_clustered(
+    X: NDArray,
+    resid: NDArray,
+    clusters: NDArray,
+    df_correction: bool = True,
+) -> NDArray:
+    """One-way cluster-robust VCV (CRV1).
+
+    V = dfc * (X'X)^{-1} * meat * (X'X)^{-1}
+    where dfc = G/(G-1) * (n-1)/(n-k)
+    """
+    n, k = X.shape
+    XtX_inv = np.linalg.inv(X.T @ X)
+    meat = _clustered_meat(X, resid, clusters)
+    G = len(np.unique(clusters))
+    if df_correction:
+        dfc = (G / (G - 1)) * ((n - 1) / (n - k))
+    else:
+        dfc = 1.0
+    return dfc * XtX_inv @ meat @ XtX_inv
+
+
+def _interaction_codes(*arrays: NDArray) -> NDArray:
+    """Create unique integer codes for the interaction of multiple cluster arrays."""
+    if len(arrays) == 1:
+        return arrays[0]
+    n = len(arrays[0])
+    dtype = [(f"f{i}", arr.dtype) for i, arr in enumerate(arrays)]
+    structured = np.empty(n, dtype=dtype)
+    for i, arr in enumerate(arrays):
+        structured[f"f{i}"] = arr
+    _, codes = np.unique(structured, return_inverse=True)
+    return codes
+
+
+def vcov_multiway_clustered(
+    X: NDArray,
+    resid: NDArray,
+    cluster_list: list[NDArray],
+) -> NDArray:
+    """Multi-way clustered VCV via Cameron-Gelbach-Miller inclusion-exclusion.
+
+    V = sum over non-empty subsets S of (-1)^(|S|+1) * V_S
+    where V_S is one-way clustered VCV using intersection of dimensions in S.
+
+    For D=2: V = V_A + V_B - V_{A*B}
+    For D=3: V = V_A + V_B + V_C - V_AB - V_AC - V_BC + V_ABC
+    """
+    D = len(cluster_list)
+    n, k = X.shape
+    XtX_inv = np.linalg.inv(X.T @ X)
+
+    V = np.zeros((k, k))
+    dims = list(range(D))
+
+    for size in range(1, D + 1):
+        sign = (-1) ** (size + 1)
+        for subset in combinations(dims, size):
+            subset_arrays = [cluster_list[d] for d in subset]
+            interaction = _interaction_codes(*subset_arrays)
+            G = len(np.unique(interaction))
+            meat = _clustered_meat(X, resid, interaction)
+            dfc = (G / (G - 1)) * ((n - 1) / (n - k))
+            V += sign * dfc * XtX_inv @ meat @ XtX_inv
+
+    return V
