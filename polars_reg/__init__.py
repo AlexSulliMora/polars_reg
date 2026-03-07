@@ -14,8 +14,17 @@ except ImportError:
     pass
 
 try:
-    from polars_reg._panel import panel_fe
+    from polars_reg._panel import panel_fd, panel_fe, panel_re
 except ImportError:
     pass
 
-__all__ = ["ols", "iv2sls", "liml", "gmm_iv", "panel_fe", "RegressionResult"]
+__all__ = [
+    "ols",
+    "iv2sls",
+    "liml",
+    "gmm_iv",
+    "panel_fe",
+    "panel_re",
+    "panel_fd",
+    "RegressionResult",
+]

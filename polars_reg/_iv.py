@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import polars as pl
 
+from polars_reg._demean import absorbed_dof, demean, drop_singletons
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
 from polars_reg._se import (
@@ -41,15 +42,52 @@ def iv2sls(
 
     arrays = extract_arrays(data, spec, cluster=cluster)
 
-    X_exog = arrays.X  # exogenous regressors (may include intercept)
+    X_exog = arrays.X
     y = arrays.y
     X_endog = arrays.endog
     Z_excl = arrays.instruments
+    fe_dict = arrays.fe_arrays
+    has_fe = len(fe_dict) > 0
 
     if X_endog is None or Z_excl is None:
         raise ValueError("IV requires endogenous variables and instruments.")
 
-    n = arrays.n_obs
+    # Handle absorbed FE: demean y, X_exog, X_endog, Z_excl
+    if has_fe:
+        keep = drop_singletons(fe_dict)
+        if not keep.all():
+            y = y[keep]
+            X_exog = X_exog[keep]
+            X_endog = X_endog[keep]
+            Z_excl = Z_excl[keep]
+            fe_dict = {k: v[keep] for k, v in fe_dict.items()}
+            if cluster:
+                arrays.cluster_arrays = {k: v[keep] for k, v in arrays.cluster_arrays.items()}
+
+        # Remove intercept (absorbed by FE)
+        if spec.add_intercept and arrays.names[-1] == "_cons":
+            X_exog = X_exog[:, :-1]
+            arrays.names = arrays.names[:-1]
+
+        # Demean all variables
+        all_vars = np.column_stack([y.reshape(-1, 1), X_exog, X_endog, Z_excl])
+        demeaned = demean(all_vars, fe_dict)
+        col = 0
+        y = demeaned[:, col]
+        col += 1
+        X_exog = demeaned[:, col : col + X_exog.shape[1]]
+        col += X_exog.shape[1]
+        X_endog = demeaned[:, col : col + X_endog.shape[1]]
+        col += X_endog.shape[1]
+        Z_excl = demeaned[:, col:]
+
+        df_abs = absorbed_dof(fe_dict)
+        fe_absorbed = list(fe_dict.keys())
+    else:
+        df_abs = 0
+        fe_absorbed = None
+
+    n = len(y)
     k_exog = X_exog.shape[1]
     k_endog = X_endog.shape[1]
     k = k_exog + k_endog
@@ -58,39 +96,32 @@ def iv2sls(
     Z = np.column_stack([X_exog, Z_excl])
 
     # --- Stage 1: Project endogenous variables onto instrument space ---
-    # Pz = Z (Z'Z)^{-1} Z'
     ZtZ = Z.T @ Z
     ZtZ_inv = np.linalg.inv(ZtZ)
-    # X_endog_hat = Pz @ X_endog = Z @ (Z'Z)^{-1} @ Z' @ X_endog
     ZtX_endog = Z.T @ X_endog
     X_endog_hat = Z @ (ZtZ_inv @ ZtX_endog)
 
     # --- First-stage F-statistic (partial F-test of excluded instruments) ---
     first_stage_f = _first_stage_f(X_exog, X_endog, Z_excl)
 
-    # --- Stage 2: 2SLS with X_hat as instrument for X ---
-    # X_hat = [X_exog, X_endog_hat]
-    # X     = [X_exog, X_endog]
+    # --- Stage 2: 2SLS ---
     X = np.column_stack([X_exog, X_endog])
     X_hat = np.column_stack([X_exog, X_endog_hat])
 
-    # beta = (X_hat' X)^{-1} X_hat' y
     XhX = X_hat.T @ X
     Xhy = X_hat.T @ y
     beta = np.linalg.solve(XhX, Xhy)
 
-    # Residuals from ORIGINAL X
     resid = y - X @ beta
 
-    # R-squared
+    # R-squared (within-R² when FE are absorbed)
     ss_res = resid @ resid
     y_demean = y - y.mean()
     ss_tot = y_demean @ y_demean
     r2 = 1.0 - ss_res / ss_tot
-    r2_adj = 1.0 - (1.0 - r2) * (n - 1) / (n - k)
+    r2_adj = 1.0 - (1.0 - r2) * (n - 1) / (n - k - df_abs)
 
     # --- Variance-covariance ---
-    # Bread: (X_hat' X)^{-1}
     XhX_inv = np.linalg.inv(XhX)
 
     if cluster:
@@ -103,17 +134,16 @@ def iv2sls(
         n_clusters_dict = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters_dict.values()) - 1
     elif vcov == "iid":
-        V = _iv_vcov_iid(X_hat, X, resid, XhX_inv)
+        V = _iv_vcov_iid(X_hat, X, resid, XhX_inv, df_abs=df_abs)
         vcov_type = "iid"
         n_clusters_dict = None
-        df_r = n - k
+        df_r = n - k - df_abs
     else:
         V = _iv_vcov_robust(X_hat, resid, XhX_inv, kind=vcov)
         vcov_type = vcov
         n_clusters_dict = None
-        df_r = n - k
+        df_r = n - k - df_abs
 
-    # Coefficient names: exog names + endog names
     names = arrays.names + (arrays.endog_names or [])
 
     return RegressionResult(
@@ -130,6 +160,8 @@ def iv2sls(
         vcov_type=vcov_type,
         n_clusters=n_clusters_dict,
         first_stage_f=first_stage_f,
+        fe_absorbed=fe_absorbed,
+        df_absorbed=df_abs,
     )
 
 
@@ -173,10 +205,11 @@ def _iv_vcov_iid(
     X: np.ndarray,
     resid: np.ndarray,
     XhX_inv: np.ndarray,
+    df_abs: int = 0,
 ) -> np.ndarray:
     """Homoskedastic VCV for 2SLS: sigma^2 * (X_hat'X)^{-1}."""
     n, k = X.shape
-    sigma2 = (resid @ resid) / (n - k)
+    sigma2 = (resid @ resid) / (n - k - df_abs)
     return sigma2 * XhX_inv
 
 
