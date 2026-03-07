@@ -8,6 +8,54 @@ from numpy.typing import NDArray
 from scipy import stats
 
 
+def _fmt_col(values: list[float], width: int, sig: int) -> list[str]:
+    """Format a column of numbers, decimal-aligned within `width` chars.
+
+    Uses fixed-point notation with the same number of decimal places for all
+    values so decimals line up. Chooses the max decimals that fit within width.
+    """
+    max_int_w = max(len(f"{v:.0f}") for v in values)
+
+    # Available space for decimal point + fraction
+    avail = width - max_int_w
+    if avail >= 2:  # room for "." + at least 1 digit
+        dec = min(avail - 1, sig)  # sig decimal places max
+        # Ensure it fits
+        while dec > 0:
+            strs = [f"{v:>{width}.{dec}f}" for v in values]
+            if all(len(s) <= width for s in strs):
+                return strs
+            dec -= 1
+
+    # No room for decimals — try integer format
+    strs = [f"{v:>{width}.0f}" for v in values]
+    if all(len(s) <= width for s in strs):
+        return strs
+
+    # Fallback: scientific notation, aligned by sig figs
+    strs = []
+    for v in values:
+        for d in range(sig, 0, -1):
+            s = f"{v:>{width}.{d}e}"
+            if len(s) <= width:
+                strs.append(s)
+                break
+        else:
+            strs.append(f"{v:>{width}.0e}")
+    return strs
+
+
+def _fmt_p_col(values: list[float], width: int) -> list[str]:
+    """Format p-values: 3 decimal places, <0.01 for tiny values."""
+    result = []
+    for v in values:
+        if v < 0.01:
+            result.append(f"{'<0.01':>{width}}")
+        else:
+            result.append(f"{v:>{width}.3f}")
+    return result
+
+
 @dataclass
 class RegressionResult:
     coefficients: NDArray
@@ -94,9 +142,14 @@ class RegressionResult:
             }
         )
 
-    def summary(self) -> str:
-        """Pretty-printed regression summary table."""
-        w = 70
+    def summary(self, precision: int = 4) -> str:
+        """Pretty-printed regression summary table.
+
+        Args:
+            precision: Number of significant figures to display (default 4).
+        """
+        w = 80
+        sig = precision
         lines = [
             f"{'=' * w}",
             f"  {self.model_type} Regression Results",
@@ -104,10 +157,11 @@ class RegressionResult:
         ]
 
         # Model info in two columns
+        depvar = self.names[0] if len(self.names) == 1 else "y"
         left = [
-            f"Dep. Variable:   {self.names[0] if len(self.names) == 1 else 'y'}",
-            f"No. Observations: {self.n_obs:>6}",
-            f"Df Residuals:     {self.df_r:>6}",
+            f"{'Dep. Variable:':<18} {depvar:>6}",
+            f"{'No. Observations:':<18} {self.n_obs:>6}",
+            f"{'Df Residuals:':<18} {self.df_r:>6}",
         ]
         right = [
             f"R-squared:     {self.r_squared:>8.4f}",
@@ -115,7 +169,7 @@ class RegressionResult:
             f"SE type:  {self.vcov_type:>12}",
         ]
         for l_line, r_line in zip(left, right):
-            lines.append(f"  {l_line:<35} {r_line}")
+            lines.append(f"  {l_line:<38} {r_line}")
 
         if self.fe_absorbed:
             lines.append(f"  Absorbed FE: {', '.join(self.fe_absorbed)} ({self.df_absorbed} DoF)")
@@ -130,18 +184,25 @@ class RegressionResult:
         lines.append(f"{'=' * w}")
 
         # Column headers
-        hdr = f"{'':>14} {'Coef':>10} {'Std.Err.':>10} {'t':>8} {'P>|t|':>8} {'[95% CI]':>19}"
+        hdr = (
+            f"{'':>14} {'Coef':>10} {'Std.Err.':>10} "
+            f"{'t':>8} {'P>|t|':>8}   {'[95% Conf. Interval]':>23}"
+        )
         lines.append(hdr)
         lines.append(f"{'-' * w}")
 
-        # Coefficient rows
+        # Coefficient rows — format columns then align decimals vertically
         ci = self.confint()
+        n_coef = len(self.names)
+        col_c = _fmt_col([self.coefficients[i] for i in range(n_coef)], 10, sig)
+        col_s = _fmt_col([self.se[i] for i in range(n_coef)], 10, sig)
+        col_t = [f"{self.tstat[i]:>8.2f}" for i in range(n_coef)]
+        col_p = _fmt_p_col([self.pvalue[i] for i in range(n_coef)], 8)
+        col_lo = _fmt_col([ci[i, 0] for i in range(n_coef)], 9, sig)
+        col_hi = _fmt_col([ci[i, 1] for i in range(n_coef)], 9, sig)
         for i, name in enumerate(self.names):
-            ci_str = f"[{ci[i, 0]:>8.4f}, {ci[i, 1]:.4f}]"
-            lines.append(
-                f"{name:>14} {self.coefficients[i]:>10.6f} {self.se[i]:>10.6f} "
-                f"{self.tstat[i]:>8.3f} {self.pvalue[i]:>8.3f} {ci_str}"
-            )
+            ci_str = f"[{col_lo[i]},  {col_hi[i]}]"
+            lines.append(f"{name:<14} {col_c[i]} {col_s[i]} {col_t[i]} {col_p[i]}   {ci_str}")
         lines.append(f"{'=' * w}")
         return "\n".join(lines)
 
