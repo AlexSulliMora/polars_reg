@@ -5,6 +5,9 @@ from itertools import combinations
 import numpy as np
 from numpy.typing import NDArray
 
+# Webb 6-point distribution for wild bootstrap
+_WEBB6 = np.array([-np.sqrt(3 / 2), -1.0, -np.sqrt(1 / 2), np.sqrt(1 / 2), 1.0, np.sqrt(3 / 2)])
+
 
 def vcov_iid(X: NDArray, resid: NDArray, df_abs: int = 0) -> NDArray:
     """Homoskedastic VCV: sigma^2 * (X'X)^{-1}.
@@ -243,3 +246,63 @@ def vcov_multiway_clustered(
             V += sign * dfc * XtX_inv @ meat @ XtX_inv
 
     return V
+
+
+def vcov_pairs_bootstrap(
+    X: NDArray,
+    y: NDArray,
+    n_boot: int = 999,
+    seed: int | None = None,
+) -> NDArray:
+    """Pairs bootstrap VCV.
+
+    Resamples (y_i, x_i) pairs with replacement and re-estimates OLS.
+    Returns the sample covariance of bootstrap coefficient estimates.
+    """
+    rng = np.random.default_rng(seed)
+    n, k = X.shape
+    betas = np.empty((n_boot, k))
+
+    for b in range(n_boot):
+        idx = rng.integers(0, n, size=n)
+        X_b = X[idx]
+        y_b = y[idx]
+        try:
+            betas[b] = np.linalg.solve(X_b.T @ X_b, X_b.T @ y_b)
+        except np.linalg.LinAlgError:
+            betas[b] = np.nan
+
+    valid = ~np.any(np.isnan(betas), axis=1)
+    return np.cov(betas[valid].T, ddof=1)
+
+
+def vcov_wild_bootstrap(
+    X: NDArray,
+    resid: NDArray,
+    clusters: NDArray,
+    n_boot: int = 999,
+    seed: int | None = None,
+) -> NDArray:
+    """Wild cluster bootstrap VCV using Webb 6-point distribution.
+
+    Draws one random multiplier per cluster from the Webb 6-point set,
+    creates perturbed residuals, re-estimates beta, and returns the
+    sample covariance of bootstrap coefficient estimates.
+    """
+    rng = np.random.default_rng(seed)
+    _, codes = np.unique(clusters, return_inverse=True)
+    G = codes.max() + 1
+    n, k = X.shape
+    XtX_inv = np.linalg.inv(X.T @ X)
+    # Precompute: beta_hat is implicit (resid = y - X@beta)
+    # y_star = X@beta + resid_star, so X'y_star = X'X@beta + X'(resid * eta)
+    # beta_star = beta + (X'X)^{-1} X'(resid * eta)
+    # So we only need (X'X)^{-1} and X' (resid * eta) per bootstrap rep.
+
+    betas_centered = np.empty((n_boot, k))
+    for b in range(n_boot):
+        multipliers = rng.choice(_WEBB6, size=G)
+        eta = multipliers[codes]
+        betas_centered[b] = XtX_inv @ (X.T @ (resid * eta))
+
+    return np.cov(betas_centered.T, ddof=1)

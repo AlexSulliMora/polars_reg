@@ -12,7 +12,9 @@ from polars_reg._se import (
     vcov_hac,
     vcov_iid,
     vcov_multiway_clustered,
+    vcov_pairs_bootstrap,
     vcov_robust,
+    vcov_wild_bootstrap,
 )
 from polars_reg._utils import ensure_polars, extract_arrays
 
@@ -64,17 +66,21 @@ def ols(
     time: str | None = None,
     bandwidth: int | None = None,
     weights: str | None = None,
+    n_boot: int = 999,
+    seed: int | None = None,
 ) -> RegressionResult:
     """Ordinary Least Squares regression (or Weighted Least Squares with weights).
 
     Args:
         formula: Formula string, e.g. "y ~ x1 + x2" or "y ~ x1 + x2 | fe1 + fe2"
         data: Polars DataFrame or LazyFrame
-        vcov: "iid", "HC0", "HC1", "HC2", "HC3", "NW" (Newey-West), or "DK" (Driscoll-Kraay)
-        cluster: Column name(s) for clustered SEs. Overrides vcov.
+        vcov: "iid", "HC0"-"HC3", "NW", "DK", "bootstrap", or "wildboot"
+        cluster: Column name(s) for clustered SEs. Overrides vcov (except wildboot).
         time: Column name for time ordering (required for NW/DK).
         bandwidth: Number of lags for HAC/DK. Default: Newey-West rule of thumb.
         weights: Column name for analytic weights (WLS). Minimizes sum w_i*(y_i - x_i'b)^2.
+        n_boot: Bootstrap replications (default 999). For vcov="bootstrap"/"wildboot".
+        seed: Random seed for bootstrap reproducibility.
     """
     if isinstance(cluster, str):
         cluster = [cluster]
@@ -153,7 +159,8 @@ def ols(
     r2_adj = 1.0 - (1.0 - r2) * (n - 1) / (n - k - df_abs)
 
     # Variance-covariance (uses weighted X and residuals for sandwich)
-    if cluster:
+    n_clusters = None
+    if cluster and vcov != "wildboot":
         cluster_arrays = [arrays.cluster_arrays[c] for c in cluster]
         # Compute non-nested FE DoF for reghdfe-style dfc adjustment
         df_a_nn = _non_nested_fe_dof(fe_dict, arrays.cluster_arrays, cluster) if has_fe else -1
@@ -164,6 +171,18 @@ def ols(
         vcov_type = "cluster"
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1
+    elif vcov == "bootstrap":
+        V = vcov_pairs_bootstrap(Xw, yw, n_boot=n_boot, seed=seed)
+        vcov_type = "bootstrap"
+        df_r = n - k - df_abs
+    elif vcov == "wildboot":
+        if not cluster:
+            raise ValueError("vcov='wildboot' requires cluster= parameter")
+        cl_arr = arrays.cluster_arrays[cluster[0]]
+        V = vcov_wild_bootstrap(Xw, resid_w, cl_arr, n_boot=n_boot, seed=seed)
+        vcov_type = "wildboot"
+        n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
+        df_r = min(n_clusters.values()) - 1
     elif vcov in ("NW", "DK"):
         if arrays.time_array is None:
             raise ValueError(f"vcov='{vcov}' requires time= parameter")
@@ -172,17 +191,14 @@ def ols(
         else:
             V = vcov_driscoll_kraay(Xw, resid_w, arrays.time_array, bandwidth=bandwidth)
         vcov_type = vcov
-        n_clusters = None
         df_r = n - k - df_abs
     elif vcov == "iid":
         V = vcov_iid(Xw, resid_w, df_abs=df_abs)
         vcov_type = "iid"
-        n_clusters = None
         df_r = n - k - df_abs
     else:
         V = vcov_robust(Xw, resid_w, kind=vcov)
         vcov_type = vcov
-        n_clusters = None
         df_r = n - k - df_abs
 
     model_type = "WLS" if w is not None else "OLS"
