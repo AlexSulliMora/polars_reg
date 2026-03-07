@@ -193,6 +193,217 @@ def panel_ab(
     return result
 
 
+def panel_sys_gmm(
+    formula: str,
+    data: pl.DataFrame | pl.LazyFrame,
+    entity: str,
+    time: str,
+    lags: int = 2,
+    maxlags: int | None = None,
+    twostep: bool = False,
+) -> RegressionResult:
+    """Blundell-Bond system GMM estimator.
+
+    Stacks the difference equations (AB) with level equations.
+    Instruments:
+      - Difference eq: lagged levels y_{t-2}, ..., y_{t-maxlag}
+      - Level eq: lagged differences Δy_{t-1}
+
+    Args:
+        formula: "y ~ x1 + x2" (lagged y is added automatically)
+        data: Panel DataFrame with entity and time columns
+        entity: Column name for entity identifier
+        time: Column name for time identifier
+        lags: Minimum instrument lag depth (default 2)
+        maxlags: Maximum instrument lag depth (None = all available)
+        twostep: If True, use two-step efficient GMM
+    """
+    data = ensure_polars(data)
+    if isinstance(data, pl.LazyFrame):
+        data = data.collect()
+
+    spec = parse_formula(formula)
+    depvar = spec.depvar
+    exog = [v for v in spec.exog if v != "0"]
+
+    cols_needed = list(dict.fromkeys([depvar] + exog + [entity, time]))
+    df = data.select(cols_needed).sort([entity, time])
+
+    n_times = df[time].n_unique()
+    if maxlags is None:
+        maxlags = n_times - 1
+    maxlags = min(maxlags, n_times - 1)
+
+    # Create lags, differences, and lagged differences
+    lag_exprs = [
+        pl.col(depvar).shift(1).over(entity).alias(f"L1_{depvar}"),
+        (pl.col(depvar) - pl.col(depvar).shift(1)).over(entity).alias(f"D_{depvar}"),
+        (pl.col(depvar).shift(1) - pl.col(depvar).shift(2)).over(entity).alias(f"DL1_{depvar}"),
+    ]
+
+    # Instruments for difference equation: lagged levels
+    for lag_depth in range(lags, maxlags + 1):
+        lag_exprs.append(
+            pl.col(depvar).shift(lag_depth).over(entity).alias(f"L{lag_depth}_{depvar}")
+        )
+
+    # Instrument for level equation: lagged first difference Δy_{t-1}
+    lag_exprs.append(
+        (pl.col(depvar).shift(1) - pl.col(depvar).shift(2))
+        .over(entity)
+        .alias(f"DL1_iv_{depvar}")
+    )
+
+    # First-difference exogenous vars
+    for col in exog:
+        lag_exprs.append((pl.col(col) - pl.col(col).shift(1)).over(entity).alias(f"D_{col}"))
+
+    df = df.with_columns(lag_exprs)
+
+    # --- Difference equation data ---
+    iv_col_names = [f"L{d}_{depvar}" for d in range(lags, maxlags + 1)]
+    diff_exog_names = [f"D_{col}" for col in exog]
+
+    core_diff = [f"D_{depvar}", f"DL1_{depvar}", f"L{lags}_{depvar}"]
+    core_diff += diff_exog_names
+    df_diff = df.drop_nulls(subset=core_diff)
+    for iv_name in iv_col_names:
+        if iv_name not in core_diff:
+            df_diff = df_diff.with_columns(pl.col(iv_name).fill_null(0.0))
+
+    n_diff = len(df_diff)
+
+    # --- Level equation data ---
+    core_lev = [depvar, f"L1_{depvar}", f"DL1_iv_{depvar}"]
+    core_lev += exog
+    df_lev = df.drop_nulls(subset=core_lev)
+    n_lev = len(df_lev)
+
+    n_total = n_diff + n_lev
+    if n_total == 0:
+        raise ValueError("No valid observations after differencing and lagging")
+
+    # --- Build stacked system ---
+
+    # y vector: [Δy_diff; y_lev]
+    y_diff = df_diff[f"D_{depvar}"].to_numpy().astype(np.float64)
+    y_lev = df_lev[depvar].to_numpy().astype(np.float64)
+    y = np.concatenate([y_diff, y_lev])
+
+    # X matrix: [ΔL.y_diff, Δx_diff; L.y_lev, x_lev]
+    names = [f"L.{depvar}"]
+    x_diff_cols = [df_diff[f"DL1_{depvar}"].to_numpy().astype(np.float64)]
+    x_lev_cols = [df_lev[f"L1_{depvar}"].to_numpy().astype(np.float64)]
+    for col in exog:
+        x_diff_cols.append(df_diff[f"D_{col}"].to_numpy().astype(np.float64))
+        x_lev_cols.append(df_lev[col].to_numpy().astype(np.float64))
+        names.append(col)
+
+    X_diff = np.column_stack(x_diff_cols) if x_diff_cols else np.empty((n_diff, 0))
+    X_lev = np.column_stack(x_lev_cols) if x_lev_cols else np.empty((n_lev, 0))
+    X = np.vstack([X_diff, X_lev])
+    k = X.shape[1]
+
+    # Z matrix (block-diagonal): diff instruments for diff eq, level instruments for level eq
+    # Diff instruments: lagged levels + differenced exogenous
+    z_diff_cols = []
+    for iv_name in iv_col_names:
+        z_diff_cols.append(df_diff[iv_name].to_numpy().astype(np.float64))
+    for col in exog:
+        z_diff_cols.append(df_diff[f"D_{col}"].to_numpy().astype(np.float64))
+    n_iv_diff = len(z_diff_cols)
+
+    # Level instruments: lagged differences + exogenous levels
+    z_lev_cols = [df_lev[f"DL1_iv_{depvar}"].to_numpy().astype(np.float64)]
+    for col in exog:
+        z_lev_cols.append(df_lev[col].to_numpy().astype(np.float64))
+    n_iv_lev = len(z_lev_cols)
+
+    n_iv = n_iv_diff + n_iv_lev
+
+    # Build block-diagonal Z
+    Z = np.zeros((n_total, n_iv))
+    Z_diff_arr = np.column_stack(z_diff_cols)
+    Z_lev_arr = np.column_stack(z_lev_cols)
+    Z[:n_diff, :n_iv_diff] = Z_diff_arr
+    Z[n_diff:, n_iv_diff:] = Z_lev_arr
+
+    if n_iv < k:
+        raise ValueError(
+            f"Under-identified: {n_iv} instruments < {k} regressors. "
+            "Increase maxlags or add exogenous variables."
+        )
+
+    # One-step GMM: W = (Z'Z)^{-1}
+    ZtZ = Z.T @ Z
+    W = np.linalg.inv(ZtZ)
+    ZtX = Z.T @ X
+    Zty = Z.T @ y
+
+    A = ZtX.T @ W @ ZtX
+    b = ZtX.T @ W @ Zty
+    beta = np.linalg.solve(A, b)
+    resid = y - X @ beta
+
+    if twostep:
+        scores = Z * resid[:, None]
+        S = scores.T @ scores
+        W = np.linalg.inv(S)
+        A = ZtX.T @ W @ ZtX
+        b = ZtX.T @ W @ Zty
+        beta = np.linalg.solve(A, b)
+        resid = y - X @ beta
+
+    # Robust VCV
+    A_inv = np.linalg.inv(A)
+    scores = Z * resid[:, None]
+    meat = ZtX.T @ W @ (scores.T @ scores) @ W @ ZtX
+    V = A_inv @ meat @ A_inv
+
+    # Sargan/Hansen J test
+    Zte = Z.T @ resid
+    j_stat = float(Zte @ W @ Zte)
+    j_df = n_iv - k
+    j_pvalue = float(1.0 - stats.chi2.cdf(j_stat, j_df)) if j_df > 0 else np.nan
+
+    # AR tests on differenced residuals only
+    entity_arr = df_diff[entity].cast(pl.Utf8).cast(pl.Categorical).to_physical().to_numpy()
+    resid_diff = resid[:n_diff]
+    Z_diff_block = Z[:n_diff, :n_iv_diff]
+    ZtX_diff = Z_diff_block.T @ X_diff
+    W_diff = np.linalg.inv(Z_diff_block.T @ Z_diff_block)
+    A_diff_inv = np.linalg.inv(ZtX_diff.T @ W_diff @ ZtX_diff)
+    ar_args = (resid_diff, entity_arr, Z_diff_block, W_diff, ZtX_diff, A_diff_inv)
+    ar1_stat, ar1_p = _ar_test(*ar_args, order=1)
+    ar2_stat, ar2_p = _ar_test(*ar_args, order=2)
+
+    # R²
+    ss_res = resid @ resid
+    y_dm = y - y.mean()
+    ss_tot = y_dm @ y_dm
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+
+    result = RegressionResult(
+        coefficients=beta,
+        vcov=V,
+        residuals=resid,
+        names=names,
+        n_obs=n_total,
+        k=k,
+        df_r=n_total - k,
+        r_squared=r2,
+        r_squared_adj=r2,
+        model_type="System GMM",
+        vcov_type="twostep" if twostep else "onestep",
+        j_stat=j_stat,
+        j_pvalue=j_pvalue,
+    )
+    result._ar1 = (ar1_stat, ar1_p)
+    result._ar2 = (ar2_stat, ar2_p)
+    result._n_instruments = n_iv
+    return result
+
+
 def _ar_test(resid, entity_codes, Z, W, ZtX, A_inv, order=1):
     """Arellano-Bond test for serial correlation of order m in Δe.
 

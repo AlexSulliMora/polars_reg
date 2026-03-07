@@ -18,7 +18,7 @@ try:
 except ImportError:
     pass
 
-from polars_reg._arellano_bond import panel_ab
+from polars_reg._arellano_bond import panel_ab, panel_sys_gmm
 from polars_reg._binary import logit, marginal_effects, odds_ratios, probit
 from polars_reg._diagnostics import (
     hausman_test,
@@ -58,5 +58,6 @@ __all__ = [
     "odds_ratios",
     "RegTable",
     "panel_ab",
+    "panel_sys_gmm",
     "quantreg",
 ]
