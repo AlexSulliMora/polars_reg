@@ -12,6 +12,8 @@ from polars_reg._se import (
     vcov_hac,
     vcov_iid,
     vcov_multiway_clustered,
+    vcov_pairs_bootstrap,
+    vcov_wild_bootstrap,
 )
 from polars_reg._utils import ensure_polars, extract_arrays
 
@@ -24,6 +26,8 @@ def panel_fe(
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
     bandwidth: int | None = None,
+    n_boot: int = 999,
+    seed: int | None = None,
 ) -> RegressionResult:
     """Panel fixed effects (within) estimator.
 
@@ -31,8 +35,10 @@ def panel_fe(
     Default clusters SEs by entity.
 
     Args:
-        vcov: "iid", "NW" (Newey-West), or "DK" (Driscoll-Kraay).
+        vcov: "iid", "NW", "DK", "bootstrap", or "wildboot".
         bandwidth: Number of lags for NW/DK. Default: Newey-West rule of thumb.
+        n_boot: Bootstrap replications (default 999).
+        seed: Random seed for bootstrap reproducibility.
     """
     if isinstance(cluster, str):
         cluster = [cluster]
@@ -79,7 +85,20 @@ def panel_fe(
     r2 = 1.0 - ss_res / ss_tot
     r2_adj = 1.0 - (1.0 - r2) * (n - 1) / (n - k - df_abs)
 
-    if vcov in ("NW", "DK"):
+    n_clusters_dict = None
+    if vcov == "bootstrap":
+        V = vcov_pairs_bootstrap(X_dm, y_dm, n_boot=n_boot, seed=seed)
+        vcov_type_str = "bootstrap"
+        df_r = n - k - df_abs
+    elif vcov == "wildboot":
+        if not cluster:
+            raise ValueError("vcov='wildboot' requires cluster= parameter")
+        cl_arr = arrays.cluster_arrays[cluster[0]]
+        V = vcov_wild_bootstrap(X_dm, resid, cl_arr, n_boot=n_boot, seed=seed)
+        vcov_type_str = "wildboot"
+        n_clusters_dict = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
+        df_r = min(n_clusters_dict.values()) - 1
+    elif vcov in ("NW", "DK"):
         if arrays.time_array is None:
             raise ValueError(f"vcov='{vcov}' requires time= parameter")
         if vcov == "NW":
@@ -87,7 +106,6 @@ def panel_fe(
         else:
             V = vcov_driscoll_kraay(X_dm, resid, arrays.time_array, bandwidth=bandwidth)
         vcov_type_str = vcov
-        n_clusters_dict = None
         df_r = n - k - df_abs
     elif cluster:
         cluster_arrays_list = [arrays.cluster_arrays[c] for c in cluster]
@@ -100,7 +118,6 @@ def panel_fe(
         vcov_type_str = "cluster"
     else:
         V = vcov_iid(X_dm, resid, df_abs=df_abs)
-        n_clusters_dict = None
         df_r = n - k - df_abs
         vcov_type_str = "iid"
 
@@ -140,6 +157,8 @@ def panel_re(
     data: pl.DataFrame | pl.LazyFrame,
     entity: str,
     vcov: str = "iid",
+    n_boot: int = 999,
+    seed: int | None = None,
 ) -> RegressionResult:
     """Panel random effects (GLS) estimator.
 
@@ -150,7 +169,9 @@ def panel_re(
         formula: Formula string, e.g. "y ~ x1 + x2"
         data: Polars DataFrame or LazyFrame
         entity: Column name for entity (panel) identifier
-        vcov: "iid" (default)
+        vcov: "iid" (default) or "bootstrap"
+        n_boot: Bootstrap replications (default 999).
+        seed: Random seed for bootstrap reproducibility.
     """
     data = ensure_polars(data)
     spec = parse_formula(formula)
@@ -214,8 +235,15 @@ def panel_re(
     r2 = 1.0 - ss_res / ss_tot
     r2_adj = 1.0 - (1.0 - r2) * (n - 1) / (n - k)
 
-    V = vcov_iid(X_re, y_re - X_re @ beta)
+    resid_re = y_re - X_re @ beta
     df_r = n - k
+
+    if vcov == "bootstrap":
+        V = vcov_pairs_bootstrap(X_re, y_re, n_boot=n_boot, seed=seed)
+        vcov_type_str = "bootstrap"
+    else:
+        V = vcov_iid(X_re, resid_re)
+        vcov_type_str = "iid"
 
     return RegressionResult(
         coefficients=beta,
@@ -228,7 +256,7 @@ def panel_re(
         r_squared=r2,
         r_squared_adj=r2_adj,
         model_type="Panel RE",
-        vcov_type="iid",
+        vcov_type=vcov_type_str,
     )
 
 
@@ -239,6 +267,8 @@ def panel_fd(
     time: str,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    n_boot: int = 999,
+    seed: int | None = None,
 ) -> RegressionResult:
     """Panel first-difference estimator.
 
@@ -250,8 +280,10 @@ def panel_fd(
         data: Polars DataFrame or LazyFrame
         entity: Column name for entity identifier
         time: Column name for time identifier
-        vcov: "iid" (default) or "HC1"
+        vcov: "iid", "HC1", "bootstrap", or "wildboot"
         cluster: Column name(s) for clustered SEs
+        n_boot: Bootstrap replications (default 999).
+        seed: Random seed for bootstrap reproducibility.
     """
     if isinstance(cluster, str):
         cluster = [cluster]
@@ -316,13 +348,25 @@ def panel_fd(
         codes = raw.to_numpy().astype(np.int32)
         cluster_arrays[c] = codes
 
-    cluster_list = [cluster_arrays[c] for c in cluster]
-    if len(cluster_list) == 1:
-        V = vcov_clustered(X_d, resid, cluster_list[0])
-    else:
-        V = vcov_multiway_clustered(X_d, resid, cluster_list)
-
     n_clusters_dict = {c: len(np.unique(cluster_arrays[c])) for c in cluster}
+
+    if vcov == "bootstrap":
+        V = vcov_pairs_bootstrap(X_d, y_d, n_boot=n_boot, seed=seed)
+        vcov_type_str = "bootstrap"
+        df_r = n - k
+    elif vcov == "wildboot":
+        cl_arr = cluster_arrays[cluster[0]]
+        V = vcov_wild_bootstrap(X_d, resid, cl_arr, n_boot=n_boot, seed=seed)
+        vcov_type_str = "wildboot"
+        df_r = min(n_clusters_dict.values()) - 1
+    else:
+        cluster_list = [cluster_arrays[c] for c in cluster]
+        if len(cluster_list) == 1:
+            V = vcov_clustered(X_d, resid, cluster_list[0])
+        else:
+            V = vcov_multiway_clustered(X_d, resid, cluster_list)
+        vcov_type_str = "cluster"
+        df_r = min(n_clusters_dict.values()) - 1
 
     return RegressionResult(
         coefficients=beta,
@@ -331,10 +375,10 @@ def panel_fd(
         names=names,
         n_obs=n,
         k=k,
-        df_r=min(n_clusters_dict.values()) - 1,
+        df_r=df_r,
         r_squared=r2,
         r_squared_adj=r2_adj,
         model_type="Panel FD",
-        vcov_type="cluster",
+        vcov_type=vcov_type_str,
         n_clusters=n_clusters_dict,
     )

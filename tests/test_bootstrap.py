@@ -4,7 +4,7 @@ import numpy as np
 import polars as pl
 import pytest
 
-from polars_reg import ols
+from polars_reg import iv2sls, liml, ols, panel_fd, panel_fe, panel_re
 
 
 @pytest.fixture
@@ -135,3 +135,139 @@ def test_bootstrap_summary(boot_data):
     s = r.summary()
     assert "bootstrap" in s
     assert "x1" in s
+
+
+# ── Bootstrap for IV estimators ──────────────────────────────────
+
+
+@pytest.fixture
+def iv_data():
+    """IV data for bootstrap tests."""
+    rng = np.random.default_rng(42)
+    n = 500
+    z1 = rng.standard_normal(n)
+    z2 = rng.standard_normal(n)
+    x_exog = rng.standard_normal(n)
+    x_endog = 0.5 * z1 + 0.3 * z2 + rng.standard_normal(n) * 0.5
+    y = 1.0 + 0.5 * x_exog + 1.0 * x_endog + rng.standard_normal(n) * 0.5
+    firm = np.repeat(np.arange(50), 10)
+    return pl.DataFrame(
+        {"y": y, "x_exog": x_exog, "x_endog": x_endog, "z1": z1, "z2": z2, "firm": firm}
+    )
+
+
+def test_iv_pairs_bootstrap(iv_data):
+    """Pairs bootstrap works for 2SLS."""
+    r = iv2sls(
+        "y ~ x_exog || x_endog ~ z1 + z2",
+        data=iv_data,
+        vcov="bootstrap",
+        n_boot=199,
+        seed=42,
+    )
+    assert r.vcov_type == "bootstrap"
+    assert np.all(r.se > 0)
+
+
+def test_iv_wild_bootstrap(iv_data):
+    """Wild cluster bootstrap works for 2SLS."""
+    r = iv2sls(
+        "y ~ x_exog || x_endog ~ z1 + z2",
+        data=iv_data,
+        vcov="wildboot",
+        cluster="firm",
+        n_boot=199,
+        seed=42,
+    )
+    assert r.vcov_type == "wildboot"
+    assert np.all(r.se > 0)
+
+
+def test_liml_pairs_bootstrap(iv_data):
+    """Pairs bootstrap works for LIML."""
+    r = liml(
+        "y ~ x_exog || x_endog ~ z1 + z2",
+        data=iv_data,
+        vcov="bootstrap",
+        n_boot=199,
+        seed=42,
+    )
+    assert r.vcov_type == "bootstrap"
+    assert np.all(r.se > 0)
+
+
+# ── Bootstrap for panel estimators ───────────────────────────────
+
+
+@pytest.fixture
+def panel_boot_data():
+    """Panel data for bootstrap tests."""
+    rng = np.random.default_rng(42)
+    n_e, n_t = 50, 10
+    x1 = rng.standard_normal(n_e * n_t)
+    alpha = np.repeat(rng.standard_normal(n_e) * 0.5, n_t)
+    y = 1.0 + 1.5 * x1 + alpha + rng.standard_normal(n_e * n_t) * 0.3
+    entity = np.repeat(np.arange(n_e), n_t)
+    time = np.tile(np.arange(n_t), n_e)
+    return pl.DataFrame({"y": y, "x1": x1, "entity": entity, "time": time})
+
+
+def test_panel_fe_pairs_bootstrap(panel_boot_data):
+    """Pairs bootstrap works for panel FE."""
+    r = panel_fe(
+        "y ~ x1",
+        data=panel_boot_data,
+        entity="entity",
+        time="time",
+        vcov="bootstrap",
+        cluster=[],
+        n_boot=199,
+        seed=42,
+    )
+    assert r.vcov_type == "bootstrap"
+    assert np.all(r.se > 0)
+
+
+def test_panel_fe_wild_bootstrap(panel_boot_data):
+    """Wild cluster bootstrap works for panel FE."""
+    r = panel_fe(
+        "y ~ x1",
+        data=panel_boot_data,
+        entity="entity",
+        time="time",
+        vcov="wildboot",
+        cluster=["entity"],
+        n_boot=199,
+        seed=42,
+    )
+    assert r.vcov_type == "wildboot"
+    assert np.all(r.se > 0)
+
+
+def test_panel_re_pairs_bootstrap(panel_boot_data):
+    """Pairs bootstrap works for panel RE."""
+    r = panel_re(
+        "y ~ x1",
+        data=panel_boot_data,
+        entity="entity",
+        vcov="bootstrap",
+        n_boot=199,
+        seed=42,
+    )
+    assert r.vcov_type == "bootstrap"
+    assert np.all(r.se > 0)
+
+
+def test_panel_fd_pairs_bootstrap(panel_boot_data):
+    """Pairs bootstrap works for panel FD."""
+    r = panel_fd(
+        "y ~ x1",
+        data=panel_boot_data,
+        entity="entity",
+        time="time",
+        vcov="bootstrap",
+        n_boot=199,
+        seed=42,
+    )
+    assert r.vcov_type == "bootstrap"
+    assert np.all(r.se > 0)

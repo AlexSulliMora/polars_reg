@@ -207,7 +207,7 @@ Accept `pandas.DataFrame` as input — convert to Polars internally, run as norm
 - [x] `ols(..., vcov="bootstrap", n_boot=999)`
 - [x] Wild bootstrap (Webb 6-point) for clustered data
 - [x] Pairs bootstrap
-- [ ] Works with all estimators (currently OLS only)
+- [x] Works with all estimators: OLS, 2SLS, LIML, GMM, panel FE/RE/FD
 
 ---
 

@@ -9,6 +9,7 @@ from polars_reg._results import RegressionResult
 from polars_reg._se import (
     _clustered_meat,
     _interaction_codes,
+    vcov_wild_bootstrap,
 )
 from polars_reg._utils import ensure_polars, extract_arrays
 
@@ -18,6 +19,8 @@ def iv2sls(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    n_boot: int = 999,
+    seed: int | None = None,
 ) -> RegressionResult:
     """Two-Stage Least Squares (2SLS) IV regression.
 
@@ -26,8 +29,10 @@ def iv2sls(
             "y ~ x_exog || x_endog ~ z1 + z2"          (no FE)
             "y ~ x_exog | fe | x_endog ~ z1 + z2"      (with FE)
         data: Polars DataFrame or LazyFrame
-        vcov: "iid", "HC0", or "HC1"
+        vcov: "iid", "HC0", "HC1", "bootstrap", or "wildboot"
         cluster: Column name(s) for clustered SEs. Overrides vcov.
+        n_boot: Bootstrap replications (default 999).
+        seed: Random seed for bootstrap reproducibility.
     """
     if isinstance(cluster, str):
         cluster = [cluster]
@@ -125,7 +130,8 @@ def iv2sls(
     # --- Variance-covariance ---
     XhX_inv = np.linalg.inv(XhX)
 
-    if cluster:
+    n_clusters_dict = None
+    if cluster and vcov != "wildboot":
         cluster_arrays_list = [arrays.cluster_arrays[c] for c in cluster]
         if len(cluster_arrays_list) == 1:
             V = _iv_vcov_clustered(X_hat, resid, cluster_arrays_list[0], XhX_inv)
@@ -134,15 +140,59 @@ def iv2sls(
         vcov_type = "cluster"
         n_clusters_dict = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters_dict.values()) - 1
+    elif vcov == "bootstrap":
+
+        def _iv_fit(X_b, y_b):
+            Z_b = np.column_stack([X_b[:, :k_exog], Z_excl_boot[: len(y_b)]])
+            ZtZ_b = Z_b.T @ Z_b
+            X_endog_hat_b = Z_b @ np.linalg.solve(ZtZ_b, Z_b.T @ X_b[:, k_exog:])
+            Xh_b = np.column_stack([X_b[:, :k_exog], X_endog_hat_b])
+            return np.linalg.solve(Xh_b.T @ X_b, Xh_b.T @ y_b)
+
+        # For pairs bootstrap, resample all arrays together
+        Z_excl_boot = Z_excl  # captured by closure
+        rng = np.random.default_rng(seed)
+        betas = np.empty((n_boot, k))
+        for b in range(n_boot):
+            idx = rng.integers(0, n, size=n)
+            X_b = X[idx]
+            y_b = y[idx]
+            Z_excl_b = Z_excl[idx]
+            Z_b = np.column_stack([X_b[:, :k_exog], Z_excl_b])
+            try:
+                ZtZ_b = Z_b.T @ Z_b
+                Xend_hat_b = Z_b @ np.linalg.solve(ZtZ_b, Z_b.T @ X_b[:, k_exog:])
+                Xh_b = np.column_stack([X_b[:, :k_exog], Xend_hat_b])
+                betas[b] = np.linalg.solve(Xh_b.T @ X_b, Xh_b.T @ y_b)
+            except (np.linalg.LinAlgError, ValueError):
+                betas[b] = np.nan
+        valid = ~np.any(np.isnan(betas), axis=1)
+        V = np.atleast_2d(np.cov(betas[valid].T, ddof=1))
+        vcov_type = "bootstrap"
+        df_r = n - k - df_abs
+    elif vcov == "wildboot":
+        if not cluster:
+            raise ValueError("vcov='wildboot' requires cluster= parameter")
+        cl_arr = arrays.cluster_arrays[cluster[0]]
+        V = vcov_wild_bootstrap(
+            X,
+            resid,
+            cl_arr,
+            n_boot=n_boot,
+            seed=seed,
+            bread=XhX_inv,
+            score_X=X_hat,
+        )
+        vcov_type = "wildboot"
+        n_clusters_dict = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
+        df_r = min(n_clusters_dict.values()) - 1
     elif vcov == "iid":
         V = _iv_vcov_iid(X_hat, X, resid, XhX_inv, df_abs=df_abs)
         vcov_type = "iid"
-        n_clusters_dict = None
         df_r = n - k - df_abs
     else:
         V = _iv_vcov_robust(X_hat, resid, XhX_inv, kind=vcov)
         vcov_type = vcov
-        n_clusters_dict = None
         df_r = n - k - df_abs
 
     names = arrays.names + (arrays.endog_names or [])

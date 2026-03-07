@@ -11,7 +11,9 @@ from polars_reg._results import RegressionResult
 from polars_reg._se import (
     vcov_clustered,
     vcov_multiway_clustered,
+    vcov_pairs_bootstrap,
     vcov_robust,
+    vcov_wild_bootstrap,
 )
 from polars_reg._utils import ensure_polars, extract_arrays
 
@@ -21,14 +23,18 @@ def liml(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    n_boot: int = 999,
+    seed: int | None = None,
 ) -> RegressionResult:
     """Limited Information Maximum Likelihood IV estimator.
 
     Args:
         formula: IV formula, e.g. "y ~ x_exog || x_endog ~ z1 + z2"
         data: Polars DataFrame or LazyFrame.
-        vcov: "iid", "HC0", "HC1", "HC2", or "HC3".
+        vcov: "iid", "HC0"-"HC3", "bootstrap", or "wildboot".
         cluster: Column name(s) for clustered SEs. Overrides vcov.
+        n_boot: Bootstrap replications (default 999).
+        seed: Random seed for bootstrap reproducibility.
     """
     if isinstance(cluster, str):
         cluster = [cluster]
@@ -111,7 +117,9 @@ def liml(
     r2_adj = 1.0 - (1.0 - r2) * (n - 1) / (n - k)
 
     # Variance-covariance
-    if cluster:
+    XwX_inv = np.linalg.inv(XwX)
+    n_clusters = None
+    if cluster and vcov != "wildboot":
         cluster_arrays = [arrays.cluster_arrays[c] for c in cluster]
         if len(cluster_arrays) == 1:
             V = vcov_clustered(X_w, resid, cluster_arrays[0])
@@ -120,18 +128,34 @@ def liml(
         vcov_type = "cluster"
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1
+    elif vcov == "bootstrap":
+        V = vcov_pairs_bootstrap(X_w, y, n_boot=n_boot, seed=seed)
+        vcov_type = "bootstrap"
+        df_r = n - k
+    elif vcov == "wildboot":
+        if not cluster:
+            raise ValueError("vcov='wildboot' requires cluster= parameter")
+        cl_arr = arrays.cluster_arrays[cluster[0]]
+        V = vcov_wild_bootstrap(
+            X_full,
+            resid,
+            cl_arr,
+            n_boot=n_boot,
+            seed=seed,
+            bread=XwX_inv,
+            score_X=X_w,
+        )
+        vcov_type = "wildboot"
+        n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
+        df_r = min(n_clusters.values()) - 1
     elif vcov == "iid":
-        # IID SE: sigma^2 * (X_w' X_full)^{-1}
-        XwX_inv = np.linalg.inv(XwX)
         sigma2 = resid @ resid / (n - k)
         V = sigma2 * XwX_inv
         vcov_type = "iid"
-        n_clusters = None
         df_r = n - k
     else:
         V = vcov_robust(X_w, resid, kind=vcov)
         vcov_type = vcov
-        n_clusters = None
         df_r = n - k
 
     return RegressionResult(
@@ -155,6 +179,8 @@ def gmm_iv(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    n_boot: int = 999,
+    seed: int | None = None,
 ) -> RegressionResult:
     """Two-step efficient GMM-IV estimator with Hansen J test.
 
@@ -234,8 +260,35 @@ def gmm_iv(
     A_final = XtZ @ S_final_inv @ XtZ.T
     V = np.linalg.inv(A_final) * n
 
-    # Override with cluster VCV if requested
-    if cluster:
+    # Override VCV if requested
+    if vcov == "bootstrap":
+        # Pairs bootstrap: resample and re-estimate two-step GMM
+        rng = np.random.default_rng(seed)
+        betas_boot = np.empty((n_boot, k))
+        for b in range(n_boot):
+            idx = rng.integers(0, n, size=n)
+            y_b, X_b, Z_b = y[idx], X_full[idx], Z[idx]
+            try:
+                ZtZ_b = Z_b.T @ Z_b
+                XtZ_b = X_b.T @ Z_b
+                Zty_b = Z_b.T @ y_b
+                A1_b = XtZ_b @ np.linalg.solve(ZtZ_b, XtZ_b.T)
+                b1_b = XtZ_b @ np.linalg.solve(ZtZ_b, Zty_b)
+                beta1_b = np.linalg.solve(A1_b, b1_b)
+                e1_b = y_b - X_b @ beta1_b
+                S_b = (Z_b * (e1_b**2)[:, None]).T @ Z_b / n
+                S_inv_b = np.linalg.inv(S_b)
+                A2_b = XtZ_b @ S_inv_b @ XtZ_b.T
+                b2_b = XtZ_b @ S_inv_b @ Zty_b
+                betas_boot[b] = np.linalg.solve(A2_b, b2_b)
+            except (np.linalg.LinAlgError, ValueError):
+                betas_boot[b] = np.nan
+        valid = ~np.any(np.isnan(betas_boot), axis=1)
+        V = np.atleast_2d(np.cov(betas_boot[valid].T, ddof=1))
+        vcov_type = "bootstrap"
+        n_clusters_dict = None
+        df_r = n - k
+    elif cluster:
         cluster_arrays_list = [arrays.cluster_arrays[c] for c in cluster]
         # For GMM with clustering, use sandwich form with Z-projected X
         # bread = (X'Z S^{-1} Z'X)^{-1}

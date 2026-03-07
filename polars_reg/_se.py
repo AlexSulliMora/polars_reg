@@ -253,11 +253,15 @@ def vcov_pairs_bootstrap(
     y: NDArray,
     n_boot: int = 999,
     seed: int | None = None,
+    fit_fn: object = None,
 ) -> NDArray:
     """Pairs bootstrap VCV.
 
-    Resamples (y_i, x_i) pairs with replacement and re-estimates OLS.
+    Resamples (y_i, x_i) pairs with replacement and re-estimates.
     Returns the sample covariance of bootstrap coefficient estimates.
+
+    Args:
+        fit_fn: Optional callable (X, y) -> beta. Defaults to OLS.
     """
     rng = np.random.default_rng(seed)
     n, k = X.shape
@@ -268,12 +272,16 @@ def vcov_pairs_bootstrap(
         X_b = X[idx]
         y_b = y[idx]
         try:
-            betas[b] = np.linalg.solve(X_b.T @ X_b, X_b.T @ y_b)
-        except np.linalg.LinAlgError:
+            if fit_fn is not None:
+                betas[b] = fit_fn(X_b, y_b)
+            else:
+                betas[b] = np.linalg.solve(X_b.T @ X_b, X_b.T @ y_b)
+        except (np.linalg.LinAlgError, ValueError):
             betas[b] = np.nan
 
     valid = ~np.any(np.isnan(betas), axis=1)
-    return np.cov(betas[valid].T, ddof=1)
+    V = np.cov(betas[valid].T, ddof=1)
+    return np.atleast_2d(V)
 
 
 def vcov_wild_bootstrap(
@@ -282,27 +290,34 @@ def vcov_wild_bootstrap(
     clusters: NDArray,
     n_boot: int = 999,
     seed: int | None = None,
+    bread: NDArray | None = None,
+    score_X: NDArray | None = None,
 ) -> NDArray:
     """Wild cluster bootstrap VCV using Webb 6-point distribution.
 
     Draws one random multiplier per cluster from the Webb 6-point set,
     creates perturbed residuals, re-estimates beta, and returns the
     sample covariance of bootstrap coefficient estimates.
+
+    For OLS: bread = (X'X)^{-1}, score_X = X (default).
+    For IV:  bread = (X_hat'X)^{-1}, score_X = X_hat.
     """
     rng = np.random.default_rng(seed)
     _, codes = np.unique(clusters, return_inverse=True)
     G = codes.max() + 1
     n, k = X.shape
-    XtX_inv = np.linalg.inv(X.T @ X)
-    # Precompute: beta_hat is implicit (resid = y - X@beta)
-    # y_star = X@beta + resid_star, so X'y_star = X'X@beta + X'(resid * eta)
-    # beta_star = beta + (X'X)^{-1} X'(resid * eta)
-    # So we only need (X'X)^{-1} and X' (resid * eta) per bootstrap rep.
 
+    if bread is None:
+        bread = np.linalg.inv(X.T @ X)
+    if score_X is None:
+        score_X = X
+
+    # beta_star - beta = bread @ score_X' @ (resid * eta)
     betas_centered = np.empty((n_boot, k))
     for b in range(n_boot):
         multipliers = rng.choice(_WEBB6, size=G)
         eta = multipliers[codes]
-        betas_centered[b] = XtX_inv @ (X.T @ (resid * eta))
+        betas_centered[b] = bread @ (score_X.T @ (resid * eta))
 
-    return np.cov(betas_centered.T, ddof=1)
+    V = np.cov(betas_centered.T, ddof=1)
+    return np.atleast_2d(V)
