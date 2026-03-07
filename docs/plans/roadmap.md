@@ -169,6 +169,70 @@ Accept `pandas.DataFrame` as input — convert to Polars internally, run as norm
 - [ ] Auto-publish to PyPI on tagged release
 
 ### 6c. Performance
-- [ ] Benchmark suite (N = 1K, 10K, 100K, 1M)
+- [x] Benchmark suite (N = 1K, 10K, 100K, 1M)
 - [ ] Sparse FE dummies for large group counts (>1000)
-- [ ] Profile demeaning for bottlenecks
+- [x] Profile demeaning for bottlenecks
+- [x] Vectorize _clustered_meat, _is_nested, drop_singletons (91x speedup)
+
+---
+
+## 7. regtable Export Formats (PRIORITY)
+
+### 7a. LaTeX export
+- [ ] `regtable(..., format="latex")` returns LaTeX tabular string
+- [ ] Proper escaping of underscores, special characters
+- [ ] Booktabs style (toprule/midrule/bottomrule)
+- [ ] Significance stars as superscripts
+
+### 7b. HTML export
+- [ ] `regtable(..., format="html")` returns HTML table string
+- [ ] CSS classes for styling (coefficient, se, header, footer)
+- [ ] Jupyter notebook auto-display via `_repr_html_`
+
+---
+
+## 8. Weighted Least Squares
+
+- [ ] `ols(..., weights=)` for analytic weights (aweight)
+- [ ] Frequency weights (fweight) support
+- [ ] WLS with FE absorption and clustered SEs
+
+---
+
+## 9. Bootstrap Standard Errors
+
+- [ ] `ols(..., vcov="bootstrap", n_boot=1000)`
+- [ ] Wild bootstrap (Webb 6-point) for clustered data
+- [ ] Pairs bootstrap
+- [ ] Works with all estimators
+
+---
+
+## 10. Limited Dependent Variable Models
+
+### 10a. Probit
+- [ ] `probit("y ~ x1 + x2", data=df)` via MLE
+- [ ] Marginal effects (at means / average)
+- [ ] Robust and clustered SEs
+
+### 10b. Logit
+- [ ] `logit("y ~ x1 + x2", data=df)` via MLE
+- [ ] Odds ratios option
+- [ ] Robust and clustered SEs
+
+---
+
+## 11. Dynamic Panel GMM (Arellano-Bond)
+
+- [ ] `panel_ab("y ~ x1 + x2", data=df, entity=, time=, lags=)`
+- [ ] System GMM (Blundell-Bond)
+- [ ] Sargan/Hansen test for overidentification
+- [ ] AR(1)/AR(2) serial correlation tests
+
+---
+
+## 12. Quantile Regression
+
+- [ ] `quantreg("y ~ x1 + x2", data=df, tau=0.5)` (median regression)
+- [ ] Multiple quantiles: tau=[0.25, 0.5, 0.75]
+- [ ] Bootstrap SEs for inference

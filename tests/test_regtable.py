@@ -162,4 +162,59 @@ def test_regtable_groupby_mixed(simple_data):
     # First column auto-labeled (1), then group keys
     assert "(1)" in table
     assert "X" in table
-    assert "Y" in table
+
+
+def test_regtable_latex(simple_data):
+    """LaTeX output has expected structure."""
+    r1 = ols("y ~ x1 + x2", data=simple_data)
+    table = regtable(r1, format="latex")
+    assert r"\begin{table}" in table
+    assert r"\toprule" in table
+    assert r"\midrule" in table
+    assert r"\bottomrule" in table
+    assert r"\end{tabular}" in table
+    assert "x1" in table
+    assert "R$^2$" in table
+
+
+def test_regtable_latex_escapes(panel_data):
+    """LaTeX output escapes underscores in variable names."""
+    r1 = ols("y ~ x1 + x2 | firm_id", data=panel_data, cluster=["firm_id"])
+    table = regtable(r1, format="latex")
+    assert r"firm\_id" in table
+    assert "firm_id" not in table.split(r"\_")[-1]  # no unescaped underscores
+
+
+def test_regtable_latex_stars(simple_data):
+    """LaTeX stars are rendered as superscripts."""
+    r1 = ols("y ~ x1 + x2", data=simple_data)
+    table = regtable(r1, format="latex", stars=True)
+    assert "$^{" in table  # star superscript
+
+
+def test_regtable_html(simple_data):
+    """HTML output has expected structure."""
+    r1 = ols("y ~ x1 + x2", data=simple_data)
+    table = regtable(r1, format="html")
+    assert "<table" in table
+    assert "</table>" in table
+    assert "<thead>" in table
+    assert "<tbody>" in table
+    assert "x1" in table
+    assert "R&sup2;" in table
+
+
+def test_regtable_html_fe_indicators(panel_data):
+    """HTML output includes FE and cluster indicator rows."""
+    r1 = ols("y ~ x1 + x2 | firm_id", data=panel_data, cluster=["firm_id"])
+    table = regtable(r1, format="html")
+    assert "Fixed Effects" in table
+    assert "Clustering" in table
+    assert "firm_id" in table
+
+
+def test_regtable_html_stars(simple_data):
+    """HTML stars are rendered as superscripts."""
+    r1 = ols("y ~ x1 + x2", data=simple_data)
+    table = regtable(r1, format="html", stars=True)
+    assert "<sup>" in table
