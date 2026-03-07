@@ -18,6 +18,7 @@ try:
 except ImportError:
     pass
 
+from polars_reg._arellano_bond import panel_ab
 from polars_reg._binary import logit, marginal_effects, probit
 from polars_reg._diagnostics import (
     hausman_test,
@@ -53,4 +54,5 @@ __all__ = [
     "probit",
     "logit",
     "marginal_effects",
+    "panel_ab",
 ]
