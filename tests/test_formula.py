@@ -1,4 +1,4 @@
-from polars_reg._formula import FormulaSpec, parse_formula
+from polars_reg._formula import parse_formula
 
 
 def test_simple_formula():

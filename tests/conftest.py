@@ -29,10 +29,15 @@ def panel_data() -> pl.DataFrame:
     x2 = rng.standard_normal(n)
     e = rng.standard_normal(n) * 0.5
     y = 1.0 * x1 - 2.0 * x2 + firm_fe[firm_id] + year_fe[year_id] + e
-    return pl.DataFrame({
-        "y": y, "x1": x1, "x2": x2,
-        "firm_id": firm_id, "year_id": year_id,
-    })
+    return pl.DataFrame(
+        {
+            "y": y,
+            "x1": x1,
+            "x2": x2,
+            "firm_id": firm_id,
+            "year_id": year_id,
+        }
+    )
 
 
 @pytest.fixture
@@ -46,7 +51,12 @@ def iv_data() -> pl.DataFrame:
     x_endog = 0.5 * z1 + 0.3 * z2 + 0.8 * u
     x_exog = rng.standard_normal(n)
     y = 1.0 + 2.0 * x_endog + 0.5 * x_exog + u
-    return pl.DataFrame({
-        "y": y, "x_endog": x_endog, "x_exog": x_exog,
-        "z1": z1, "z2": z2,
-    })
+    return pl.DataFrame(
+        {
+            "y": y,
+            "x_endog": x_endog,
+            "x_exog": x_exog,
+            "z1": z1,
+            "z2": z2,
+        }
+    )

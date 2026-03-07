@@ -8,7 +8,11 @@ from scipy import linalg, stats
 
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
-from polars_reg._se import vcov_clustered, vcov_iid, vcov_multiway_clustered, vcov_robust
+from polars_reg._se import (
+    vcov_clustered,
+    vcov_multiway_clustered,
+    vcov_robust,
+)
 from polars_reg._utils import extract_arrays
 
 
@@ -89,10 +93,6 @@ def liml(
     ZtZ_inv = np.linalg.inv(Z.T @ Z)
     Pz_Xfull = Z @ (ZtZ_inv @ (Z.T @ X_full))
     X_w = (1.0 - kappa) * X_full + kappa * Pz_Xfull
-
-    # Also compute W @ y for the estimator
-    Pz_y = Z @ (ZtZ_inv @ (Z.T @ y))
-    y_w = (1.0 - kappa) * y + kappa * Pz_y
 
     # beta = (X_w' X_full)^{-1} X_w' y
     XwX = X_w.T @ X_full
@@ -244,11 +244,8 @@ def gmm_iv(
         XZ_Sinv = XtZ @ S_final_inv  # k x q
         Xe = (XZ_Sinv @ Z.T).T * resid[:, None]  # n x k score-like
         if len(cluster_arrays_list) == 1:
-            from polars_reg._se import _clustered_meat
             clusters = cluster_arrays_list[0]
             G = len(np.unique(clusters))
-            meat = _clustered_meat(np.eye(k), np.ones(k), clusters)
-            # Recompute meat properly
             unique_clusters = np.unique(clusters)
             meat_mat = np.zeros((k, k))
             for g in unique_clusters:

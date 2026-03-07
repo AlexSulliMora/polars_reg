@@ -8,7 +8,6 @@ from polars_reg._results import RegressionResult
 from polars_reg._se import (
     _clustered_meat,
     _interaction_codes,
-    vcov_multiway_clustered,
 )
 from polars_reg._utils import extract_arrays
 
@@ -44,8 +43,11 @@ def iv2sls(
 
     X_exog = arrays.X  # exogenous regressors (may include intercept)
     y = arrays.y
-    X_endog = arrays.endog  # endogenous regressors
-    Z_excl = arrays.instruments  # excluded instruments
+    X_endog = arrays.endog
+    Z_excl = arrays.instruments
+
+    if X_endog is None or Z_excl is None:
+        raise ValueError("IV requires endogenous variables and instruments.")
 
     n = arrays.n_obs
     k_exog = X_exog.shape[1]
@@ -98,9 +100,7 @@ def iv2sls(
         else:
             V = _iv_vcov_multiway(X_hat, resid, cluster_arrays_list, XhX_inv)
         vcov_type = "cluster"
-        n_clusters_dict = {
-            c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster
-        }
+        n_clusters_dict = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters_dict.values()) - 1
     elif vcov == "iid":
         V = _iv_vcov_iid(X_hat, X, resid, XhX_inv)
@@ -114,7 +114,7 @@ def iv2sls(
         df_r = n - k
 
     # Coefficient names: exog names + endog names
-    names = arrays.names + arrays.endog_names
+    names = arrays.names + (arrays.endog_names or [])
 
     return RegressionResult(
         coefficients=beta,
@@ -192,7 +192,7 @@ def _iv_vcov_robust(
     where meat = X_hat' diag(e^2) X_hat, with HC1 scaling.
     """
     n, k = X_hat.shape
-    e2 = resid ** 2
+    e2 = resid**2
 
     meat = X_hat.T @ (X_hat * e2[:, None])
 

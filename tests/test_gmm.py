@@ -1,6 +1,4 @@
 import numpy as np
-import polars as pl
-import pytest
 
 from polars_reg._gmm import gmm_iv, liml
 
@@ -15,6 +13,7 @@ def test_liml_basic(iv_data):
 def test_liml_vs_ols(iv_data):
     """LIML should correct endogeneity bias like 2SLS."""
     from polars_reg._ols import ols
+
     ols_result = ols("y ~ x_exog + x_endog", data=iv_data)
     liml_result = liml("y ~ x_exog || x_endog ~ z1 + z2", data=iv_data)
     ols_endog = ols_result.coefficients[ols_result.names.index("x_endog")]

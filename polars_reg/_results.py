@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
@@ -50,7 +50,7 @@ class RegressionResult:
     def summary(self) -> str:
         lines = [
             f"{self.model_type} Regression",
-            f"{'='*60}",
+            f"{'=' * 60}",
             f"N = {self.n_obs}    R² = {self.r_squared:.4f}    Adj. R² = {self.r_squared_adj:.4f}",
             f"SE type: {self.vcov_type}",
         ]
@@ -63,9 +63,10 @@ class RegressionResult:
             lines.append(f"First-stage F: {self.first_stage_f:.2f}")
         if self.j_stat is not None:
             lines.append(f"Hansen J: {self.j_stat:.4f} (p = {self.j_pvalue:.4f})")
-        lines.append(f"{'-'*60}")
-        lines.append(f"{'':>12} {'Coef':>10} {'SE':>10} {'t':>8} {'P>|t|':>8} {'[0.025':>8} {'0.975]':>8}")
-        lines.append(f"{'-'*60}")
+        lines.append(f"{'-' * 60}")
+        cols = f"{'Coef':>10} {'SE':>10} {'t':>8} {'P>|t|':>8} {'[0.025':>8} {'0.975]':>8}"
+        lines.append(f"{'':>12} {cols}")
+        lines.append(f"{'-' * 60}")
         ci = self.confint()
         for i, name in enumerate(self.names):
             lines.append(
@@ -73,5 +74,5 @@ class RegressionResult:
                 f"{self.tstat[i]:>8.2f} {self.pvalue[i]:>8.4f} "
                 f"{ci[i, 0]:>8.4f} {ci[i, 1]:>8.4f}"
             )
-        lines.append(f"{'='*60}")
+        lines.append(f"{'=' * 60}")
         return "\n".join(lines)

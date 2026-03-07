@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -91,7 +90,9 @@ def _wsl_to_win(path: str | Path) -> str:
     """Convert a WSL path to a Windows path."""
     result = subprocess.run(
         ["wslpath", "-w", str(path)],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return result.stdout.strip()
 
@@ -158,8 +159,7 @@ file close donefh
     while not sentinel.exists():
         if time.monotonic() - start > timeout:
             raise TimeoutError(
-                f"Stata did not complete within {timeout}s. "
-                f"Check {do_path} for issues."
+                f"Stata did not complete within {timeout}s. Check {do_path} for issues."
             )
         time.sleep(0.5)
 
@@ -211,48 +211,48 @@ def _build_results_do(stata_cmd: str, model_type: str, win_csv_path: str) -> str
         "local names : colnames b",
         "local k = colsof(b)",
         "forvalues i = 1/`k' {",
-        '    local name : word `i\' of `names\'',
+        "    local name : word `i' of `names'",
         "    local coef = b[1,`i']",
         "    local se = sqrt(V[`i',`i'])",
-        '    file write fh "`name\',`coef\',`se\'" _n',
+        "    file write fh \"`name',`coef',`se'\" _n",
         "}",
         "",
-        '* Write scalar metadata',
+        "* Write scalar metadata",
         'file write fh "___N___," %20.0f (e(N)) ",0" _n',
         'file write fh "___df_r___," %20.0f (e(df_r)) ",0" _n',
     ]
 
     # R-squared (may not exist for all models)
     extract_lines += [
-        'capture local r2_val = e(r2)',
-        'if _rc == 0 {',
+        "capture local r2_val = e(r2)",
+        "if _rc == 0 {",
         '    file write fh "___r2___," %20.12f (e(r2)) ",0" _n',
-        '}',
-        'capture local r2a_val = e(r2_a)',
-        'if _rc == 0 {',
+        "}",
+        "capture local r2a_val = e(r2_a)",
+        "if _rc == 0 {",
         '    file write fh "___r2_a___," %20.12f (e(r2_a)) ",0" _n',
-        '}',
+        "}",
     ]
 
     # reghdfe-specific
     if model_type == "reghdfe":
         extract_lines += [
-            'capture {',
+            "capture {",
             '    file write fh "___r2_within___," %20.12f (e(r2_within)) ",0" _n',
             '    file write fh "___df_a___," %20.0f (e(df_a)) ",0" _n',
-            '}',
+            "}",
         ]
 
     # GMM J-test
     if model_type == "ivregress_gmm":
         extract_lines += [
-            'capture {',
+            "capture {",
             '    file write fh "___J___," %20.12f (e(J)) ",0" _n',
             '    file write fh "___J_p___," %20.12f (e(J_p)) ",0" _n',
-            '}',
+            "}",
         ]
 
-    extract_lines.append('file close fh')
+    extract_lines.append("file close fh")
 
     return "\n".join(extract_lines)
 
@@ -478,7 +478,7 @@ def _iv_to_ivregress_gmm(spec: FormulaSpec, vce_opt: str) -> str:
     instr_str = " ".join(spec.instruments)
     exog_str = " ".join(spec.exog) if spec.exog else ""
 
-    parts = [f"ivregress gmm", spec.depvar]
+    parts = ["ivregress gmm", spec.depvar]
     if exog_str:
         parts.append(exog_str)
     parts.append(f"({endog_str} = {instr_str})")
@@ -556,9 +556,7 @@ def _align_coefficients(
 
     if not common:
         raise ValueError(
-            f"No common coefficient names.\n"
-            f"  polars_reg: {polars_names}\n"
-            f"  Stata: {stata_names}"
+            f"No common coefficient names.\n  polars_reg: {polars_names}\n  Stata: {stata_names}"
         )
 
     pr_idx = [pr_map[n] for n in common]
@@ -602,16 +600,26 @@ def compare_results(
     # Align coefficients by name
     try:
         pr_c, pr_se, st_c, st_se, names = _align_coefficients(
-            polars_result.names, polars_result.coefficients, polars_result.se,
-            stata_result.names, stata_result.coefficients, stata_result.se,
+            polars_result.names,
+            polars_result.coefficients,
+            polars_result.se,
+            stata_result.names,
+            stata_result.coefficients,
+            stata_result.se,
         )
     except ValueError as e:
         return ComparisonResult(
-            estimator=estimator, formula=formula, stata_command=stata_command,
-            passed=False, n_obs_match=n_match,
-            coef_max_rdiff=float("inf"), se_max_rdiff=float("inf"),
-            r2_rdiff=None, details=[str(e)],
-            polars_names=polars_result.names, stata_names=stata_result.names,
+            estimator=estimator,
+            formula=formula,
+            stata_command=stata_command,
+            passed=False,
+            n_obs_match=n_match,
+            coef_max_rdiff=float("inf"),
+            se_max_rdiff=float("inf"),
+            r2_rdiff=None,
+            details=[str(e)],
+            polars_names=polars_result.names,
+            stata_names=stata_result.names,
         )
 
     # HC0 adjustment: Stata has no direct HC0, so if vcov=="HC0" we ran
@@ -661,13 +669,21 @@ def compare_results(
             )
 
     return ComparisonResult(
-        estimator=estimator, formula=formula, stata_command=stata_command,
-        passed=passed, n_obs_match=n_match,
-        coef_max_rdiff=coef_max, se_max_rdiff=se_max, r2_rdiff=r2_rdiff,
+        estimator=estimator,
+        formula=formula,
+        stata_command=stata_command,
+        passed=passed,
+        n_obs_match=n_match,
+        coef_max_rdiff=coef_max,
+        se_max_rdiff=se_max,
+        r2_rdiff=r2_rdiff,
         details=details,
-        polars_coefs=pr_c, stata_coefs=st_c,
-        polars_se=pr_se, stata_se=st_se,
-        polars_names=names, stata_names=names,
+        polars_coefs=pr_c,
+        stata_coefs=st_c,
+        polars_se=pr_se,
+        stata_se=st_se,
+        polars_names=names,
+        stata_names=names,
     )
 
 

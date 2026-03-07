@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 import polars as pl
@@ -60,26 +60,14 @@ def extract_arrays(
     # Extract FE as integer codes
     fe_arrays: dict[str, np.ndarray] = {}
     for col in spec.fe:
-        codes = (
-            df_clean[col]
-            .cast(pl.Utf8)
-            .cast(pl.Categorical)
-            .to_physical()
-            .to_numpy()
-        )
+        codes = df_clean[col].cast(pl.Utf8).cast(pl.Categorical).to_physical().to_numpy()
         fe_arrays[col] = codes.astype(np.int32)
 
     # Extract cluster codes
     cluster_arrays: dict[str, np.ndarray] = {}
     if cluster:
         for col in cluster:
-            codes = (
-                df_clean[col]
-                .cast(pl.Utf8)
-                .cast(pl.Categorical)
-                .to_physical()
-                .to_numpy()
-            )
+            codes = df_clean[col].cast(pl.Utf8).cast(pl.Categorical).to_physical().to_numpy()
             cluster_arrays[col] = codes.astype(np.int32)
 
     # Extract endogenous and instruments
@@ -88,16 +76,12 @@ def extract_arrays(
     endog_names = None
     instrument_names = None
     if spec.endog:
-        endog_cols = [
-            df_clean[c].to_numpy(allow_copy=False).astype(np.float64)
-            for c in spec.endog
-        ]
+        endog_cols = [df_clean[c].to_numpy(allow_copy=False).astype(np.float64) for c in spec.endog]
         endog = np.column_stack(endog_cols)
         endog_names = list(spec.endog)
     if spec.instruments:
         iv_cols = [
-            df_clean[c].to_numpy(allow_copy=False).astype(np.float64)
-            for c in spec.instruments
+            df_clean[c].to_numpy(allow_copy=False).astype(np.float64) for c in spec.instruments
         ]
         instruments = np.column_stack(iv_cols)
         instrument_names = list(spec.instruments)

@@ -6,7 +6,12 @@ import polars as pl
 from polars_reg._demean import absorbed_dof, demean, drop_singletons
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
-from polars_reg._se import vcov_clustered, vcov_iid, vcov_multiway_clustered, vcov_robust
+from polars_reg._se import (
+    vcov_clustered,
+    vcov_iid,
+    vcov_multiway_clustered,
+    vcov_robust,
+)
 from polars_reg._utils import extract_arrays
 
 
@@ -80,9 +85,7 @@ def ols(
             X = X[keep]
             fe_dict = {k: v[keep] for k, v in fe_dict.items()}
             if cluster:
-                arrays.cluster_arrays = {
-                    k: v[keep] for k, v in arrays.cluster_arrays.items()
-                }
+                arrays.cluster_arrays = {k: v[keep] for k, v in arrays.cluster_arrays.items()}
 
         # Remove intercept (absorbed by FE)
         if spec.add_intercept and arrays.names[-1] == "_cons":

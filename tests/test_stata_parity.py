@@ -63,10 +63,15 @@ def panel_data() -> pl.DataFrame:
     x2 = rng.standard_normal(n)
     e = rng.standard_normal(n) * 0.5
     y = 1.0 * x1 - 2.0 * x2 + firm_fe[firm_id - 1] + year_fe[year_id - 2001] + e
-    return pl.DataFrame({
-        "y": y, "x1": x1, "x2": x2,
-        "firm_id": firm_id, "year_id": year_id,
-    })
+    return pl.DataFrame(
+        {
+            "y": y,
+            "x1": x1,
+            "x2": x2,
+            "firm_id": firm_id,
+            "year_id": year_id,
+        }
+    )
 
 
 @pytest.fixture
@@ -80,10 +85,15 @@ def iv_data() -> pl.DataFrame:
     x_endog = 0.5 * z1 + 0.3 * z2 + 0.8 * u
     x_exog = rng.standard_normal(n)
     y = 1.0 + 2.0 * x_endog + 0.5 * x_exog + u
-    return pl.DataFrame({
-        "y": y, "x_endog": x_endog, "x_exog": x_exog,
-        "z1": z1, "z2": z2,
-    })
+    return pl.DataFrame(
+        {
+            "y": y,
+            "x_endog": x_endog,
+            "x_exog": x_exog,
+            "z1": z1,
+            "z2": z2,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -120,9 +130,7 @@ class TestTranslation:
         assert "noconstant" in cmd
 
     def test_reghdfe_basic(self):
-        cmd, model = to_stata_command(
-            "ols", "y ~ x1 + x2 | firm_id + year_id", cluster=["firm_id"]
-        )
+        cmd, model = to_stata_command("ols", "y ~ x1 + x2 | firm_id + year_id", cluster=["firm_id"])
         assert model == "reghdfe"
         assert "reghdfe y x1 x2" in cmd
         assert "absorb(firm_id year_id)" in cmd
@@ -130,7 +138,8 @@ class TestTranslation:
 
     def test_reghdfe_twoway_cluster(self):
         cmd, _ = to_stata_command(
-            "ols", "y ~ x1 | firm_id + year_id",
+            "ols",
+            "y ~ x1 | firm_id + year_id",
             cluster=["firm_id", "year_id"],
         )
         assert "vce(cluster firm_id year_id)" in cmd
@@ -145,15 +154,11 @@ class TestTranslation:
         assert "ivregress 2sls y x_exog (x_endog = z1 z2)" in cmd
 
     def test_iv2sls_robust(self):
-        cmd, _ = to_stata_command(
-            "iv2sls", "y ~ x_exog || x_endog ~ z1 + z2", vcov="HC1"
-        )
+        cmd, _ = to_stata_command("iv2sls", "y ~ x_exog || x_endog ~ z1 + z2", vcov="HC1")
         assert "vce(robust)" in cmd
 
     def test_iv2sls_clustered(self):
-        cmd, _ = to_stata_command(
-            "iv2sls", "y ~ x_exog || x_endog ~ z1 + z2", cluster=["cl"]
-        )
+        cmd, _ = to_stata_command("iv2sls", "y ~ x_exog || x_endog ~ z1 + z2", cluster=["cl"])
         assert "vce(cluster cl)" in cmd
 
     def test_liml(self):
@@ -193,28 +198,20 @@ class TestOLSParity:
         assert r.se_max_rdiff < TIGHT
 
     def test_ols_robust(self, ols_data):
-        r = assert_stata_parity(
-            "ols", "y ~ x1 + x2 + x3", ols_data, vcov="HC1", rtol=TIGHT
-        )
+        r = assert_stata_parity("ols", "y ~ x1 + x2 + x3", ols_data, vcov="HC1", rtol=TIGHT)
         assert r.coef_max_rdiff < TIGHT
         assert r.se_max_rdiff < TIGHT
 
     def test_ols_hc2(self, ols_data):
-        r = assert_stata_parity(
-            "ols", "y ~ x1 + x2 + x3", ols_data, vcov="HC2", rtol=TIGHT
-        )
+        r = assert_stata_parity("ols", "y ~ x1 + x2 + x3", ols_data, vcov="HC2", rtol=TIGHT)
         assert r.se_max_rdiff < TIGHT
 
     def test_ols_hc3(self, ols_data):
-        r = assert_stata_parity(
-            "ols", "y ~ x1 + x2 + x3", ols_data, vcov="HC3", rtol=TIGHT
-        )
+        r = assert_stata_parity("ols", "y ~ x1 + x2 + x3", ols_data, vcov="HC3", rtol=TIGHT)
         assert r.se_max_rdiff < TIGHT
 
     def test_ols_no_intercept(self, ols_data):
-        r = assert_stata_parity(
-            "ols", "y ~ x1 + x2 + x3 - 1", ols_data, rtol=TIGHT
-        )
+        r = assert_stata_parity("ols", "y ~ x1 + x2 + x3 - 1", ols_data, rtol=TIGHT)
         assert r.coef_max_rdiff < TIGHT
 
 
@@ -224,32 +221,44 @@ class TestRegHDFEParity:
 
     def test_one_fe_clustered(self, panel_data):
         r = assert_stata_parity(
-            "ols", "y ~ x1 + x2 | firm_id", panel_data,
-            cluster=["firm_id"], rtol=REGHDFE,
+            "ols",
+            "y ~ x1 + x2 | firm_id",
+            panel_data,
+            cluster=["firm_id"],
+            rtol=REGHDFE,
         )
         assert r.coef_max_rdiff < REGHDFE
         assert r.se_max_rdiff < REGHDFE
 
     def test_twoway_fe_clustered(self, panel_data):
         r = assert_stata_parity(
-            "ols", "y ~ x1 + x2 | firm_id + year_id", panel_data,
-            cluster=["firm_id"], rtol=REGHDFE,
+            "ols",
+            "y ~ x1 + x2 | firm_id + year_id",
+            panel_data,
+            cluster=["firm_id"],
+            rtol=REGHDFE,
         )
         assert r.coef_max_rdiff < REGHDFE
         assert r.se_max_rdiff < REGHDFE
 
     def test_twoway_fe_twoway_cluster(self, panel_data):
         r = assert_stata_parity(
-            "ols", "y ~ x1 + x2 | firm_id + year_id", panel_data,
-            cluster=["firm_id", "year_id"], rtol=REGHDFE,
+            "ols",
+            "y ~ x1 + x2 | firm_id + year_id",
+            panel_data,
+            cluster=["firm_id", "year_id"],
+            rtol=REGHDFE,
         )
         assert r.coef_max_rdiff < REGHDFE
         assert r.se_max_rdiff < REGHDFE
 
     def test_twoway_fe_iid(self, panel_data):
         r = assert_stata_parity(
-            "ols", "y ~ x1 + x2 | firm_id + year_id", panel_data,
-            vcov="iid", rtol=REGHDFE,
+            "ols",
+            "y ~ x1 + x2 | firm_id + year_id",
+            panel_data,
+            vcov="iid",
+            rtol=REGHDFE,
         )
         assert r.coef_max_rdiff < REGHDFE
         assert r.se_max_rdiff < REGHDFE
@@ -261,7 +270,9 @@ class TestIVParity:
 
     def test_2sls_iid(self, iv_data):
         r = assert_stata_parity(
-            "iv2sls", "y ~ x_exog || x_endog ~ z1 + z2", iv_data,
+            "iv2sls",
+            "y ~ x_exog || x_endog ~ z1 + z2",
+            iv_data,
             rtol=TIGHT,
         )
         assert r.coef_max_rdiff < TIGHT
@@ -269,8 +280,11 @@ class TestIVParity:
 
     def test_2sls_robust(self, iv_data):
         r = assert_stata_parity(
-            "iv2sls", "y ~ x_exog || x_endog ~ z1 + z2", iv_data,
-            vcov="HC1", rtol=TIGHT,
+            "iv2sls",
+            "y ~ x_exog || x_endog ~ z1 + z2",
+            iv_data,
+            vcov="HC1",
+            rtol=TIGHT,
         )
         assert r.coef_max_rdiff < TIGHT
         assert r.se_max_rdiff < TIGHT
@@ -279,7 +293,9 @@ class TestIVParity:
         # LIML kappa eigenvalue computation differs slightly between
         # implementations, leading to ~6e-4 coefficient differences
         r = assert_stata_parity(
-            "liml", "y ~ x_exog || x_endog ~ z1 + z2", iv_data,
+            "liml",
+            "y ~ x_exog || x_endog ~ z1 + z2",
+            iv_data,
             rtol=LOOSE,
         )
         assert r.coef_max_rdiff < LOOSE
@@ -288,7 +304,9 @@ class TestIVParity:
     def test_gmm_robust(self, iv_data):
         # GMM may have slightly different implementation details
         r = assert_stata_parity(
-            "gmm_iv", "y ~ x_exog || x_endog ~ z1 + z2", iv_data,
+            "gmm_iv",
+            "y ~ x_exog || x_endog ~ z1 + z2",
+            iv_data,
             rtol=MEDIUM,
         )
         assert r.coef_max_rdiff < MEDIUM
@@ -316,6 +334,7 @@ def run_all_parity_checks(
         for r in results:
             print(r)
     """
+    import polars_reg as pr
     from tests.stata_compare import (
         _extract_stata_results,
         _load_data_to_stata,
@@ -323,8 +342,6 @@ def run_all_parity_checks(
         compare_results,
         to_stata_command,
     )
-
-    import polars_reg as pr
 
     specs = [
         # (estimator, formula, data, vcov, cluster)
@@ -367,10 +384,15 @@ def run_all_parity_checks(
             results.append(comp)
         except Exception as e:
             comp = ComparisonResult(
-                estimator=est, formula=formula, stata_command="(error)",
-                passed=False, n_obs_match=False,
-                coef_max_rdiff=float("inf"), se_max_rdiff=float("inf"),
-                r2_rdiff=None, details=[f"Exception: {e}"],
+                estimator=est,
+                formula=formula,
+                stata_command="(error)",
+                passed=False,
+                n_obs_match=False,
+                coef_max_rdiff=float("inf"),
+                se_max_rdiff=float("inf"),
+                r2_rdiff=None,
+                details=[f"Exception: {e}"],
             )
             results.append(comp)
 

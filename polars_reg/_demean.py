@@ -55,9 +55,7 @@ def demean(
     return result.squeeze(axis=1) if squeeze else result
 
 
-def _symmetric_kaczmarz(
-    X: NDArray, fe_list: list[NDArray], n_groups_list: list[int]
-) -> NDArray:
+def _symmetric_kaczmarz(X: NDArray, fe_list: list[NDArray], n_groups_list: list[int]) -> NDArray:
     """One sweep of symmetric Kaczmarz: forward then backward."""
     # Forward
     for codes, n_g in zip(fe_list, n_groups_list):
@@ -149,9 +147,7 @@ def absorbed_dof(fe_dict: dict[str, NDArray]) -> int:
     return total_dof
 
 
-def _connected_components(
-    codes_a: NDArray, n_a: int, codes_b: NDArray, n_b: int
-) -> int:
+def _connected_components(codes_a: NDArray, n_a: int, codes_b: NDArray, n_b: int) -> int:
     """Count connected components in bipartite graph of two FE dimensions."""
     total = n_a + n_b
     graph = scipy.sparse.coo_matrix(

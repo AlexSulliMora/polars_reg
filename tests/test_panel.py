@@ -1,13 +1,14 @@
 import numpy as np
-from polars_reg._panel import panel_fe
+
 from polars_reg._ols import ols
+from polars_reg._panel import panel_fe
 
 
 def test_panel_fe_basic(panel_data):
     """Panel FE should recover coefficients."""
     result = panel_fe("y ~ x1 + x2", data=panel_data, entity="firm_id", time="year_id")
     assert result.model_type == "Panel FE"
-    np.testing.assert_allclose(result.coefficients[0], 1.0, atol=0.15)   # x1
+    np.testing.assert_allclose(result.coefficients[0], 1.0, atol=0.15)  # x1
     np.testing.assert_allclose(result.coefficients[1], -2.0, atol=0.15)  # x2
 
 

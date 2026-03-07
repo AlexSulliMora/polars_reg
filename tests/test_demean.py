@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 from polars_reg._demean import absorbed_dof, demean, drop_singletons
 
@@ -78,8 +77,8 @@ def test_drop_singletons():
     a = np.array([99, 0, 0, 1, 1, 2, 2, 2])
     b = np.array([0, 0, 1, 0, 1, 0, 1, 2])
     mask = drop_singletons({"a": a, "b": b})
-    assert mask[0] == False  # singleton in group a=99
-    assert mask[7] == False  # cascading singleton: b=2 only had obs 0 and 7
+    assert not mask[0]  # singleton in group a=99
+    assert not mask[7]  # cascading singleton: b=2 only had obs 0 and 7
     assert mask[1:7].all()  # remaining observations survive
 
 

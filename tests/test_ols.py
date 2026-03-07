@@ -1,5 +1,4 @@
 import numpy as np
-import polars as pl
 
 from polars_reg._ols import ols
 
@@ -9,9 +8,9 @@ def test_ols_basic(simple_data):
     # DGP: y = 2.0 + 1.5*x1 - 0.5*x2 + N(0, 0.25)
     assert result.n_obs == 1000
     assert result.model_type == "OLS"
-    np.testing.assert_allclose(result.coefficients[0], 1.5, atol=0.1)   # x1
+    np.testing.assert_allclose(result.coefficients[0], 1.5, atol=0.1)  # x1
     np.testing.assert_allclose(result.coefficients[1], -0.5, atol=0.1)  # x2
-    np.testing.assert_allclose(result.coefficients[2], 2.0, atol=0.1)   # _cons
+    np.testing.assert_allclose(result.coefficients[2], 2.0, atol=0.1)  # _cons
     assert result.r_squared > 0.8
     assert result.names == ["x1", "x2", "_cons"]
 

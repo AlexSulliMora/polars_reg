@@ -49,9 +49,7 @@ def test_extract_fe_codes():
 
 
 def test_extract_cluster_codes():
-    df = pl.DataFrame(
-        {"y": [1.0, 2.0, 3.0], "x1": [1.0, 2.0, 3.0], "cl": [0, 1, 0]}
-    )
+    df = pl.DataFrame({"y": [1.0, 2.0, 3.0], "x1": [1.0, 2.0, 3.0], "cl": [0, 1, 0]})
     spec = FormulaSpec(depvar="y", exog=["x1"])
     arrays = extract_arrays(df, spec, cluster=["cl"])
     assert "cl" in arrays.cluster_arrays

@@ -1,6 +1,6 @@
 """Integration tests: end-to-end usage of the public API."""
+
 import numpy as np
-import polars as pl
 import pytest
 
 import polars_reg
