@@ -33,6 +33,7 @@ class ExtractedArrays:
     endog_names: list[str] | None = None
     instrument_names: list[str] | None = None
     time_array: np.ndarray | None = None
+    weights: np.ndarray | None = None
 
 
 def extract_arrays(
@@ -40,6 +41,7 @@ def extract_arrays(
     spec: FormulaSpec,
     cluster: list[str] | None = None,
     time: str | None = None,
+    weights: str | None = None,
 ) -> ExtractedArrays:
     """Extract NumPy arrays from a Polars DataFrame given a FormulaSpec."""
     if isinstance(df, pl.LazyFrame):
@@ -57,10 +59,14 @@ def extract_arrays(
         all_cols += [c for c in cluster if c not in all_cols]
     if time and time not in all_cols:
         all_cols.append(time)
+    if weights and weights not in all_cols:
+        all_cols.append(weights)
     all_cols = list(dict.fromkeys(all_cols))  # dedupe preserving order
 
     # Drop rows with nulls in numeric columns
     numeric_cols = [spec.depvar] + exog_cols + spec.endog + spec.instruments
+    if weights:
+        numeric_cols.append(weights)
     df_clean = df.select(all_cols).drop_nulls(subset=numeric_cols)
 
     n_obs = len(df_clean)
@@ -119,6 +125,11 @@ def extract_arrays(
     if time:
         time_array = df_clean[time].cast(pl.Float64).to_numpy()
 
+    # Extract weights
+    w = None
+    if weights:
+        w = df_clean[weights].to_numpy().astype(np.float64)
+
     return ExtractedArrays(
         y=y,
         X=X,
@@ -131,4 +142,5 @@ def extract_arrays(
         endog_names=endog_names,
         instrument_names=instrument_names,
         time_array=time_array,
+        weights=w,
     )

@@ -8,18 +8,27 @@ import scipy.sparse.csgraph
 from numpy.typing import NDArray
 
 
-def _group_means(x: NDArray, codes: NDArray, n_groups: int) -> NDArray:
-    """Compute group means. x can be 1D or 2D."""
-    counts = np.bincount(codes, minlength=n_groups).astype(np.float64)
+def _group_means(x: NDArray, codes: NDArray, n_groups: int, w: NDArray | None = None) -> NDArray:
+    """Compute (optionally weighted) group means. x can be 1D or 2D."""
+    if w is None:
+        denom = np.bincount(codes, minlength=n_groups).astype(np.float64)
+    else:
+        denom = np.bincount(codes, weights=w, minlength=n_groups)
     if x.ndim == 1:
-        sums = np.bincount(codes, weights=x, minlength=n_groups)
-        return sums / counts
+        if w is None:
+            sums = np.bincount(codes, weights=x, minlength=n_groups)
+        else:
+            sums = np.bincount(codes, weights=w * x, minlength=n_groups)
+        return sums / denom
     else:
         k = x.shape[1]
         means = np.empty((n_groups, k))
         for j in range(k):
-            sums = np.bincount(codes, weights=x[:, j], minlength=n_groups)
-            means[:, j] = sums / counts
+            if w is None:
+                sums = np.bincount(codes, weights=x[:, j], minlength=n_groups)
+            else:
+                sums = np.bincount(codes, weights=w * x[:, j], minlength=n_groups)
+            means[:, j] = sums / denom
         return means
 
 
@@ -28,11 +37,15 @@ def demean(
     fe_dict: dict[str, NDArray],
     tol: float = 1e-8,
     max_iter: int = 100_000,
+    weights: NDArray | None = None,
 ) -> NDArray:
     """Demean columns of X by absorbing multiple fixed effects.
 
     Uses Symmetric Kaczmarz + CG acceleration (Correia 2016).
     Single FE: exact in one pass. Multiple FE: iterative.
+
+    Args:
+        weights: Optional analytic weights for weighted group means.
     """
     if X.ndim == 1:
         X = X.reshape(-1, 1)
@@ -47,23 +60,28 @@ def demean(
     if len(fe_list) == 1:
         codes = fe_list[0]
         n_g = n_groups_list[0]
-        means = _group_means(X, codes, n_g)
+        means = _group_means(X, codes, n_g, w=weights)
         X -= means[codes]
         return X.squeeze(axis=1) if squeeze else X
 
-    result = _demean_cg(X, fe_list, n_groups_list, tol, max_iter)
+    result = _demean_cg(X, fe_list, n_groups_list, tol, max_iter, weights=weights)
     return result.squeeze(axis=1) if squeeze else result
 
 
-def _symmetric_kaczmarz(X: NDArray, fe_list: list[NDArray], n_groups_list: list[int]) -> NDArray:
+def _symmetric_kaczmarz(
+    X: NDArray,
+    fe_list: list[NDArray],
+    n_groups_list: list[int],
+    w: NDArray | None = None,
+) -> NDArray:
     """One sweep of symmetric Kaczmarz: forward then backward."""
     # Forward
     for codes, n_g in zip(fe_list, n_groups_list):
-        means = _group_means(X, codes, n_g)
+        means = _group_means(X, codes, n_g, w=w)
         X = X - means[codes]
     # Backward (skip last since forward already did it)
     for codes, n_g in zip(reversed(fe_list[:-1]), reversed(n_groups_list[:-1])):
-        means = _group_means(X, codes, n_g)
+        means = _group_means(X, codes, n_g, w=w)
         X = X - means[codes]
     return X
 
@@ -74,12 +92,13 @@ def _demean_cg(
     n_groups_list: list[int],
     tol: float,
     max_iter: int,
+    weights: NDArray | None = None,
 ) -> NDArray:
     """CG-accelerated demeaning with symmetric Kaczmarz transform."""
     x = X.copy()
 
     # Initial residual: r = T(x) - x
-    r = _symmetric_kaczmarz(x.copy(), fe_list, n_groups_list) - x
+    r = _symmetric_kaczmarz(x.copy(), fe_list, n_groups_list, w=weights) - x
     u = r.copy()
     ssr = np.sum(r**2)
 
@@ -89,7 +108,7 @@ def _demean_cg(
             break
 
         # v = u - T(u) = A*u where A = I - T
-        Tu = _symmetric_kaczmarz(u.copy(), fe_list, n_groups_list)
+        Tu = _symmetric_kaczmarz(u.copy(), fe_list, n_groups_list, w=weights)
         v = u - Tu
         uv = np.sum(u * v)
         if abs(uv) < 1e-30:

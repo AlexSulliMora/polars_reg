@@ -63,8 +63,9 @@ def ols(
     cluster: list[str] | str | None = None,
     time: str | None = None,
     bandwidth: int | None = None,
+    weights: str | None = None,
 ) -> RegressionResult:
-    """Ordinary Least Squares regression.
+    """Ordinary Least Squares regression (or Weighted Least Squares with weights).
 
     Args:
         formula: Formula string, e.g. "y ~ x1 + x2" or "y ~ x1 + x2 | fe1 + fe2"
@@ -73,17 +74,25 @@ def ols(
         cluster: Column name(s) for clustered SEs. Overrides vcov.
         time: Column name for time ordering (required for NW/DK).
         bandwidth: Number of lags for HAC/DK. Default: Newey-West rule of thumb.
+        weights: Column name for analytic weights (WLS). Minimizes sum w_i*(y_i - x_i'b)^2.
     """
     if isinstance(cluster, str):
         cluster = [cluster]
     data = ensure_polars(data)
 
     spec = parse_formula(formula)
-    arrays = extract_arrays(data, spec, cluster=cluster, time=time)
+    arrays = extract_arrays(data, spec, cluster=cluster, time=time, weights=weights)
 
     X, y = arrays.X, arrays.y
+    w = arrays.weights
     fe_dict = arrays.fe_arrays
     has_fe = len(fe_dict) > 0
+
+    # Normalize weights to sum to N (Stata aweight convention)
+    if w is not None:
+        if np.any(w <= 0):
+            raise ValueError("Weights must be strictly positive")
+        w = w * len(w) / w.sum()
 
     if has_fe:
         # Drop singletons
@@ -92,6 +101,8 @@ def ols(
             y = y[keep]
             X = X[keep]
             fe_dict = {k: v[keep] for k, v in fe_dict.items()}
+            if w is not None:
+                w = w[keep]
             if cluster:
                 arrays.cluster_arrays = {k: v[keep] for k, v in arrays.cluster_arrays.items()}
             if arrays.time_array is not None:
@@ -102,9 +113,9 @@ def ols(
             X = X[:, :-1]
             arrays.names = arrays.names[:-1]
 
-        # Demean y and X
+        # Demean y and X (weighted demeaning if WLS)
         all_vars = np.column_stack([y.reshape(-1, 1), X])
-        demeaned = demean(all_vars, fe_dict)
+        demeaned = demean(all_vars, fe_dict, weights=w)
         y = demeaned[:, 0]
         X = demeaned[:, 1:]
 
@@ -116,28 +127,40 @@ def ols(
 
     n, k = X.shape
 
-    # Solve OLS: beta = (X'X)^{-1} X'y
-    XtX = X.T @ X
-    Xty = X.T @ y
-    beta = np.linalg.solve(XtX, Xty)
-    resid = y - X @ beta
+    # For WLS: pre-multiply by sqrt(w); OLS on transformed data = WLS
+    if w is not None:
+        sqw = np.sqrt(w)
+        Xw = X * sqw[:, None]
+        yw = y * sqw
+    else:
+        Xw, yw = X, y
 
-    # R-squared (within-R² when FE are absorbed)
-    ss_res = resid @ resid
-    y_demean = y - y.mean()
-    ss_tot = y_demean @ y_demean
-    r2 = 1.0 - ss_res / ss_tot
+    # Solve: beta = (Xw'Xw)^{-1} Xw'yw
+    beta = np.linalg.solve(Xw.T @ Xw, Xw.T @ yw)
+    resid_w = yw - Xw @ beta  # weighted residuals (for SE computation)
+    resid = y - X @ beta  # unweighted residuals (for output)
+
+    # R-squared
+    if w is not None:
+        ss_res = np.sum(w * resid**2)
+        y_wmean = np.sum(w * y) / np.sum(w)
+        ss_tot = np.sum(w * (y - y_wmean) ** 2)
+    else:
+        ss_res = resid @ resid
+        y_demean = y - y.mean()
+        ss_tot = y_demean @ y_demean
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
     r2_adj = 1.0 - (1.0 - r2) * (n - 1) / (n - k - df_abs)
 
-    # Variance-covariance
+    # Variance-covariance (uses weighted X and residuals for sandwich)
     if cluster:
         cluster_arrays = [arrays.cluster_arrays[c] for c in cluster]
         # Compute non-nested FE DoF for reghdfe-style dfc adjustment
         df_a_nn = _non_nested_fe_dof(fe_dict, arrays.cluster_arrays, cluster) if has_fe else -1
         if len(cluster_arrays) == 1:
-            V = vcov_clustered(X, resid, cluster_arrays[0], df_a_non_nested=df_a_nn)
+            V = vcov_clustered(Xw, resid_w, cluster_arrays[0], df_a_non_nested=df_a_nn)
         else:
-            V = vcov_multiway_clustered(X, resid, cluster_arrays, df_a_non_nested=df_a_nn)
+            V = vcov_multiway_clustered(Xw, resid_w, cluster_arrays, df_a_non_nested=df_a_nn)
         vcov_type = "cluster"
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1
@@ -145,23 +168,24 @@ def ols(
         if arrays.time_array is None:
             raise ValueError(f"vcov='{vcov}' requires time= parameter")
         if vcov == "NW":
-            V = vcov_hac(X, resid, arrays.time_array, bandwidth=bandwidth)
+            V = vcov_hac(Xw, resid_w, arrays.time_array, bandwidth=bandwidth)
         else:
-            V = vcov_driscoll_kraay(X, resid, arrays.time_array, bandwidth=bandwidth)
+            V = vcov_driscoll_kraay(Xw, resid_w, arrays.time_array, bandwidth=bandwidth)
         vcov_type = vcov
         n_clusters = None
         df_r = n - k - df_abs
     elif vcov == "iid":
-        V = vcov_iid(X, resid, df_abs=df_abs)
+        V = vcov_iid(Xw, resid_w, df_abs=df_abs)
         vcov_type = "iid"
         n_clusters = None
         df_r = n - k - df_abs
     else:
-        V = vcov_robust(X, resid, kind=vcov)
+        V = vcov_robust(Xw, resid_w, kind=vcov)
         vcov_type = vcov
         n_clusters = None
         df_r = n - k - df_abs
 
+    model_type = "WLS" if w is not None else "OLS"
     result = RegressionResult(
         coefficients=beta,
         vcov=V,
@@ -172,7 +196,7 @@ def ols(
         df_r=df_r,
         r_squared=r2,
         r_squared_adj=r2_adj,
-        model_type="OLS",
+        model_type=model_type,
         vcov_type=vcov_type,
         n_clusters=n_clusters,
         fe_absorbed=fe_absorbed,
