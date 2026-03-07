@@ -144,23 +144,23 @@ Accept `pandas.DataFrame` as input — convert to Polars internally, run as norm
 - [ ] Support `x1:x2` syntax for interaction terms in formula parser
 - [ ] Support `x1##x2` (full factorial: main effects + interaction)
 
-### 5b. HAC / Driscoll-Kraay standard errors
-- [ ] Newey-West (HAC) for time series
-- [ ] Driscoll-Kraay for panel data with cross-sectional dependence
+### 5b. HAC / Driscoll-Kraay standard errors (DONE)
+- [x] Newey-West (HAC) for time series
+- [x] Driscoll-Kraay for panel data with cross-sectional dependence
 
-### 5c. Additional diagnostics
-- [ ] Wald test for linear restrictions
-- [ ] Hausman test (FE vs RE)
-- [ ] Weak instrument diagnostics (Stock-Yogo critical values, Kleibergen-Paap)
+### 5c. Additional diagnostics (DONE)
+- [x] Wald test for linear restrictions
+- [x] Hausman test (FE vs RE)
+- [x] Weak instrument diagnostics (Stock-Yogo critical values, Kleibergen-Paap)
 
 ---
 
 ## 6. Polish & Packaging
 
 ### 6a. Documentation
-- [ ] README with quickstart, installation, feature overview
+- [x] README with quickstart, installation, feature overview
 - [ ] API reference (auto-generated from docstrings)
-- [ ] Add showcase notebook link to README
+- [x] Add showcase notebook link to README
 
 ### 6b. CI/CD
 - [ ] GitHub Actions: run tests on push (Python 3.10+)
@@ -170,7 +170,7 @@ Accept `pandas.DataFrame` as input — convert to Polars internally, run as norm
 
 ### 6c. Performance
 - [x] Benchmark suite (N = 1K, 10K, 100K, 1M)
-- [ ] Sparse FE dummies for large group counts (>1000)
+- [x] Sparse FE dummies for large group counts (>1000) — handled by bincount-based demeaning
 - [x] Profile demeaning for bottlenecks
 - [x] Vectorize _clustered_meat, _is_nested, drop_singletons (91x speedup)
 
@@ -187,14 +187,14 @@ Accept `pandas.DataFrame` as input — convert to Polars internally, run as norm
 ### 7b. HTML export
 - [x] `regtable(..., format="html")` returns HTML table string
 - [x] CSS classes for styling (coefficient, se, header, footer)
-- [ ] Jupyter notebook auto-display via `_repr_html_`
+- [x] Jupyter notebook auto-display via `_repr_html_`
 
 ---
 
 ## 8. Weighted Least Squares (DONE)
 
 - [x] `ols(..., weights=)` for analytic weights (aweight)
-- [ ] Frequency weights (fweight) support
+- [x] Frequency weights (fweight) support
 - [x] WLS with FE absorption and clustered SEs
 
 ---
@@ -217,7 +217,7 @@ Accept `pandas.DataFrame` as input — convert to Polars internally, run as norm
 
 ### 10b. Logit
 - [x] `logit("y ~ x1 + x2", data=df)` via MLE
-- [ ] Odds ratios option
+- [x] Odds ratios option
 - [x] Robust and clustered SEs
 
 ---
@@ -225,7 +225,7 @@ Accept `pandas.DataFrame` as input — convert to Polars internally, run as norm
 ## 11. Dynamic Panel GMM (Arellano-Bond) (DONE)
 
 - [x] `panel_ab("y ~ x1 + x2", data=df, entity=, time=, lags=)`
-- [ ] System GMM (Blundell-Bond)
+- [x] System GMM (Blundell-Bond)
 - [x] Sargan/Hansen test for overidentification
 - [x] AR(1)/AR(2) serial correlation tests
 
