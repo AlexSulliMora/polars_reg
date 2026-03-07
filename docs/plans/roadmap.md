@@ -176,63 +176,63 @@ Accept `pandas.DataFrame` as input — convert to Polars internally, run as norm
 
 ---
 
-## 7. regtable Export Formats (PRIORITY)
+## 7. regtable Export Formats (DONE)
 
 ### 7a. LaTeX export
-- [ ] `regtable(..., format="latex")` returns LaTeX tabular string
-- [ ] Proper escaping of underscores, special characters
-- [ ] Booktabs style (toprule/midrule/bottomrule)
-- [ ] Significance stars as superscripts
+- [x] `regtable(..., format="latex")` returns LaTeX tabular string
+- [x] Proper escaping of underscores, special characters
+- [x] Booktabs style (toprule/midrule/bottomrule)
+- [x] Significance stars as superscripts
 
 ### 7b. HTML export
-- [ ] `regtable(..., format="html")` returns HTML table string
-- [ ] CSS classes for styling (coefficient, se, header, footer)
+- [x] `regtable(..., format="html")` returns HTML table string
+- [x] CSS classes for styling (coefficient, se, header, footer)
 - [ ] Jupyter notebook auto-display via `_repr_html_`
 
 ---
 
-## 8. Weighted Least Squares
+## 8. Weighted Least Squares (DONE)
 
-- [ ] `ols(..., weights=)` for analytic weights (aweight)
+- [x] `ols(..., weights=)` for analytic weights (aweight)
 - [ ] Frequency weights (fweight) support
-- [ ] WLS with FE absorption and clustered SEs
+- [x] WLS with FE absorption and clustered SEs
 
 ---
 
-## 9. Bootstrap Standard Errors
+## 9. Bootstrap Standard Errors (DONE)
 
-- [ ] `ols(..., vcov="bootstrap", n_boot=1000)`
-- [ ] Wild bootstrap (Webb 6-point) for clustered data
-- [ ] Pairs bootstrap
-- [ ] Works with all estimators
+- [x] `ols(..., vcov="bootstrap", n_boot=999)`
+- [x] Wild bootstrap (Webb 6-point) for clustered data
+- [x] Pairs bootstrap
+- [ ] Works with all estimators (currently OLS only)
 
 ---
 
-## 10. Limited Dependent Variable Models
+## 10. Limited Dependent Variable Models (DONE)
 
 ### 10a. Probit
-- [ ] `probit("y ~ x1 + x2", data=df)` via MLE
-- [ ] Marginal effects (at means / average)
-- [ ] Robust and clustered SEs
+- [x] `probit("y ~ x1 + x2", data=df)` via MLE
+- [x] Marginal effects (at means / average)
+- [x] Robust and clustered SEs
 
 ### 10b. Logit
-- [ ] `logit("y ~ x1 + x2", data=df)` via MLE
+- [x] `logit("y ~ x1 + x2", data=df)` via MLE
 - [ ] Odds ratios option
-- [ ] Robust and clustered SEs
+- [x] Robust and clustered SEs
 
 ---
 
-## 11. Dynamic Panel GMM (Arellano-Bond)
+## 11. Dynamic Panel GMM (Arellano-Bond) (DONE)
 
-- [ ] `panel_ab("y ~ x1 + x2", data=df, entity=, time=, lags=)`
+- [x] `panel_ab("y ~ x1 + x2", data=df, entity=, time=, lags=)`
 - [ ] System GMM (Blundell-Bond)
-- [ ] Sargan/Hansen test for overidentification
-- [ ] AR(1)/AR(2) serial correlation tests
+- [x] Sargan/Hansen test for overidentification
+- [x] AR(1)/AR(2) serial correlation tests
 
 ---
 
-## 12. Quantile Regression
+## 12. Quantile Regression (DONE)
 
-- [ ] `quantreg("y ~ x1 + x2", data=df, tau=0.5)` (median regression)
-- [ ] Multiple quantiles: tau=[0.25, 0.5, 0.75]
-- [ ] Bootstrap SEs for inference
+- [x] `quantreg("y ~ x1 + x2", data=df, tau=0.5)` (median regression)
+- [x] Multiple quantiles: tau=[0.25, 0.5, 0.75]
+- [x] Bootstrap SEs for inference
