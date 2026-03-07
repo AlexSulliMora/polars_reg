@@ -117,12 +117,12 @@ def drop_singletons(fe_dict: dict[str, NDArray]) -> NDArray:
         for codes in fe_dict.values():
             active_codes = codes[keep]
             counts = np.bincount(active_codes)
-            singleton_groups = set(np.where(counts == 1)[0])
-            if singleton_groups:
-                for i in range(n):
-                    if keep[i] and codes[i] in singleton_groups:
-                        keep[i] = False
-                        changed = True
+            # Vectorized: mark all obs in singleton groups for removal
+            is_singleton = counts[active_codes] == 1
+            if is_singleton.any():
+                idx = np.where(keep)[0]
+                keep[idx[is_singleton]] = False
+                changed = True
     return keep
 
 

@@ -18,7 +18,12 @@ try:
 except ImportError:
     pass
 
-from polars_reg._diagnostics import hausman_test, weak_instrument_test
+from polars_reg._diagnostics import (
+    hausman_test,
+    kleibergen_paap_from_result,
+    kleibergen_paap_test,
+    weak_instrument_test,
+)
 from polars_reg._groupby import GroupRegressionResult, groupby_reg
 from polars_reg._regtable import regtable
 from polars_reg.r_equiv import compare_r, to_r
@@ -42,4 +47,6 @@ __all__ = [
     "compare_r",
     "hausman_test",
     "weak_instrument_test",
+    "kleibergen_paap_test",
+    "kleibergen_paap_from_result",
 ]

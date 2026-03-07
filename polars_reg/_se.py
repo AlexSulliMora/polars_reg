@@ -50,16 +50,22 @@ def vcov_robust(X: NDArray, resid: NDArray, kind: str = "HC1") -> NDArray:
 
 
 def _clustered_meat(X: NDArray, resid: NDArray, clusters: NDArray) -> NDArray:
-    """Compute the clustered sandwich meat: sum_g (s_g s_g')."""
+    """Compute the clustered sandwich meat: sum_g (s_g s_g').
+
+    Uses np.bincount to aggregate scores by cluster in O(n*k) instead of
+    looping over groups in Python.
+    """
     k = X.shape[1]
     score = X * resid[:, None]
-    unique_clusters = np.unique(clusters)
-    meat = np.zeros((k, k))
-    for g in unique_clusters:
-        mask = clusters == g
-        sg = score[mask].sum(axis=0)
-        meat += np.outer(sg, sg)
-    return meat
+    # Remap clusters to contiguous 0..G-1 codes
+    _, codes = np.unique(clusters, return_inverse=True)
+    G = codes.max() + 1
+    # Aggregate scores by cluster: S[g, j] = sum of score[i, j] for i in cluster g
+    S = np.empty((G, k))
+    for j in range(k):
+        S[:, j] = np.bincount(codes, weights=score[:, j], minlength=G)
+    # meat = S' @ S = sum_g outer(s_g, s_g)
+    return S.T @ S
 
 
 def vcov_clustered(

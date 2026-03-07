@@ -21,14 +21,15 @@ def _is_nested(fe_codes: np.ndarray, cluster_codes: np.ndarray) -> bool:
     """Check if FE groups are nested within cluster groups.
 
     An FE is nested in a cluster if every FE group maps to exactly one cluster.
+    Uses vectorized approach: for each FE group, check min==max of cluster codes.
     """
-    # For each FE group, check if all observations map to the same cluster
-    unique_fe = np.unique(fe_codes)
-    for g in unique_fe:
-        mask = fe_codes == g
-        if len(np.unique(cluster_codes[mask])) > 1:
-            return False
-    return True
+    n_fe = int(fe_codes.max()) + 1
+    cl_min = np.full(n_fe, np.iinfo(np.int64).max, dtype=np.int64)
+    cl_max = np.full(n_fe, np.iinfo(np.int64).min, dtype=np.int64)
+    cl64 = cluster_codes.astype(np.int64)
+    np.minimum.at(cl_min, fe_codes, cl64)
+    np.maximum.at(cl_max, fe_codes, cl64)
+    return bool(np.all(cl_min == cl_max))
 
 
 def _non_nested_fe_dof(

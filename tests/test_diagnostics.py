@@ -243,3 +243,65 @@ def test_hausman_coefficients_compared(panel_data):
     assert "x1" in result["coefficients_compared"]
     assert "x2" in result["coefficients_compared"]
     assert "_cons" not in result["coefficients_compared"]
+
+
+# ── Kleibergen-Paap rk test ────────────────────────────────────
+
+
+def test_kp_from_result_strong(iv_strong):
+    """KP rk stat should be large for strong instruments."""
+    result = pr.kleibergen_paap_from_result(iv_strong)
+    assert result["rk_stat"] is not None
+    assert result["rk_stat"] > 10  # strong instruments
+
+
+def test_kp_from_result_weak(iv_weak):
+    """KP rk stat should be small for weak instruments."""
+    result = pr.kleibergen_paap_from_result(iv_weak)
+    assert result["rk_stat"] is not None
+    assert result["rk_stat"] < 10  # weak instruments
+
+
+def test_kp_robust():
+    """KP with robust SEs should produce a result."""
+    rng = np.random.default_rng(42)
+    n = 1000
+    z1 = rng.standard_normal(n)
+    z2 = rng.standard_normal(n)
+    u = rng.standard_normal(n)
+    x_end = 0.8 * z1 + 0.6 * z2 + 0.3 * u
+    y = 1.0 + 2.0 * x_end + u
+    df = pl.DataFrame({"y": y, "x_end": x_end, "z1": z1, "z2": z2})
+    r = pr.iv2sls("y ~ 1 || x_end ~ z1 + z2", data=df, vcov="HC1")
+    result = pr.kleibergen_paap_from_result(r)
+    assert result["rk_stat"] is not None
+    assert result["rk_stat"] > 0
+
+
+def test_kp_clustered():
+    """KP with clustered SEs should produce a result."""
+    rng = np.random.default_rng(42)
+    n = 1000
+    z1 = rng.standard_normal(n)
+    z2 = rng.standard_normal(n)
+    u = rng.standard_normal(n)
+    x_end = 0.8 * z1 + 0.6 * z2 + 0.3 * u
+    y = 1.0 + 2.0 * x_end + u
+    cluster = np.random.randint(0, 50, n)
+    df = pl.DataFrame({
+        "y": y, "x_end": x_end, "z1": z1, "z2": z2, "cl": cluster,
+    })
+    r = pr.iv2sls("y ~ 1 || x_end ~ z1 + z2", data=df, cluster=["cl"])
+    result = pr.kleibergen_paap_from_result(r)
+    assert result["rk_stat"] is not None
+    assert result["rk_stat"] > 0
+
+
+def test_kp_no_iv_arrays():
+    """Should raise for OLS results without IV arrays."""
+    rng = np.random.default_rng(42)
+    n = 100
+    df = pl.DataFrame({"y": rng.standard_normal(n), "x1": rng.standard_normal(n)})
+    r = pr.ols("y ~ x1", data=df)
+    with pytest.raises(ValueError, match="first-stage arrays"):
+        pr.kleibergen_paap_from_result(r)

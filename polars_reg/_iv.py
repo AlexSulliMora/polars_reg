@@ -147,7 +147,7 @@ def iv2sls(
 
     names = arrays.names + (arrays.endog_names or [])
 
-    return RegressionResult(
+    result = RegressionResult(
         coefficients=beta,
         vcov=V,
         residuals=resid,
@@ -164,6 +164,16 @@ def iv2sls(
         fe_absorbed=fe_absorbed,
         df_absorbed=df_abs,
     )
+    # Stash first-stage arrays for Kleibergen-Paap test
+    result._X = X
+    result._y = y
+    result._iv_X_exog = X_exog
+    result._iv_X_endog = X_endog
+    result._iv_Z_excl = Z_excl
+    result._iv_cluster_arrays = (
+        [arrays.cluster_arrays[c] for c in cluster] if cluster else None
+    )
+    return result
 
 
 def _first_stage_f(
