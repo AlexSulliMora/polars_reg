@@ -6,13 +6,19 @@ Econometric regression methods using [Polars](https://pola.rs/) DataFrames. Also
 
 - **OLS** with robust (HC0-HC3) and multi-way clustered standard errors
 - **High-dimensional fixed effects** absorption (reghdfe-style iterative demeaning)
-- **2SLS / IV** with first-stage F-statistics
+- **Weighted Least Squares** — analytic weights (`weights=`) and frequency weights (`fweights=`)
+- **2SLS / IV** with first-stage F-statistics and weak instrument diagnostics
 - **LIML** (limited information maximum likelihood)
 - **GMM-IV** with Hansen J overidentification test
 - **Panel estimators**: fixed effects (within), random effects (Swamy-Arora GLS), first-difference
+- **Dynamic panel GMM**: Arellano-Bond (difference GMM) and Blundell-Bond (system GMM)
+- **Probit / Logit** with MLE, marginal effects, and odds ratios
+- **Quantile regression** — median and arbitrary quantiles with bootstrap SEs
+- **Bootstrap SEs** — pairs bootstrap and wild cluster bootstrap (Webb 6-point)
+- **HAC / Driscoll-Kraay** standard errors for time series and panel data
 - **GroupBy regression**: run the same regression per group (e.g., per stock, per industry)
-- **regtable**: side-by-side regression comparison tables (estout/esttab-style)
-- **Diagnostics**: Wald test, Hausman test (FE vs RE)
+- **regtable**: side-by-side regression comparison tables (estout/esttab-style), with LaTeX and HTML export
+- **Diagnostics**: Wald test, Hausman test (FE vs RE), Kleibergen-Paap, Stock-Yogo weak IV
 - **Stata/R equivalence**: generate equivalent Stata or R code for any specification
 
 All estimators are validated against Stata output to 5+ decimal places.
@@ -51,6 +57,18 @@ grp.coef_table()  # stacked Polars DataFrame
 # Side-by-side comparison table
 pr.regtable(m1, m2, m3, labels=["OLS", "Robust", "FE"])
 
+# Probit / Logit
+result = pr.logit("y_binary ~ x1 + x2", data=df, cluster="firm_id")
+pr.marginal_effects(result, at="mean")
+pr.odds_ratios(result)
+
+# Quantile regression (median)
+result = pr.quantreg("y ~ x1 + x2", data=df, tau=0.5)
+
+# Dynamic panel GMM
+result = pr.panel_ab("y ~ x1", data=df, entity="firm_id", time="year_id")
+result = pr.panel_sys_gmm("y ~ x1", data=df, entity="firm_id", time="year_id")
+
 # Access results
 result.coefficients  # coefficient vector
 result.se            # standard errors
@@ -77,15 +95,22 @@ result.wald_test(R)  # Wald test for linear restrictions
 
 | Function | Description |
 |----------|-------------|
-| `ols()` | OLS with optional FE absorption |
+| `ols()` | OLS/WLS with optional FE absorption |
 | `iv2sls()` | Two-stage least squares |
 | `liml()` | Limited information maximum likelihood |
 | `gmm_iv()` | Two-step efficient GMM |
 | `panel_fe()` | Panel fixed effects (within) |
 | `panel_re()` | Panel random effects (Swamy-Arora GLS) |
 | `panel_fd()` | Panel first-difference |
+| `panel_ab()` | Arellano-Bond dynamic panel GMM |
+| `panel_sys_gmm()` | Blundell-Bond system GMM |
+| `probit()` | Probit MLE |
+| `logit()` | Logit MLE |
+| `quantreg()` | Quantile regression (IRLS + bootstrap) |
 | `groupby_reg()` | Run any estimator per group |
 | `regtable()` | Side-by-side regression table |
+| `marginal_effects()` | Probit/logit marginal effects |
+| `odds_ratios()` | Logit odds ratios with delta-method SEs |
 | `hausman_test()` | Hausman specification test (FE vs RE) |
 
 ## Standard Error Options
@@ -95,6 +120,10 @@ result.wald_test(R)  # Wald test for linear restrictions
 - `vcov="HC0"`, `"HC2"`, `"HC3"` — other HC variants
 - `cluster=["firm_id"]` — one-way clustered
 - `cluster=["firm_id", "year_id"]` — two-way clustered (Cameron-Gelbach-Miller)
+- `vcov="NW"` — Newey-West HAC (requires `time=`)
+- `vcov="DK"` — Driscoll-Kraay (requires `time=`)
+- `vcov="bootstrap"` — pairs bootstrap
+- `vcov="wildboot"` — wild cluster bootstrap (requires `cluster=`)
 
 ## Stata / R Equivalence
 
