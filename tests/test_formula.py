@@ -45,3 +45,44 @@ def test_iv_no_fe():
     assert spec.fe == []
     assert spec.endog == ["x_endog"]
     assert spec.instruments == ["z1"]
+
+
+def test_interaction_colon():
+    spec = parse_formula("y ~ x1 + x2 + x1:x2")
+    assert spec.exog == ["x1", "x2", "x1:x2"]
+
+
+def test_interaction_star():
+    """x1*x2 expands to x1 + x2 + x1:x2."""
+    spec = parse_formula("y ~ x1*x2")
+    assert spec.exog == ["x1", "x2", "x1:x2"]
+
+
+def test_interaction_star_with_other_vars():
+    spec = parse_formula("y ~ x0 + x1*x2")
+    assert spec.exog == ["x0", "x1", "x2", "x1:x2"]
+
+
+def test_three_way_interaction():
+    """x1*x2*x3 expands to all subsets."""
+    spec = parse_formula("y ~ x1*x2*x3")
+    assert "x1" in spec.exog
+    assert "x2" in spec.exog
+    assert "x3" in spec.exog
+    assert "x1:x2" in spec.exog
+    assert "x1:x3" in spec.exog
+    assert "x2:x3" in spec.exog
+    assert "x1:x2:x3" in spec.exog
+    assert len(spec.exog) == 7
+
+
+def test_interaction_no_duplicates():
+    """x1*x2 + x1 should not duplicate x1."""
+    spec = parse_formula("y ~ x1*x2 + x1")
+    assert spec.exog.count("x1") == 1
+
+
+def test_interaction_with_fe():
+    spec = parse_formula("y ~ x1*x2 | fe1")
+    assert spec.exog == ["x1", "x2", "x1:x2"]
+    assert spec.fe == ["fe1"]

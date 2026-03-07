@@ -137,13 +137,25 @@ def _opts_str(opts: list[str]) -> str:
     return ", " + " ".join(opts) if opts else ""
 
 
+def _stata_varname(name: str) -> str:
+    """Convert interaction term to Stata syntax: x1:x2 -> c.x1#c.x2."""
+    if ":" in name:
+        parts = name.split(":")
+        return "#".join(f"c.{p}" for p in parts)
+    return name
+
+
+def _stata_varlist(names: list[str]) -> list[str]:
+    return [_stata_varname(n) for n in names]
+
+
 # ---------------------------------------------------------------------------
 # OLS
 # ---------------------------------------------------------------------------
 
 
 def _to_reg(spec: Any, vce_opt: str) -> str:
-    parts = ["reg", spec.depvar] + spec.exog
+    parts = ["reg", spec.depvar] + _stata_varlist(spec.exog)
     opts = []
     if not spec.add_intercept:
         opts.append("noconstant")
@@ -153,7 +165,7 @@ def _to_reg(spec: Any, vce_opt: str) -> str:
 
 
 def _to_reghdfe(spec: Any, vcov: str, cluster: list[str] | None) -> str:
-    parts = ["reghdfe", spec.depvar] + spec.exog
+    parts = ["reghdfe", spec.depvar] + _stata_varlist(spec.exog)
     opts = [f"absorb({' '.join(spec.fe)})"]
     if cluster:
         if len(cluster) == 1:
@@ -177,7 +189,7 @@ def _to_reghdfe(spec: Any, vcov: str, cluster: list[str] | None) -> str:
 def _to_ivregress(spec: Any, method: str, vce_opt: str) -> str:
     endog = " ".join(spec.endog)
     instr = " ".join(spec.instruments)
-    exog = " ".join(spec.exog) if spec.exog else ""
+    exog = " ".join(_stata_varlist(spec.exog)) if spec.exog else ""
     parts = [f"ivregress {method}", spec.depvar]
     if exog:
         parts.append(exog)
@@ -193,7 +205,7 @@ def _to_ivregress(spec: Any, method: str, vce_opt: str) -> str:
 def _to_ivreghdfe(spec: Any, method: str, vcov: str, cluster: list[str] | None) -> str:
     endog = " ".join(spec.endog)
     instr = " ".join(spec.instruments)
-    exog = " ".join(spec.exog) if spec.exog else ""
+    exog = " ".join(_stata_varlist(spec.exog)) if spec.exog else ""
     parts = ["ivreghdfe", spec.depvar]
     if exog:
         parts.append(exog)
@@ -212,7 +224,7 @@ def _to_ivreghdfe(spec: Any, method: str, vcov: str, cluster: list[str] | None) 
 def _to_ivregress_gmm(spec: Any, vce_opt: str) -> str:
     endog = " ".join(spec.endog)
     instr = " ".join(spec.instruments)
-    exog = " ".join(spec.exog) if spec.exog else ""
+    exog = " ".join(_stata_varlist(spec.exog)) if spec.exog else ""
     parts = ["ivregress gmm", spec.depvar]
     if exog:
         parts.append(exog)
@@ -236,7 +248,7 @@ def _to_xtreg_fe(
     if not entity:
         raise ValueError("panel_fe requires entity=")
     lines = [f"xtset {entity}" + (f" {time}" if time else "")]
-    parts = ["xtreg", spec.depvar] + spec.exog
+    parts = ["xtreg", spec.depvar] + _stata_varlist(spec.exog)
     opts = ["fe"]
     if cluster:
         opts.append(f"vce(cluster {cluster[0]})")
@@ -250,7 +262,7 @@ def _to_xtreg_re(spec: Any, entity: str | None) -> str:
     if not entity:
         raise ValueError("panel_re requires entity=")
     lines = [f"xtset {entity}"]
-    parts = ["xtreg", spec.depvar] + spec.exog
+    parts = ["xtreg", spec.depvar] + _stata_varlist(spec.exog)
     opts = ["re"]
     lines.append(" ".join(parts) + _opts_str(opts))
     return "\n".join(lines)
@@ -264,7 +276,7 @@ def _to_panel_fd(
     lines = [f"xtset {entity} {time}"]
     # Stata: reg D.y D.x1 D.x2, vce(cluster entity)
     d_depvar = f"D.{spec.depvar}"
-    d_exog = [f"D.{v}" for v in spec.exog]
+    d_exog = [f"D.{_stata_varname(v)}" for v in spec.exog]
     parts = ["reg", d_depvar] + d_exog
     opts = []
     if cluster:

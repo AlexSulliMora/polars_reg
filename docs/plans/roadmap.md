@@ -140,9 +140,12 @@ Accept `pandas.DataFrame` as input — convert to Polars internally, run as norm
 
 ## 5. Other Feature Gaps
 
-### 5a. Interaction terms in formula
-- [ ] Support `x1:x2` syntax for interaction terms in formula parser
-- [ ] Support `x1##x2` (full factorial: main effects + interaction)
+### 5a. Interaction terms in formula (DONE)
+- [x] Support `x1:x2` syntax for interaction terms in formula parser
+- [x] Support `x1*x2` (full factorial: main effects + interaction)
+- [x] Three-way and higher-order interactions
+- [x] Stata equivalence: `c.x1#c.x2` syntax
+- [x] R equivalence: `x1:x2` syntax
 
 ### 5b. HAC / Driscoll-Kraay standard errors (DONE)
 - [x] Newey-West (HAC) for time series

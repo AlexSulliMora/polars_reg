@@ -1,4 +1,5 @@
 import numpy as np
+import polars as pl
 
 from polars_reg._ols import ols
 
@@ -78,3 +79,81 @@ def test_ols_fe_twoway_clustered(panel_data):
     )
     assert result.vcov_type == "cluster"
     assert result.n_clusters == {"firm_id": 50, "year_id": 20}
+
+
+# ── Interaction terms ────────────────────────────────────────────
+
+
+@pl.StringCache()
+def test_interaction_colon():
+    """x1:x2 creates an elementwise product column."""
+    rng = np.random.default_rng(42)
+    n = 500
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    y = 1.0 + 2.0 * x1 + 3.0 * x2 + 0.5 * x1 * x2 + rng.standard_normal(n) * 0.3
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+    r = ols("y ~ x1 + x2 + x1:x2", data=df)
+    assert "x1:x2" in r.names
+    idx = r.names.index("x1:x2")
+    np.testing.assert_allclose(r.coefficients[idx], 0.5, atol=0.15)
+
+
+@pl.StringCache()
+def test_interaction_star():
+    """x1*x2 expands to x1 + x2 + x1:x2 and matches explicit form."""
+    rng = np.random.default_rng(42)
+    n = 500
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    y = 1.0 + 2.0 * x1 + 3.0 * x2 + 0.5 * x1 * x2 + rng.standard_normal(n) * 0.3
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+    r_star = ols("y ~ x1*x2", data=df)
+    r_explicit = ols("y ~ x1 + x2 + x1:x2", data=df)
+    np.testing.assert_allclose(r_star.coefficients, r_explicit.coefficients)
+    np.testing.assert_allclose(r_star.se, r_explicit.se)
+
+
+@pl.StringCache()
+def test_interaction_with_fe():
+    """Interaction terms work with absorbed fixed effects."""
+    rng = np.random.default_rng(42)
+    n = 500
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    fe = rng.integers(0, 20, n)
+    y = 2.0 * x1 + 3.0 * x2 + 0.5 * x1 * x2 + fe * 0.1 + rng.standard_normal(n) * 0.3
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2, "fe": fe})
+    r = ols("y ~ x1*x2 | fe", data=df)
+    assert "x1:x2" in r.names
+    assert r.n_obs == 500
+    np.testing.assert_allclose(r.coefficients[r.names.index("x1:x2")], 0.5, atol=0.15)
+
+
+@pl.StringCache()
+def test_interaction_robust_se():
+    """Interaction terms work with robust SEs."""
+    rng = np.random.default_rng(42)
+    n = 500
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    y = 1.0 + 2.0 * x1 + 0.5 * x1 * x2 + rng.standard_normal(n) * 0.3
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+    r = ols("y ~ x1 + x2 + x1:x2", data=df, vcov="HC1")
+    assert r.vcov_type == "HC1"
+    assert np.all(r.se > 0)
+
+
+@pl.StringCache()
+def test_three_way_interaction():
+    """x1*x2*x3 produces all subset interactions."""
+    rng = np.random.default_rng(42)
+    n = 500
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    x3 = rng.standard_normal(n)
+    y = 1.0 + x1 + x2 + x3 + rng.standard_normal(n) * 0.5
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2, "x3": x3})
+    r = ols("y ~ x1*x2*x3", data=df)
+    expected = ["x1", "x2", "x3", "x1:x2", "x1:x3", "x2:x3", "x1:x2:x3", "_cons"]
+    assert r.names == expected
