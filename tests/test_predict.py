@@ -47,10 +47,12 @@ def test_predict_indicator_variables():
     np.testing.assert_allclose(pred, expected_fitted, atol=1e-10)
 
     # Predict on new data with known industry levels
-    new_df = pl.DataFrame({
-        "x1": [0.0, 0.0, 0.0],
-        "industry": [1, 2, 3],
-    })
+    new_df = pl.DataFrame(
+        {
+            "x1": [0.0, 0.0, 0.0],
+            "industry": [1, 2, 3],
+        }
+    )
     pred_new = result.predict(newdata=new_df)
     # For industry=1 (reference), prediction = _cons + 0*x1
     # For industry=2, prediction = _cons + coef(industry=2)
@@ -108,10 +110,12 @@ def test_predict_indicator_continuous_interaction():
     np.testing.assert_allclose(pred, expected_fitted, atol=1e-10)
 
     # Predict on new data
-    new_df = pl.DataFrame({
-        "x1": [1.0, 1.0, 1.0],
-        "group": [1, 2, 3],
-    })
+    new_df = pl.DataFrame(
+        {
+            "x1": [1.0, 1.0, 1.0],
+            "group": [1, 2, 3],
+        }
+    )
     pred_new = result.predict(newdata=new_df)
     assert pred_new.shape == (3,)
     # Predictions for different groups should differ

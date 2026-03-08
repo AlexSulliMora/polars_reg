@@ -127,9 +127,7 @@ class RegressionResult:
             raise ValueError("Fitted values not available (model was not stored).")
         return self._y - self.residuals
 
-    def _resolve_term(
-        self, term: str, newdata: pl.DataFrame
-    ) -> NDArray:
+    def _resolve_term(self, term: str, newdata: pl.DataFrame) -> NDArray:
         """Resolve a single term (column name or indicator dummy) to a float array.
 
         Handles:
@@ -148,14 +146,13 @@ class RegressionResult:
                     f"Column '{col_name}' (from indicator '{term}') not found in newdata. "
                     f"Available columns: {newdata.columns}"
                 )
-            return (
-                newdata[col_name].cast(pl.Utf8).to_numpy().astype(str) == level_value
-            ).astype(np.float64)
+            return (newdata[col_name].cast(pl.Utf8).to_numpy().astype(str) == level_value).astype(
+                np.float64
+            )
         # Plain column
         if term not in newdata.columns:
             raise KeyError(
-                f"Column '{term}' not found in newdata. "
-                f"Available columns: {newdata.columns}"
+                f"Column '{term}' not found in newdata. Available columns: {newdata.columns}"
             )
         return newdata[term].to_numpy().astype(np.float64)
 
@@ -188,9 +185,7 @@ class RegressionResult:
             return X_new @ self.coefficients
         return self.fitted()
 
-    def predict_interval(
-        self, newdata: pl.DataFrame, alpha: float = 0.05
-    ) -> dict[str, NDArray]:
+    def predict_interval(self, newdata: pl.DataFrame, alpha: float = 0.05) -> dict[str, NDArray]:
         """Return point predictions with prediction intervals.
 
         Uses ``Var(pred_i) = x_i' V x_i`` where *V* is the estimated VCV of

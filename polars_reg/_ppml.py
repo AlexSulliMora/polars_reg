@@ -158,8 +158,7 @@ def ppml(
         )
     if np.any(mu > 1e10):
         warnings.warn(
-            "Possible separation detected: fitted values exceed 1e10. "
-            "Results may be unreliable.",
+            "Possible separation detected: fitted values exceed 1e10. Results may be unreliable.",
             stacklevel=2,
         )
 
@@ -182,9 +181,7 @@ def ppml(
             dfc = (G / (G - 1)) * ((n - 1) / (n - k))
             V = dfc * H_inv @ meat @ H_inv
         else:
-            V = _mle_multiway_clustered(
-                X, score_resid, cluster_arrays_list, H_inv, n, k
-            )
+            V = _mle_multiway_clustered(X, score_resid, cluster_arrays_list, H_inv, n, k)
         vcov_type_out = "cluster"
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1

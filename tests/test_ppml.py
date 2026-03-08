@@ -6,10 +6,10 @@ import pytest
 
 from polars_reg import ppml
 
-
 # ---------------------------------------------------------------------------
 # Fixtures / shared DGP
 # ---------------------------------------------------------------------------
+
 
 def _make_poisson_data(n=1000, seed=42):
     """Generate Poisson DGP: y ~ Poisson(exp(0.5 + 1.0*x1 - 0.5*x2))."""
@@ -57,17 +57,20 @@ def _make_clustered_data(n=1000, n_clusters=50, seed=42):
     x2 = rng.standard_normal(n)
     mu = np.exp(0.5 + 1.0 * x1 - 0.5 * x2 + cluster_effects[cluster_id])
     y = rng.poisson(mu)
-    return pl.DataFrame({
-        "y": y,
-        "x1": x1,
-        "x2": x2,
-        "cluster_id": cluster_id,
-    })
+    return pl.DataFrame(
+        {
+            "y": y,
+            "x1": x1,
+            "x2": x2,
+            "cluster_id": cluster_id,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestPPMLBasic:
     """Basic PPML estimation with Poisson DGP."""
@@ -262,10 +265,12 @@ class TestPPMLPredict:
         df = _make_poisson_data()
         res = ppml("y ~ x1 + x2", data=df)
 
-        newdata = pl.DataFrame({
-            "x1": [0.0, 1.0, -1.0],
-            "x2": [0.0, 0.0, 0.0],
-        })
+        newdata = pl.DataFrame(
+            {
+                "x1": [0.0, 1.0, -1.0],
+                "x2": [0.0, 0.0, 0.0],
+            }
+        )
         # predict() returns x'beta (linear predictor), not exp(x'beta)
         # This is consistent with other models in the package
         pred = res.predict(newdata)
@@ -278,10 +283,12 @@ class TestPPMLEdgeCases:
 
     def test_negative_y_raises(self):
         """Negative dependent variable should raise ValueError."""
-        df = pl.DataFrame({
-            "y": [-1.0, 0.0, 1.0, 2.0],
-            "x1": [1.0, 2.0, 3.0, 4.0],
-        })
+        df = pl.DataFrame(
+            {
+                "y": [-1.0, 0.0, 1.0, 2.0],
+                "x1": [1.0, 2.0, 3.0, 4.0],
+            }
+        )
         with pytest.raises(ValueError, match="non-negative"):
             ppml("y ~ x1", data=df)
 
@@ -294,10 +301,12 @@ class TestPPMLEdgeCases:
     def test_all_zeros_y(self):
         """All-zero y should still run (degenerate but no crash)."""
         rng = np.random.default_rng(42)
-        df = pl.DataFrame({
-            "y": np.zeros(100),
-            "x1": rng.standard_normal(100),
-        })
+        df = pl.DataFrame(
+            {
+                "y": np.zeros(100),
+                "x1": rng.standard_normal(100),
+            }
+        )
         # Should produce a result (may warn about separation)
         with pytest.warns(UserWarning):
             res = ppml("y ~ x1", data=df)

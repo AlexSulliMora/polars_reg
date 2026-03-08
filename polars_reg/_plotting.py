@@ -20,9 +20,7 @@ def _ensure_mpl():
 
         return plt
     except ImportError:
-        raise ImportError(
-            "Install matplotlib for plotting: pip install matplotlib"
-        ) from None
+        raise ImportError("Install matplotlib for plotting: pip install matplotlib") from None
 
 
 def coefplot(
@@ -191,10 +189,7 @@ def avplot(
     if variable is not None:
         # Single variable mode
         if variable not in names:
-            raise ValueError(
-                f"Variable '{variable}' not found in result. "
-                f"Available: {names}"
-            )
+            raise ValueError(f"Variable '{variable}' not found in result. Available: {names}")
         if ax is None:
             _, ax = plt.subplots()
 
@@ -250,9 +245,7 @@ def avplot(
     return fig
 
 
-def _partial_residuals(
-    X: np.ndarray, y: np.ndarray, j: int
-) -> tuple[np.ndarray, np.ndarray]:
+def _partial_residuals(X: np.ndarray, y: np.ndarray, j: int) -> tuple[np.ndarray, np.ndarray]:
     """Compute FWL partial residuals for variable at column index j.
 
     Returns:
