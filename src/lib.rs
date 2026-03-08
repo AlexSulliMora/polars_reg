@@ -1252,7 +1252,7 @@ fn rust_ols_from_arrays<'py>(
         vcov = xtx_inv.iter().map(|v| v * sigma2).collect();
     } else {
         // HC0, HC1, HC2, HC3
-        vcov = sandwich_vcov(&x_flat, &resid, &xtx_inv, n, k, &vcov_type);
+        vcov = sandwich_vcov(&x_flat, &resid, &xtx_inv, n, k, &vcov_type, df_abs);
     }
 
     let beta_arr = Array1::from_vec(beta);
@@ -1672,22 +1672,23 @@ fn rust_iv2sls<'py>(
                     interaction_codes(&arrays)
                 };
                 // Use X_hat for clustered meat in IV
+                // No small-sample correction (asymptotic, matching Stata ivregress)
                 let meat = clustered_meat_raw(&xhat_flat, n, k, &resid, &codes, g);
-                let dfc = (g as f64 / (g as f64 - 1.0)) * ((n as f64 - 1.0) / (n as f64 - k as f64));
                 let tmp = matmul(&xhx_inv, &meat, k, k, k);
                 let term = matmul(&tmp, &xhx_inv, k, k, k);
                 for idx in 0..(k * k) {
-                    v_total[idx] += sign * dfc * term[idx];
+                    v_total[idx] += sign * term[idx];
                 }
             }
         }
         vcov = v_total;
     } else if vcov_type == "iid" {
-        let sigma2 = ss_res / (n as f64 - k as f64 - df_abs as f64);
+        // IV uses asymptotic sigma² = e'e/n (matching Stata ivregress)
+        let sigma2 = ss_res / n as f64;
         vcov = xhx_inv.iter().map(|v| v * sigma2).collect();
     } else {
-        // HC0/HC1: sandwich with X_hat
-        vcov = sandwich_vcov(&xhat_flat, &resid, &xhx_inv, n, k, &vcov_type);
+        // IV uses HC0 (no small-sample correction), matching Stata ivregress
+        vcov = sandwich_vcov(&xhat_flat, &resid, &xhx_inv, n, k, "HC0", 0);
     }
 
     // Build final names
@@ -1723,6 +1724,7 @@ fn rust_iv2sls<'py>(
 
 /// Compute sandwich VCV: (X'X)^{-1} meat (X'X)^{-1} where meat depends on vcov_type.
 /// x_flat is row-major (n, k). Returns flat k*k VCV.
+/// df_abs: additional absorbed degrees of freedom (e.g., from fixed effects).
 fn sandwich_vcov(
     x_flat: &[f64],
     resid: &[f64],
@@ -1730,6 +1732,7 @@ fn sandwich_vcov(
     n: usize,
     k: usize,
     vcov_type: &str,
+    df_abs: usize,
 ) -> Vec<f64> {
     match vcov_type {
         "HC0" | "HC1" => {
@@ -1752,7 +1755,7 @@ fn sandwich_vcov(
             let tmp = matmul(xtx_inv, &meat, k, k, k);
             let mut v = matmul(&tmp, xtx_inv, k, k, k);
             if vcov_type == "HC1" {
-                let scale = n as f64 / (n as f64 - k as f64);
+                let scale = n as f64 / (n as f64 - k as f64 - df_abs as f64);
                 for val in v.iter_mut() {
                     *val *= scale;
                 }
@@ -1945,8 +1948,8 @@ fn rust_ols_nofe<'py>(
         let sigma2 = ss_res / (n - k) as f64;
         vcov = xtx_inv.iter().map(|v| v * sigma2).collect();
     } else {
-        // HC0, HC1, HC2, HC3
-        vcov = sandwich_vcov(&x_flat, &resid, &xtx_inv, n, k, &vcov_type);
+        // HC0, HC1, HC2, HC3 (no FE in this path, so df_abs = 0)
+        vcov = sandwich_vcov(&x_flat, &resid, &xtx_inv, n, k, &vcov_type, 0);
     }
 
     // Build final names

@@ -458,7 +458,7 @@ def _iv_to_ivregress(spec: FormulaSpec, method: str, vce_opt: str) -> str:
         parts.append(exog_str)
     parts.append(f"({endog_str} = {instr_str})")
 
-    opts = ["small"]  # small-sample correction to match our n-k dof
+    opts = []  # asymptotic (no small-sample correction), matching our formulas
     if not spec.add_intercept:
         opts.append("noconstant")
     if vce_opt:

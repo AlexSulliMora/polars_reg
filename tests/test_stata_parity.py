@@ -97,12 +97,13 @@ def test_parity_ols_nw(parity_data):
     # Fixture generated from single firm (pure time series)
     firm1 = parity_data.filter(pl.col("firm_id") == 1)
     result = pr.ols("y ~ x1 + x2", data=firm1, vcov="NW", time="year_id", bandwidth=4)
-    compare_coefs(result, load_fixture("ols_nw"), rtol_se=1e-3)
+    compare_coefs(result, load_fixture("ols_nw"))
 
 
 def test_parity_ols_dk(parity_data):
     result = pr.ols("y ~ x1 + x2", data=parity_data, vcov="DK", time="year_id", bandwidth=4)
-    compare_coefs(result, load_fixture("ols_dk"), rtol_se=1e-3)
+    # DK involves time-aggregation + kernel; slightly wider tolerance
+    compare_coefs(result, load_fixture("ols_dk"), rtol_se=2e-4)
 
 
 # --- OLS + FE ---
@@ -115,8 +116,7 @@ def test_parity_ols_fe_cluster(parity_data):
 
 def test_parity_ols_fe_hc1(parity_data):
     result = pr.ols("y ~ x1 + x2 | firm_id", data=parity_data, vcov="HC1")
-    # reghdfe HC1 uses N/(N-k-d) dfc vs our N/(N-k); widen tolerance
-    compare_coefs(result, load_fixture("ols_fe_hc1"), rtol_se=0.03)
+    compare_coefs(result, load_fixture("ols_fe_hc1"))
 
 
 def test_parity_ols_2fe_cluster(parity_data):
@@ -129,18 +129,17 @@ def test_parity_ols_2fe_cluster(parity_data):
 
 def test_parity_iv_iid(parity_data):
     result = pr.iv2sls("y ~ x1 || x_endog ~ z1 + z2", data=parity_data)
-    # Stata ivregress uses N-k dof; small difference in iid SE
-    compare_coefs(result, load_fixture("iv_iid"), rtol_se=2e-3)
+    compare_coefs(result, load_fixture("iv_iid"))
 
 
 def test_parity_iv_robust(parity_data):
     result = pr.iv2sls("y ~ x1 || x_endog ~ z1 + z2", data=parity_data, vcov="HC1")
-    compare_coefs(result, load_fixture("iv_robust"), rtol_se=2e-3)
+    compare_coefs(result, load_fixture("iv_robust"))
 
 
 def test_parity_iv_cluster(parity_data):
     result = pr.iv2sls("y ~ x1 || x_endog ~ z1 + z2", data=parity_data, cluster=["firm_id"])
-    compare_coefs(result, load_fixture("iv_cluster"), rtol_se=2e-3)
+    compare_coefs(result, load_fixture("iv_cluster"))
 
 
 def test_parity_iv_fe_cluster(parity_data):
@@ -149,7 +148,7 @@ def test_parity_iv_fe_cluster(parity_data):
         data=parity_data,
         cluster=["firm_id"],
     )
-    compare_coefs(result, load_fixture("iv_fe_cluster"), rtol_se=1e-3)
+    compare_coefs(result, load_fixture("iv_fe_cluster"))
 
 
 # --- Panel RE ---
@@ -157,7 +156,7 @@ def test_parity_iv_fe_cluster(parity_data):
 
 def test_parity_re_iid(parity_data):
     result = pr.panel_re("y ~ x1 + x2", data=parity_data, entity="firm_id")
-    compare_coefs(result, load_fixture("re_iid"), rtol_se=1e-3)
+    compare_coefs(result, load_fixture("re_iid"))
 
 
 def test_parity_re_cluster(parity_data):
@@ -167,11 +166,11 @@ def test_parity_re_cluster(parity_data):
         entity="firm_id",
         cluster=["firm_id"],
     )
-    # Stata xtreg,re uses different intercept SE with clustering;
+    # Stata xtreg,re intercept SE uses between-group estimation;
     # compare slopes only (skip _cons)
     fixture = load_fixture("re_cluster")
     fixture = fixture[fixture["variable"] != "_cons"]
-    compare_coefs(result, fixture, rtol_se=0.025)
+    compare_coefs(result, fixture)
 
 
 # --- Newey (HAC baseline) ---
@@ -181,4 +180,4 @@ def test_parity_newey(parity_data):
     # Fixture generated from single firm (pure time series)
     firm1 = parity_data.filter(pl.col("firm_id") == 1)
     result = pr.ols("y ~ x1 + x2", data=firm1, vcov="NW", time="year_id", bandwidth=8)
-    compare_coefs(result, load_fixture("newey_lag8"), rtol_se=1e-3)
+    compare_coefs(result, load_fixture("newey_lag8"))

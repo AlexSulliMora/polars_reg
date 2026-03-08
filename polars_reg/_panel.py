@@ -261,9 +261,9 @@ def panel_re(
     r2 = 1.0 - ss_res / ss_tot
     r2_adj = 1.0 - (1.0 - r2) * (n - 1) / (n - k)
 
-    # Original residuals for sandwich (not quasi-demeaned)
+    # Original residuals (for R² and output)
     resid = y - X @ beta
-    # Quasi-demeaned residuals for iid VCV
+    # Quasi-demeaned residuals (for sandwich VCV and iid VCV)
     resid_re = y_re - X_re @ beta
 
     n_clusters_dict = None
@@ -286,7 +286,7 @@ def panel_re(
                 .astype(np.int32)
             )
         )
-        V = vcov_wild_bootstrap(X_re, resid, cl_codes, n_boot=n_boot, seed=seed)
+        V = vcov_wild_bootstrap(X_re, resid_re, cl_codes, n_boot=n_boot, seed=seed)
         vcov_type_str = "wildboot"
         n_clusters_dict = {cluster[0]: len(np.unique(cl_codes))}
         df_r = n_clusters_dict[cluster[0]] - 1
@@ -294,7 +294,7 @@ def panel_re(
         if arrays.time_array is None:
             raise ValueError(f"vcov='{vcov}' requires time= parameter")
         XtX_inv = np.linalg.inv(X_re.T @ X_re)
-        score = X_re * resid[:, None]
+        score = X_re * resid_re[:, None]
         if vcov == "NW":
             S = _hac_meat(score, arrays.time_array, bandwidth)
             dfc = n / (n - k)
@@ -327,11 +327,11 @@ def panel_re(
                 cluster_arrays_list.append(cl)
 
         if vcov in ("HC0", "HC1"):
-            V = vcov_robust(X_re, resid, kind=vcov)
+            V = vcov_robust(X_re, resid_re, kind=vcov)
         elif len(cluster_arrays_list) == 1:
-            V = vcov_clustered(X_re, resid, cluster_arrays_list[0])
+            V = vcov_clustered(X_re, resid_re, cluster_arrays_list[0])
         else:
-            V = vcov_multiway_clustered(X_re, resid, cluster_arrays_list)
+            V = vcov_multiway_clustered(X_re, resid_re, cluster_arrays_list)
         if vcov in ("HC0", "HC1"):
             n_clusters_dict = None  # HC0/HC1 is robust, not clustered
             vcov_type_str = vcov

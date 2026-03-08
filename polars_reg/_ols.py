@@ -545,7 +545,7 @@ def ols(
         vcov_type = "iid"
         df_r = n_eff - k - df_abs
     else:
-        V = vcov_robust(Xw, resid_w, kind=vcov)
+        V = vcov_robust(Xw, resid_w, kind=vcov, df_abs=df_abs)
         vcov_type = vcov
         df_r = n_eff - k - df_abs
 

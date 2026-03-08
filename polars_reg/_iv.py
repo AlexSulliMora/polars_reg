@@ -447,9 +447,12 @@ def _iv_vcov_iid(
     XhX_inv: np.ndarray,
     df_abs: int = 0,
 ) -> np.ndarray:
-    """Homoskedastic VCV for 2SLS: sigma^2 * (X_hat'X)^{-1}."""
-    n, k = X.shape
-    sigma2 = (resid @ resid) / (n - k - df_abs)
+    """Homoskedastic VCV for 2SLS: sigma^2 * (X_hat'X)^{-1}.
+
+    Uses sigma^2 = e'e/n (asymptotic, matching Stata ivregress).
+    """
+    n = X.shape[0]
+    sigma2 = (resid @ resid) / n
     return sigma2 * XhX_inv
 
 
@@ -462,19 +465,12 @@ def _iv_vcov_robust(
     """Heteroskedasticity-robust VCV for 2SLS.
 
     Sandwich: (X_hat'X)^{-1} meat (X_hat'X)^{-1}
-    where meat = X_hat' diag(e^2) X_hat, with HC1 scaling.
+    where meat = X_hat' diag(e^2) X_hat.
+    No small-sample correction (asymptotic, matching Stata ivregress).
     """
-    n, k = X_hat.shape
     e2 = resid**2
-
     meat = X_hat.T @ (X_hat * e2[:, None])
-
-    if kind == "HC0":
-        return XhX_inv @ meat @ XhX_inv
-    elif kind == "HC1":
-        return (n / (n - k)) * XhX_inv @ meat @ XhX_inv
-    else:
-        raise ValueError(f"Unsupported robust SE kind for 2SLS: {kind}")
+    return XhX_inv @ meat @ XhX_inv
 
 
 def _iv_vcov_clustered(
@@ -486,12 +482,11 @@ def _iv_vcov_clustered(
     """One-way cluster-robust VCV for 2SLS.
 
     Uses score vector X_hat * resid and bread (X_hat'X)^{-1}.
+    No small-sample correction (asymptotic, matching Stata ivregress).
     """
-    n, k = X_hat.shape
     codes, G = _recode_to_contiguous(clusters)
     meat = _clustered_meat(X_hat, resid, codes, G)
-    dfc = (G / (G - 1)) * ((n - 1) / (n - k))
-    return dfc * XhX_inv @ meat @ XhX_inv
+    return XhX_inv @ meat @ XhX_inv
 
 
 def _iv_vcov_multiway(
@@ -514,7 +509,6 @@ def _iv_vcov_multiway(
             subset_arrays = [cluster_list[d] for d in subset]
             interaction, G = _interaction_codes(*subset_arrays)
             meat = _clustered_meat(X_hat, resid, interaction, G)
-            dfc = (G / (G - 1)) * ((n - 1) / (n - k))
-            V += sign * dfc * XhX_inv @ meat @ XhX_inv
+            V += sign * XhX_inv @ meat @ XhX_inv
 
     return V

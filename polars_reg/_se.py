@@ -29,15 +29,18 @@ def vcov_iid(X: NDArray, resid: NDArray, df_abs: int = 0) -> NDArray:
     return sigma2 * XtX_inv
 
 
-def vcov_robust(X: NDArray, resid: NDArray, kind: str = "HC1") -> NDArray:
+def vcov_robust(X: NDArray, resid: NDArray, kind: str = "HC1", df_abs: int = 0) -> NDArray:
     """Heteroskedasticity-robust VCV (HC0, HC1, HC2, HC3).
 
     All use sandwich form: (X'X)^{-1} X' diag(w) X (X'X)^{-1}
     HC0: w_i = e_i^2
-    HC1: w_i = e_i^2 * n/(n-k)
+    HC1: w_i = e_i^2 * n/(n-k-d)  (d = absorbed FE degrees of freedom)
     HC2: w_i = e_i^2 / (1 - h_ii)
     HC3: w_i = e_i^2 / (1 - h_ii)^2
     where h_ii = x_i' (X'X)^{-1} x_i (hat matrix diagonal)
+
+    Args:
+        df_abs: Additional absorbed degrees of freedom (e.g., from fixed effects).
     """
     n, k = X.shape
     XtX_inv = np.linalg.inv(X.T @ X)
@@ -47,7 +50,7 @@ def vcov_robust(X: NDArray, resid: NDArray, kind: str = "HC1") -> NDArray:
         return XtX_inv @ meat @ XtX_inv
     elif kind == "HC1":
         meat = X.T @ (X * (resid**2)[:, None])
-        return (n / (n - k)) * XtX_inv @ meat @ XtX_inv
+        return (n / (n - k - df_abs)) * XtX_inv @ meat @ XtX_inv
     elif kind in ("HC2", "HC3"):
         hat = np.einsum("ij,jk,ik->i", X, XtX_inv, X)
         if kind == "HC2":

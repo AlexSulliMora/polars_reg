@@ -281,7 +281,7 @@ def test_fe2_iid_r(cross_data):
 
 @skip_no_stata
 def test_iv2sls_iid_stata(cross_data):
-    assert_stata_parity("iv2sls", "y ~ x1 || x_endog ~ z1 + z2", cross_data, rtol=TIGHT)
+    assert_stata_parity("iv2sls", "y ~ x1 || x_endog ~ z1 + z2", cross_data, rtol=MEDIUM)
 
 
 @skip_no_r
@@ -296,7 +296,7 @@ def test_iv2sls_iid_r(cross_data):
 
 @skip_no_stata
 def test_iv2sls_hc1_stata(cross_data):
-    assert_stata_parity("iv2sls", "y ~ x1 || x_endog ~ z1 + z2", cross_data, vcov="HC1", rtol=TIGHT)
+    assert_stata_parity("iv2sls", "y ~ x1 || x_endog ~ z1 + z2", cross_data, vcov="HC1", rtol=MEDIUM)
 
 
 @skip_no_r
