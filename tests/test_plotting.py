@@ -1,14 +1,14 @@
-import matplotlib
-
-matplotlib.use("Agg")
-
-import matplotlib.axes
-import matplotlib.figure
 import numpy as np
 import pytest
 
-from polars_reg._plotting import avplot, coefplot
-from polars_reg._results import RegressionResult
+matplotlib = pytest.importorskip("matplotlib")
+matplotlib.use("Agg")
+
+import matplotlib.axes  # noqa: E402
+import matplotlib.figure  # noqa: E402
+
+from polars_reg._plotting import avplot, coefplot  # noqa: E402
+from polars_reg._results import RegressionResult  # noqa: E402
 
 
 def _make_result(names=None, store_Xy=True):
