@@ -130,4 +130,19 @@ file open `fh' using "`outfile'", write append
 file write `fh' "High-dim FE,`med'" _n
 file close `fh'
 
+* --- PPML (Poisson) ---
+local total = 0
+forvalues i = 1/`reps' {
+    timer clear 1
+    timer on 1
+    quietly poisson y_count x1 x2
+    timer off 1
+    quietly timer list 1
+    local total = `total' + r(t1)
+}
+local med = (`total' / `reps') * 1000
+file open `fh' using "`outfile'", write append
+file write `fh' "PPML (Poisson),`med'" _n
+file close `fh'
+
 exit, clear

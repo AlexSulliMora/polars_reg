@@ -71,11 +71,13 @@ BENCHMARKS = [
     "2-way FE + cluster",
     "2SLS / IV",
     "High-dim FE\n(5K groups + 2-way cluster)",
+    "PPML (Poisson)",
 ]
 
 # Map from R/Stata output names to chart benchmark names
 _NAME_MAP = {
     "High-dim FE": "High-dim FE\n(5K groups + 2-way cluster)",
+    "PPML (Poisson)": "PPML (Poisson)",
 }
 
 
@@ -98,6 +100,9 @@ def make_data(n: int, n_firms: int, n_industries: int = 20, rng=None):
     year_id = rng.integers(2000, 2020, size=n)
     firm_fe = rng.standard_normal(n_firms)[firm_id]
     y = 2.0 + x1 - 0.5 * x2 + 1.5 * x_endog + firm_fe + u
+    # Count outcome for PPML
+    mu_count = np.exp(0.5 + 0.8 * x1 - 0.3 * x2)
+    y_count = rng.poisson(np.clip(mu_count, 0, 100)).astype(np.float64)
     return {
         "y": y,
         "x1": x1,
@@ -108,6 +113,7 @@ def make_data(n: int, n_firms: int, n_industries: int = 20, rng=None):
         "firm_id": firm_id,
         "industry_id": industry_id,
         "year_id": year_id,
+        "y_count": y_count,
     }
 
 
@@ -198,7 +204,7 @@ def run_stata_benchmarks(csv_path: str, reps: int) -> dict[str, float]:
         import time as _time
 
         deadline = _time.monotonic() + 1200
-        expected_lines = 7
+        expected_lines = 8
         while _time.monotonic() < deadline:
             if os.path.isfile(outfile):
                 with open(outfile) as _f:
@@ -435,6 +441,33 @@ def run_all():
             )
         )
 
+        # PPML (Poisson)
+        pldf_count = pldf.with_columns(pl.Series("y_count", data["y_count"]))
+        pdf_count = pdf.copy()
+        pdf_count["y_count"] = data["y_count"]
+        X_sm_count = sm.add_constant(pdf_count[["x1", "x2"]])
+        results["PPML (Poisson)"]["polars_reg"].append(
+            (n, timeit(lambda: pr.ppml("y_count ~ x1 + x2", data=pldf_count)))
+        )
+        results["PPML (Poisson)"]["statsmodels"].append(
+            (
+                n,
+                timeit(
+                    lambda: sm.GLM(
+                        pdf_count["y_count"],
+                        X_sm_count,
+                        family=sm.families.Poisson(),
+                    ).fit()
+                ),
+            )
+        )
+        results["PPML (Poisson)"]["pyfixest"].append(
+            (
+                n,
+                timeit(lambda: pf.fepois("y_count ~ x1 + x2", data=pdf_count)),
+            )
+        )
+
         print(" done")
 
     return results, scales
@@ -471,7 +504,7 @@ PKG_ORDER = [
 
 
 def make_chart(results, scales):
-    fig, axes = plt.subplots(2, 4, figsize=(18, 8.5))
+    fig, axes = plt.subplots(2, 4, figsize=(18, 9))
     axes = axes.flatten()
 
     # Collect all legend handles/labels across all panels
@@ -520,28 +553,25 @@ def make_chart(results, scales):
                 labels.append(f"{s // 1_000}K")
         ax.set_xticklabels(labels, fontsize=8)
 
-    # Hide the unused subplot (8th position)
-    axes[7].axis("off")
-
     # Build legend from all panels (preserving order)
     handles = [all_handles[p] for p in PKG_ORDER if p in all_handles]
     labels = [p for p in PKG_ORDER if p in all_handles]
-    axes[7].legend(
+    fig.legend(
         handles,
         labels,
-        loc="center",
-        fontsize=13,
+        loc="lower center",
+        fontsize=11,
         frameon=True,
         fancybox=True,
-        shadow=True,
-        ncol=1,
+        ncol=len(labels),
         markerscale=1.5,
+        bbox_to_anchor=(0.5, -0.02),
     )
 
     title = "polars_reg benchmarks — wall-clock time (lower is better)"
     fig.suptitle(title, fontsize=14, fontweight="bold", y=0.98)
 
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.tight_layout(rect=[0, 0.04, 1, 0.95])
     out = str(BENCH_DIR / "benchmark_chart.png")
     fig.savefig(out, dpi=150, bbox_inches="tight", facecolor="white")
     print(f"\nSaved: {out}")

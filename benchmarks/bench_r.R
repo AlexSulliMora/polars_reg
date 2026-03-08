@@ -54,3 +54,6 @@ bench("High-dim FE", quote(
     cluster = ~ firm_id + industry_id
   )
 ))
+bench("PPML (Poisson)", quote(
+  fepois(y_count ~ x1 + x2, data = dt)
+))
