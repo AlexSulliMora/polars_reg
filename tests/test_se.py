@@ -4,6 +4,8 @@ import pytest
 from polars_reg._se import (
     _interaction_codes,
     vcov_clustered,
+    vcov_driscoll_kraay,
+    vcov_hac,
     vcov_iid,
     vcov_multiway_clustered,
     vcov_robust,
@@ -127,3 +129,47 @@ def test_invalid_robust_kind():
     X, y, resid, beta, XtX_inv = _make_ols_data()
     with pytest.raises(ValueError, match="Unknown robust SE kind"):
         vcov_robust(X, resid, kind="HC99")
+
+
+def test_hac_refactor_parity():
+    """Refactored vcov_hac should produce valid VCV."""
+    rng = np.random.default_rng(42)
+    n, k = 500, 3
+    X = rng.standard_normal((n, k))
+    resid = rng.standard_normal(n)
+    time_ids = np.repeat(np.arange(50), 10).astype(float)
+    V = vcov_hac(X, resid, time_ids, bandwidth=5)
+    assert V.shape == (k, k)
+    eigvals = np.linalg.eigvalsh(V)
+    assert np.all(eigvals >= -1e-10)
+
+
+def test_dk_refactor_parity():
+    """Refactored vcov_driscoll_kraay should produce valid VCV."""
+    rng = np.random.default_rng(42)
+    n, k = 500, 3
+    X = rng.standard_normal((n, k))
+    resid = rng.standard_normal(n)
+    time_ids = np.repeat(np.arange(50), 10).astype(float)
+    V = vcov_driscoll_kraay(X, resid, time_ids, bandwidth=5)
+    assert V.shape == (k, k)
+    eigvals = np.linalg.eigvalsh(V)
+    assert np.all(eigvals >= -1e-10)
+
+
+def test_hac_meat_standalone():
+    """_hac_meat should produce same meat as the full vcov_hac minus bread."""
+    from polars_reg._se import _hac_meat
+
+    rng = np.random.default_rng(42)
+    n, k = 500, 3
+    X = rng.standard_normal((n, k))
+    resid = rng.standard_normal(n)
+    time_ids = np.repeat(np.arange(50), 10).astype(float)
+    score = X * resid[:, None]
+    meat = _hac_meat(score, time_ids, bandwidth=5)
+    XtX_inv = np.linalg.inv(X.T @ X)
+    dfc = n / (n - k)
+    V_manual = dfc * XtX_inv @ meat @ XtX_inv
+    V_func = vcov_hac(X, resid, time_ids, bandwidth=5)
+    np.testing.assert_allclose(V_manual, V_func, rtol=1e-12)

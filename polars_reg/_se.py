@@ -132,6 +132,100 @@ def vcov_clustered(
     return dfc * XtX_inv @ meat @ XtX_inv
 
 
+def _hac_meat(
+    score: NDArray,
+    time_ids: NDArray,
+    bandwidth: int | None = None,
+) -> NDArray:
+    """Compute Newey-West HAC meat matrix from score vectors.
+
+    Args:
+        score: n x k score matrix (typically X * resid[:, None]).
+        time_ids: Time period identifiers. Scores are sorted by these.
+        bandwidth: Number of lags. Default: floor(4*(n/100)^(2/9)).
+
+    Returns:
+        k x k meat matrix.
+    """
+    if _HAS_NATIVE:
+        try:
+            from polars_reg._native import rust_hac_meat as _rust_hac_meat
+
+            return np.asarray(
+                _rust_hac_meat(
+                    np.ascontiguousarray(score, dtype=np.float64),
+                    np.ascontiguousarray(time_ids, dtype=np.float64),
+                    bandwidth if bandwidth is not None else -1,
+                )
+            )
+        except ImportError:
+            pass
+
+    n = score.shape[0]
+    order = np.argsort(time_ids)
+    score = score[order]
+
+    if bandwidth is None:
+        bandwidth = max(1, int(np.floor(4 * (n / 100) ** (2 / 9))))
+
+    S = score.T @ score
+    for j in range(1, bandwidth + 1):
+        w = 1.0 - j / (bandwidth + 1)
+        Gamma_j = score[j:].T @ score[:-j]
+        S += w * (Gamma_j + Gamma_j.T)
+    return S
+
+
+def _dk_meat(
+    score: NDArray,
+    time_ids: NDArray,
+    bandwidth: int | None = None,
+) -> NDArray:
+    """Compute Driscoll-Kraay meat matrix from score vectors.
+
+    Aggregates scores by time period, then applies Newey-West kernel.
+
+    Args:
+        score: n x k score matrix (typically X * resid[:, None]).
+        time_ids: Time period identifiers.
+        bandwidth: Number of lags. Default: floor(4*(T/100)^(2/9)).
+
+    Returns:
+        k x k meat matrix.
+    """
+    if _HAS_NATIVE:
+        try:
+            from polars_reg._native import rust_dk_meat as _rust_dk_meat
+
+            return np.asarray(
+                _rust_dk_meat(
+                    np.ascontiguousarray(score, dtype=np.float64),
+                    np.ascontiguousarray(time_ids, dtype=np.float64),
+                    bandwidth if bandwidth is not None else -1,
+                )
+            )
+        except ImportError:
+            pass
+
+    k = score.shape[1]
+    unique_times, time_idx = np.unique(time_ids, return_inverse=True)
+    T = len(unique_times)
+
+    h = np.zeros((T, k))
+    for j in range(k):
+        h[:, j] = np.bincount(time_idx, weights=score[:, j], minlength=T)
+
+    if bandwidth is None:
+        bandwidth = max(1, int(np.floor(4 * (T / 100) ** (2 / 9))))
+
+    S = h.T @ h
+    for j in range(1, bandwidth + 1):
+        w = 1.0 - j / (bandwidth + 1)
+        Gamma_j = h[j:].T @ h[:-j]
+        S += w * (Gamma_j + Gamma_j.T)
+    return S
+
+
 def vcov_hac(
     X: NDArray,
     resid: NDArray,
@@ -149,21 +243,7 @@ def vcov_hac(
     n, k = X.shape
     XtX_inv = np.linalg.inv(X.T @ X)
     score = X * resid[:, None]
-
-    # Sort by time to ensure proper lag structure
-    order = np.argsort(time_ids)
-    score = score[order]
-
-    if bandwidth is None:
-        bandwidth = max(1, int(np.floor(4 * (n / 100) ** (2 / 9))))
-
-    # Meat: Γ_0 + Σ_{j=1}^{L} w(j) * (Γ_j + Γ_j')
-    S = score.T @ score
-    for j in range(1, bandwidth + 1):
-        w = 1.0 - j / (bandwidth + 1)
-        Gamma_j = score[j:].T @ score[:-j]
-        S += w * (Gamma_j + Gamma_j.T)
-
+    S = _hac_meat(score, time_ids, bandwidth)
     dfc = n / (n - k)
     return dfc * XtX_inv @ S @ XtX_inv
 
@@ -186,26 +266,8 @@ def vcov_driscoll_kraay(
     n, k = X.shape
     XtX_inv = np.linalg.inv(X.T @ X)
     score = X * resid[:, None]
-
-    # Aggregate scores by time period
-    unique_times, time_idx = np.unique(time_ids, return_inverse=True)
-    T = len(unique_times)
-
-    h = np.zeros((T, k))
-    for j in range(k):
-        h[:, j] = np.bincount(time_idx, weights=score[:, j], minlength=T)
-
-    if bandwidth is None:
-        bandwidth = max(1, int(np.floor(4 * (T / 100) ** (2 / 9))))
-
-    # Newey-West on cross-sectional sums
-    S = h.T @ h
-    for j in range(1, bandwidth + 1):
-        w = 1.0 - j / (bandwidth + 1)
-        Gamma_j = h[j:].T @ h[:-j]
-        S += w * (Gamma_j + Gamma_j.T)
-
-    # Small-sample correction: T/(T-1) following Hoechle (2007)
+    S = _dk_meat(score, time_ids, bandwidth)
+    T = len(np.unique(time_ids))
     dfc = T / (T - 1)
     return dfc * XtX_inv @ S @ XtX_inv
 
