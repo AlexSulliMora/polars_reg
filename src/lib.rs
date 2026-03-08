@@ -1977,6 +1977,165 @@ fn rust_ols_nofe<'py>(
     ))
 }
 
+// ---------------------------------------------------------------------------
+// HAC / Driscoll-Kraay meat matrices
+// ---------------------------------------------------------------------------
+
+/// Newey-West HAC meat matrix: Γ₀ + Σⱼ w(j)(Γⱼ + Γⱼ')
+/// with Bartlett kernel weights w(j) = 1 - j/(bw+1).
+#[pyfunction]
+fn rust_hac_meat<'py>(
+    py: Python<'py>,
+    score: PyReadonlyArray2<'py, f64>,
+    time_ids: PyReadonlyArray1<'py, f64>,
+    bandwidth: i64,
+) -> Bound<'py, PyArray2<f64>> {
+    let score_arr = score.as_array();
+    let time_arr = time_ids.as_array();
+    let n = score_arr.nrows();
+    let k = score_arr.ncols();
+
+    // Sort by time
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&a, &b| time_arr[a].partial_cmp(&time_arr[b]).unwrap());
+
+    // Build sorted score (row-major flat)
+    let mut s_flat = vec![0.0_f64; n * k];
+    for (new_i, &old_i) in order.iter().enumerate() {
+        for j in 0..k {
+            s_flat[new_i * k + j] = score_arr[[old_i, j]];
+        }
+    }
+
+    let bw = if bandwidth < 0 {
+        std::cmp::max(1, (4.0 * (n as f64 / 100.0).powf(2.0 / 9.0)).floor() as usize)
+    } else {
+        bandwidth as usize
+    };
+
+    // Γ₀ = S'S (upper triangle, then symmetrize)
+    let mut meat = vec![0.0_f64; k * k];
+    for i in 0..n {
+        let row = &s_flat[i * k..(i + 1) * k];
+        for j in 0..k {
+            for l in j..k {
+                meat[j * k + l] += row[j] * row[l];
+            }
+        }
+    }
+
+    // Bartlett kernel lags
+    for lag in 1..=bw {
+        let w = 1.0 - lag as f64 / (bw as f64 + 1.0);
+        let mut gamma = vec![0.0_f64; k * k];
+        for i in lag..n {
+            let row_cur = &s_flat[i * k..(i + 1) * k];
+            let row_lag = &s_flat[(i - lag) * k..(i - lag + 1) * k];
+            for j in 0..k {
+                for l in 0..k {
+                    gamma[j * k + l] += row_cur[j] * row_lag[l];
+                }
+            }
+        }
+        // Add w * (Γⱼ + Γⱼ')
+        for j in 0..k {
+            for l in j..k {
+                meat[j * k + l] += w * (gamma[j * k + l] + gamma[l * k + j]);
+            }
+        }
+    }
+
+    // Symmetrize
+    for j in 0..k {
+        for l in (j + 1)..k {
+            meat[l * k + j] = meat[j * k + l];
+        }
+    }
+
+    let result = Array2::from_shape_vec((k, k), meat).unwrap();
+    result.into_pyarray(py)
+}
+
+/// Driscoll-Kraay meat: aggregate scores by time, then Newey-West on T×k.
+#[pyfunction]
+fn rust_dk_meat<'py>(
+    py: Python<'py>,
+    score: PyReadonlyArray2<'py, f64>,
+    time_ids: PyReadonlyArray1<'py, f64>,
+    bandwidth: i64,
+) -> Bound<'py, PyArray2<f64>> {
+    let score_arr = score.as_array();
+    let time_arr = time_ids.as_array();
+    let n = score_arr.nrows();
+    let k = score_arr.ncols();
+
+    // Recode time_ids to contiguous 0..T-1 (sorted by time value)
+    let mut time_map: std::collections::BTreeMap<i64, usize> = std::collections::BTreeMap::new();
+    for i in 0..n {
+        let key = time_arr[i].to_bits() as i64;
+        let next_id = time_map.len();
+        time_map.entry(key).or_insert(next_id);
+    }
+    let t_count = time_map.len();
+
+    // Aggregate scores by time: h[t, j] = Σ score[i, j] for time[i] == t
+    let mut h_flat = vec![0.0_f64; t_count * k];
+    for i in 0..n {
+        let key = time_arr[i].to_bits() as i64;
+        let t = time_map[&key];
+        for j in 0..k {
+            h_flat[t * k + j] += score_arr[[i, j]];
+        }
+    }
+
+    let bw = if bandwidth < 0 {
+        std::cmp::max(1, (4.0 * (t_count as f64 / 100.0).powf(2.0 / 9.0)).floor() as usize)
+    } else {
+        bandwidth as usize
+    };
+
+    // Γ₀ = h'h
+    let mut meat = vec![0.0_f64; k * k];
+    for t in 0..t_count {
+        let row = &h_flat[t * k..(t + 1) * k];
+        for j in 0..k {
+            for l in j..k {
+                meat[j * k + l] += row[j] * row[l];
+            }
+        }
+    }
+
+    // Bartlett kernel lags
+    for lag in 1..=bw {
+        let w = 1.0 - lag as f64 / (bw as f64 + 1.0);
+        let mut gamma = vec![0.0_f64; k * k];
+        for t in lag..t_count {
+            let row_cur = &h_flat[t * k..(t + 1) * k];
+            let row_lag = &h_flat[(t - lag) * k..(t - lag + 1) * k];
+            for j in 0..k {
+                for l in 0..k {
+                    gamma[j * k + l] += row_cur[j] * row_lag[l];
+                }
+            }
+        }
+        for j in 0..k {
+            for l in j..k {
+                meat[j * k + l] += w * (gamma[j * k + l] + gamma[l * k + j]);
+            }
+        }
+    }
+
+    // Symmetrize
+    for j in 0..k {
+        for l in (j + 1)..k {
+            meat[l * k + j] = meat[j * k + l];
+        }
+    }
+
+    let result = Array2::from_shape_vec((k, k), meat).unwrap();
+    result.into_pyarray(py)
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(rust_demean, m)?)?;
@@ -1987,5 +2146,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(rust_ols_from_arrays, m)?)?;
     m.add_function(wrap_pyfunction!(rust_ols_nofe, m)?)?;
     m.add_function(wrap_pyfunction!(rust_iv2sls, m)?)?;
+    m.add_function(wrap_pyfunction!(rust_hac_meat, m)?)?;
+    m.add_function(wrap_pyfunction!(rust_dk_meat, m)?)?;
     Ok(())
 }
