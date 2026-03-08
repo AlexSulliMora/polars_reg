@@ -82,6 +82,68 @@ def test_panel_re_summary(panel_data):
     assert "Panel RE" in s
 
 
+def test_panel_re_cluster(panel_data):
+    """RE with clustered SEs by entity."""
+    result = panel_re("y ~ x1 + x2", data=panel_data, entity="firm_id", cluster=["firm_id"])
+    assert result.vcov_type == "cluster"
+    assert "firm_id" in result.n_clusters
+
+
+def test_panel_re_robust(panel_data):
+    """RE with HC1 robust SEs."""
+    result = panel_re("y ~ x1 + x2", data=panel_data, entity="firm_id", vcov="HC1")
+    assert result.vcov_type == "HC1"
+    # Robust SEs should differ from iid
+    result_iid = panel_re("y ~ x1 + x2", data=panel_data, entity="firm_id")
+    assert not np.allclose(result.se, result_iid.se)
+
+
+def test_panel_re_nw(panel_data):
+    """RE with Newey-West SEs."""
+    result = panel_re(
+        "y ~ x1 + x2",
+        data=panel_data,
+        entity="firm_id",
+        vcov="NW",
+        time="year_id",
+    )
+    assert result.vcov_type == "NW"
+    assert all(se > 0 for se in result.se)
+
+
+def test_panel_re_dk(panel_data):
+    """RE with Driscoll-Kraay SEs."""
+    result = panel_re(
+        "y ~ x1 + x2",
+        data=panel_data,
+        entity="firm_id",
+        vcov="DK",
+        time="year_id",
+    )
+    assert result.vcov_type == "DK"
+
+
+def test_panel_re_wildboot(panel_data):
+    """RE with wild cluster bootstrap SEs."""
+    result = panel_re(
+        "y ~ x1 + x2",
+        data=panel_data,
+        entity="firm_id",
+        vcov="wildboot",
+        cluster=["firm_id"],
+        seed=42,
+    )
+    assert result.vcov_type == "wildboot"
+
+
+def test_panel_re_nw_requires_time(panel_data):
+    """NW vcov should raise without time parameter."""
+    import pytest
+
+    with pytest.raises(ValueError, match="requires time"):
+        panel_re("y ~ x1 + x2", data=panel_data, entity="firm_id", vcov="NW")
+
+
 # ── panel_fd tests ──────────────────────────────────────────────────
 
 
