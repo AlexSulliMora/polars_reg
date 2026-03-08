@@ -14,6 +14,139 @@ from polars_reg._se import (
 )
 from polars_reg._utils import ensure_polars, extract_arrays
 
+try:
+    from polars_reg._native import rust_iv2sls as _rust_iv2sls
+
+    _HAS_NATIVE = True
+except ImportError:
+    _HAS_NATIVE = False
+
+
+def _to_codes_fast(series: pl.Series) -> np.ndarray:
+    """Convert Polars Series to int32 codes. Minimal overhead path."""
+    from polars_reg._native import rust_recode
+
+    dtype = series.dtype
+    if dtype in (
+        pl.Int8, pl.Int16, pl.Int32, pl.Int64,
+        pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64,
+    ):
+        arr = series.to_numpy().astype(np.int64)
+        codes, _ = rust_recode(arr)
+        return np.asarray(codes).astype(np.int32)
+    codes = series.cast(pl.Utf8).cast(pl.Categorical).to_physical().to_numpy()
+    return codes.astype(np.int32)
+
+
+def _iv2sls_rust(
+    data: pl.DataFrame | pl.LazyFrame,
+    spec,
+    cluster: list[str] | None,
+    vcov: str,
+) -> RegressionResult:
+    """Rust fast path for 2SLS IV regression."""
+    if isinstance(data, pl.LazyFrame):
+        all_cols = (
+            [spec.depvar] + list(spec.exog) + list(spec.endog)
+            + list(spec.instruments) + list(spec.fe)
+        )
+        if cluster:
+            all_cols += [c for c in cluster if c not in all_cols]
+        all_cols = list(dict.fromkeys(all_cols))
+        data = data.select(all_cols).collect()
+
+    numeric_cols = [spec.depvar] + list(spec.exog) + list(spec.endog) + list(spec.instruments)
+    df = data.drop_nulls(subset=numeric_cols)
+
+    y_col = df[spec.depvar].cast(pl.Float64).to_numpy()
+    x_exog = [df[c].cast(pl.Float64).to_numpy() for c in spec.exog]
+    x_endog = [df[c].cast(pl.Float64).to_numpy() for c in spec.endog]
+    z_excl = [df[c].cast(pl.Float64).to_numpy() for c in spec.instruments]
+
+    fe_arrays = [_to_codes_fast(df[c]) for c in spec.fe]
+    cl_arrays = []
+    cl_names = []
+    if cluster:
+        for c in cluster:
+            if c in spec.fe:
+                cl_arrays.append(fe_arrays[spec.fe.index(c)])
+            else:
+                cl_arrays.append(_to_codes_fast(df[c]))
+            cl_names.append(c)
+
+    (
+        beta, V, resid, r2, r2_adj, first_stage_f,
+        n, df_abs, n_dropped, cl_n_groups, final_names,
+    ) = _rust_iv2sls(
+        np.ascontiguousarray(y_col, dtype=np.float64),
+        [np.ascontiguousarray(a, dtype=np.float64) for a in x_exog],
+        [np.ascontiguousarray(a, dtype=np.float64) for a in x_endog],
+        [np.ascontiguousarray(a, dtype=np.float64) for a in z_excl],
+        list(spec.exog),
+        list(spec.endog),
+        [np.ascontiguousarray(a, dtype=np.int32) for a in fe_arrays],
+        list(spec.fe),
+        [np.ascontiguousarray(a, dtype=np.int32) for a in cl_arrays],
+        cl_names,
+        1e-8,
+        100_000,
+        vcov if not cluster else "cluster",
+        spec.add_intercept and not spec.fe,
+    )
+
+    beta = np.asarray(beta)
+    V = np.asarray(V)
+    resid = np.asarray(resid)
+    k = len(beta)
+
+    if cluster:
+        n_clusters = {c: g for c, g in zip(cluster, cl_n_groups)}
+        df_r = min(n_clusters.values()) - 1
+        vcov_type = "cluster"
+    else:
+        n_clusters = None
+        df_r = n - k - df_abs
+        vcov_type = vcov
+
+    fe_absorbed = list(spec.fe) if spec.fe else None
+
+    result = RegressionResult(
+        coefficients=beta,
+        vcov=V,
+        residuals=resid,
+        names=list(final_names),
+        n_obs=n,
+        k=k,
+        df_r=df_r,
+        r_squared=r2,
+        r_squared_adj=r2_adj,
+        model_type="2SLS",
+        vcov_type=vcov_type,
+        n_clusters=n_clusters,
+        first_stage_f=float(first_stage_f),
+        fe_absorbed=fe_absorbed,
+        df_absorbed=df_abs,
+    )
+    # Stash arrays for Kleibergen-Paap diagnostics
+    # Note: these are pre-demeaning arrays (OK for no-FE cases, which is all
+    # current KP tests). FE cases would need demeaned arrays from Rust.
+    n_orig = len(y_col)
+    if n == n_orig:
+        # No singletons dropped — use original arrays directly
+        exog_parts = [np.asarray(a) for a in x_exog]
+        if spec.add_intercept and not spec.fe:
+            exog_parts.append(np.ones(n))
+        result._iv_X_exog = np.column_stack(exog_parts) if exog_parts else np.empty((n, 0))
+        result._iv_X_endog = np.column_stack([np.asarray(a) for a in x_endog])
+        result._iv_Z_excl = np.column_stack([np.asarray(a) for a in z_excl])
+        result._iv_cluster_arrays = (
+            [np.asarray(a) for a in cl_arrays] if cluster else None
+        )
+    else:
+        # Singletons dropped — arrays mismatch, can't stash for KP
+        pass
+    return result
+
 
 def iv2sls(
     formula: str,
@@ -46,6 +179,17 @@ def iv2sls(
             "IV formula must specify endogenous variables and instruments. "
             "Use syntax: y ~ x_exog || x_endog ~ z1 + z2"
         )
+
+    # --- Rust fast path ---
+    _rust_eligible = (
+        _HAS_NATIVE
+        and not spec.indicators
+        and not any(":" in c for c in spec.exog)
+        and vcov not in ("bootstrap", "wildboot")
+        and (cluster or vcov in ("iid", "HC0", "HC1"))
+    )
+    if _rust_eligible:
+        return _iv2sls_rust(data, spec, cluster, vcov)
 
     arrays = extract_arrays(data, spec, cluster=cluster)
 

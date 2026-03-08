@@ -537,7 +537,7 @@ fn solve_kxk(a: &[f64], b: &[f64], k: usize) -> Vec<f64> {
 
         let pivot = lu[piv[col] * k + col];
         if pivot.abs() < 1e-30 {
-            return vec![0.0; k];
+            return vec![f64::NAN; k];
         }
 
         for row in (col + 1)..k {
@@ -1027,6 +1027,7 @@ fn rust_ols_from_arrays<'py>(
     cl_names: Vec<String>,
     tol: f64,
     max_iter: usize,
+    vcov_type: String,
 ) -> PyResult<(
     Bound<'py, PyArray1<f64>>,   // beta
     Bound<'py, PyArray2<f64>>,   // vcov
@@ -1246,9 +1247,12 @@ fn rust_ols_from_arrays<'py>(
             }
         }
         vcov = v_total;
-    } else {
-        let sigma2 = ss_res / (n - k) as f64;
+    } else if vcov_type == "iid" {
+        let sigma2 = ss_res / (n as f64 - k as f64 - df_abs as f64);
         vcov = xtx_inv.iter().map(|v| v * sigma2).collect();
+    } else {
+        // HC0, HC1, HC2, HC3
+        vcov = sandwich_vcov(&x_flat, &resid, &xtx_inv, n, k, &vcov_type);
     }
 
     let beta_arr = Array1::from_vec(beta);
@@ -1279,6 +1283,700 @@ fn rust_ols_from_arrays<'py>(
     ))
 }
 
+// ---------------------------------------------------------------------------
+// rust_iv2sls — full 2SLS pipeline: demean + two-stage solve + SE
+// ---------------------------------------------------------------------------
+
+/// 2SLS IV estimation entirely in Rust.
+/// Accepts individual column arrays for y, exog, endog, instruments, FE, clusters.
+#[pyfunction]
+fn rust_iv2sls<'py>(
+    py: Python<'py>,
+    y_col: PyReadonlyArray1<'py, f64>,
+    x_exog_cols: Vec<PyReadonlyArray1<'py, f64>>,
+    x_endog_cols: Vec<PyReadonlyArray1<'py, f64>>,
+    z_excl_cols: Vec<PyReadonlyArray1<'py, f64>>,
+    x_names: Vec<String>,         // exog names
+    endog_names: Vec<String>,     // endog names
+    fe_cols: Vec<PyReadonlyArray1<'py, i32>>,
+    fe_names: Vec<String>,
+    cl_cols: Vec<PyReadonlyArray1<'py, i32>>,
+    cl_names: Vec<String>,
+    tol: f64,
+    max_iter: usize,
+    vcov_type: String,
+    add_intercept: bool,
+) -> PyResult<(
+    Bound<'py, PyArray1<f64>>,   // beta
+    Bound<'py, PyArray2<f64>>,   // vcov
+    Bound<'py, PyArray1<f64>>,   // residuals
+    f64,                          // r2
+    f64,                          // r2_adj
+    f64,                          // first_stage_f
+    usize,                        // n_obs
+    usize,                        // df_abs
+    usize,                        // n_dropped
+    Vec<usize>,                   // n_clusters per cluster dim
+    Vec<String>,                  // final names (exog + endog)
+)> {
+    let y_src = y_col.as_slice().unwrap();
+    let n_orig = y_src.len();
+    let has_fe = !fe_cols.is_empty();
+    let has_cluster = !cl_cols.is_empty();
+
+    // Borrow input slices
+    let exog_slices: Vec<&[f64]> = x_exog_cols.iter().map(|a| a.as_slice().unwrap()).collect();
+    let endog_slices: Vec<&[f64]> = x_endog_cols.iter().map(|a| a.as_slice().unwrap()).collect();
+    let z_excl_slices: Vec<&[f64]> = z_excl_cols.iter().map(|a| a.as_slice().unwrap()).collect();
+    let fe_slices: Vec<&[i32]> = fe_cols.iter().map(|a| a.as_slice().unwrap()).collect();
+    let cl_slices: Vec<&[i32]> = cl_cols.iter().map(|a| a.as_slice().unwrap()).collect();
+
+    let k_exog_base = exog_slices.len();
+    let k_endog = endog_slices.len();
+    let k_z_excl = z_excl_slices.len();
+    let k_exog = if add_intercept { k_exog_base + 1 } else { k_exog_base };
+    let k = k_exog + k_endog;
+    let k_z = k_exog + k_z_excl;  // total instruments = exog + excluded
+
+    // Copy y
+    let mut y_vec: Vec<f64> = y_src.to_vec();
+
+    // Build exog row-major (n_orig, k_exog) — includes intercept if requested
+    let mut exog_flat: Vec<f64> = Vec::with_capacity(n_orig * k_exog);
+    for i in 0..n_orig {
+        for j in 0..k_exog_base {
+            exog_flat.push(exog_slices[j][i]);
+        }
+        if add_intercept {
+            exog_flat.push(1.0);
+        }
+    }
+
+    // Build endog row-major (n_orig, k_endog)
+    let mut endog_flat: Vec<f64> = Vec::with_capacity(n_orig * k_endog);
+    for i in 0..n_orig {
+        for j in 0..k_endog {
+            endog_flat.push(endog_slices[j][i]);
+        }
+    }
+
+    // Build excluded instruments row-major (n_orig, k_z_excl)
+    let mut z_excl_flat: Vec<f64> = Vec::with_capacity(n_orig * k_z_excl);
+    for i in 0..n_orig {
+        for j in 0..k_z_excl {
+            z_excl_flat.push(z_excl_slices[j][i]);
+        }
+    }
+
+    // --- Drop singletons ---
+    let mut n_dropped = 0_usize;
+    let mut fe_owned: Vec<Vec<i32>> = Vec::new();
+    let mut cl_owned: Vec<Vec<i32>> = Vec::new();
+    let mut dropped = false;
+
+    if has_fe {
+        let keep = drop_singletons_mask(&fe_slices);
+        let n_keep: usize = keep.iter().filter(|&&b| b).count();
+        if n_keep < n_orig {
+            n_dropped = n_orig - n_keep;
+            dropped = true;
+
+            let mut new_y = Vec::with_capacity(n_keep);
+            let mut new_exog = Vec::with_capacity(n_keep * k_exog);
+            let mut new_endog = Vec::with_capacity(n_keep * k_endog);
+            let mut new_z = Vec::with_capacity(n_keep * k_z_excl);
+            for i in 0..n_orig {
+                if keep[i] {
+                    new_y.push(y_vec[i]);
+                    new_exog.extend_from_slice(&exog_flat[i * k_exog..(i + 1) * k_exog]);
+                    new_endog.extend_from_slice(&endog_flat[i * k_endog..(i + 1) * k_endog]);
+                    new_z.extend_from_slice(&z_excl_flat[i * k_z_excl..(i + 1) * k_z_excl]);
+                }
+            }
+            y_vec = new_y;
+            exog_flat = new_exog;
+            endog_flat = new_endog;
+            z_excl_flat = new_z;
+
+            for codes in &fe_slices {
+                let new_codes: Vec<i32> = (0..n_orig).filter(|&i| keep[i]).map(|i| codes[i]).collect();
+                fe_owned.push(new_codes);
+            }
+            for codes in &cl_slices {
+                let new_codes: Vec<i32> = (0..n_orig).filter(|&i| keep[i]).map(|i| codes[i]).collect();
+                cl_owned.push(new_codes);
+            }
+        }
+    }
+
+    let fe_work: Vec<&[i32]> = if dropped {
+        fe_owned.iter().map(|v| v.as_slice()).collect()
+    } else {
+        fe_slices
+    };
+    let cl_work: Vec<&[i32]> = if dropped {
+        cl_owned.iter().map(|v| v.as_slice()).collect()
+    } else {
+        cl_slices
+    };
+
+    let n = y_vec.len();
+
+    // --- Demean all arrays if FE present ---
+    if has_fe {
+        let ng_list: Vec<usize> = fe_work.iter()
+            .map(|fe| *fe.iter().max().unwrap_or(&0) as usize + 1)
+            .collect();
+
+        if fe_work.len() == 1 {
+            let denom = group_counts(fe_work[0], ng_list[0]);
+            // Demean y
+            demean_col(&mut y_vec, fe_work[0], &denom, ng_list[0]);
+            // Demean exog
+            let mut cm = ColMajorMatrix::from_row_major_flat(&exog_flat, n, k_exog);
+            for j in 0..k_exog {
+                demean_col(cm.col_mut(j), fe_work[0], &denom, ng_list[0]);
+            }
+            cm.to_row_major_flat(&mut exog_flat);
+            // Demean endog
+            let mut cm_end = ColMajorMatrix::from_row_major_flat(&endog_flat, n, k_endog);
+            for j in 0..k_endog {
+                demean_col(cm_end.col_mut(j), fe_work[0], &denom, ng_list[0]);
+            }
+            cm_end.to_row_major_flat(&mut endog_flat);
+            // Demean excluded instruments
+            let mut cm_z = ColMajorMatrix::from_row_major_flat(&z_excl_flat, n, k_z_excl);
+            for j in 0..k_z_excl {
+                demean_col(cm_z.col_mut(j), fe_work[0], &denom, ng_list[0]);
+            }
+            cm_z.to_row_major_flat(&mut z_excl_flat);
+        } else {
+            // Stack all into one matrix for CG demeaning
+            let total_cols = 1 + k_exog + k_endog + k_z_excl;
+            let mut cm_data = vec![0.0_f64; n * total_cols];
+            // Col 0 = y
+            cm_data[..n].copy_from_slice(&y_vec);
+            // Cols 1..k_exog+1 = exog
+            for j in 0..k_exog {
+                for i in 0..n {
+                    cm_data[(1 + j) * n + i] = exog_flat[i * k_exog + j];
+                }
+            }
+            // Cols k_exog+1..k_exog+1+k_endog = endog
+            for j in 0..k_endog {
+                for i in 0..n {
+                    cm_data[(1 + k_exog + j) * n + i] = endog_flat[i * k_endog + j];
+                }
+            }
+            // Remaining cols = excluded instruments
+            for j in 0..k_z_excl {
+                for i in 0..n {
+                    cm_data[(1 + k_exog + k_endog + j) * n + i] = z_excl_flat[i * k_z_excl + j];
+                }
+            }
+            let cm_in = ColMajorMatrix { data: cm_data, n, k: total_cols };
+            let cm_out = demean_cg_slices(&cm_in, &fe_work, &ng_list, tol, max_iter);
+
+            // Extract back
+            y_vec.copy_from_slice(&cm_out.data[..n]);
+            for j in 0..k_exog {
+                for i in 0..n {
+                    exog_flat[i * k_exog + j] = cm_out.data[(1 + j) * n + i];
+                }
+            }
+            for j in 0..k_endog {
+                for i in 0..n {
+                    endog_flat[i * k_endog + j] = cm_out.data[(1 + k_exog + j) * n + i];
+                }
+            }
+            for j in 0..k_z_excl {
+                for i in 0..n {
+                    z_excl_flat[i * k_z_excl + j] = cm_out.data[(1 + k_exog + k_endog + j) * n + i];
+                }
+            }
+        }
+    }
+
+    // --- Build Z = [exog, z_excl] row-major (n, k_z) ---
+    let mut z_flat: Vec<f64> = Vec::with_capacity(n * k_z);
+    for i in 0..n {
+        z_flat.extend_from_slice(&exog_flat[i * k_exog..(i + 1) * k_exog]);
+        z_flat.extend_from_slice(&z_excl_flat[i * k_z_excl..(i + 1) * k_z_excl]);
+    }
+
+    // --- Stage 1: X_endog_hat = Z (Z'Z)^{-1} Z' X_endog ---
+    // Compute Z'Z (k_z x k_z)
+    let mut ztz = vec![0.0_f64; k_z * k_z];
+    for i in 0..n {
+        let zrow = &z_flat[i * k_z..(i + 1) * k_z];
+        for j in 0..k_z {
+            for l in j..k_z {
+                ztz[j * k_z + l] += zrow[j] * zrow[l];
+            }
+        }
+    }
+    for j in 0..k_z { for l in (j + 1)..k_z { ztz[l * k_z + j] = ztz[j * k_z + l]; } }
+
+    let ztz_inv = invert_kxk(&ztz, k_z);
+
+    // Compute Z' X_endog (k_z x k_endog)
+    let mut zt_xend = vec![0.0_f64; k_z * k_endog];
+    for i in 0..n {
+        let zrow = &z_flat[i * k_z..(i + 1) * k_z];
+        let erow = &endog_flat[i * k_endog..(i + 1) * k_endog];
+        for j in 0..k_z {
+            for l in 0..k_endog {
+                zt_xend[j * k_endog + l] += zrow[j] * erow[l];
+            }
+        }
+    }
+
+    // (Z'Z)^{-1} Z' X_endog = pi (k_z x k_endog)
+    let pi = matmul(&ztz_inv, &zt_xend, k_z, k_z, k_endog);
+
+    // X_endog_hat = Z * pi (n x k_endog)
+    let mut endog_hat_flat = vec![0.0_f64; n * k_endog];
+    for i in 0..n {
+        let zrow = &z_flat[i * k_z..(i + 1) * k_z];
+        for l in 0..k_endog {
+            let mut val = 0.0;
+            for j in 0..k_z {
+                val += zrow[j] * pi[j * k_endog + l];
+            }
+            endog_hat_flat[i * k_endog + l] = val;
+        }
+    }
+
+    // --- First-stage F-stat (partial F-test, first endog variable) ---
+    // Restricted: x_end ~ exog
+    let mut exog_t_exog = vec![0.0_f64; k_exog * k_exog];
+    for i in 0..n {
+        let row = &exog_flat[i * k_exog..(i + 1) * k_exog];
+        for j in 0..k_exog { for l in j..k_exog { exog_t_exog[j * k_exog + l] += row[j] * row[l]; } }
+    }
+    for j in 0..k_exog { for l in (j + 1)..k_exog { exog_t_exog[l * k_exog + j] = exog_t_exog[j * k_exog + l]; } }
+    let mut exog_t_xend0 = vec![0.0_f64; k_exog];
+    for i in 0..n {
+        let row = &exog_flat[i * k_exog..(i + 1) * k_exog];
+        let e0 = endog_flat[i * k_endog];
+        for j in 0..k_exog { exog_t_xend0[j] += row[j] * e0; }
+    }
+    let beta_r = solve_kxk(&exog_t_exog, &exog_t_xend0, k_exog);
+    let mut ss_r = 0.0_f64;
+    for i in 0..n {
+        let row = &exog_flat[i * k_exog..(i + 1) * k_exog];
+        let mut pred = 0.0;
+        for j in 0..k_exog { pred += row[j] * beta_r[j]; }
+        let r = endog_flat[i * k_endog] - pred;
+        ss_r += r * r;
+    }
+    // Unrestricted: x_end ~ Z
+    let mut zt_xend0 = vec![0.0_f64; k_z];
+    for i in 0..n {
+        let zrow = &z_flat[i * k_z..(i + 1) * k_z];
+        let e0 = endog_flat[i * k_endog];
+        for j in 0..k_z { zt_xend0[j] += zrow[j] * e0; }
+    }
+    let beta_u = solve_kxk(&ztz, &zt_xend0, k_z);
+    let mut ss_u = 0.0_f64;
+    for i in 0..n {
+        let zrow = &z_flat[i * k_z..(i + 1) * k_z];
+        let mut pred = 0.0;
+        for j in 0..k_z { pred += zrow[j] * beta_u[j]; }
+        let r = endog_flat[i * k_endog] - pred;
+        ss_u += r * r;
+    }
+    let q = k_z_excl as f64;
+    let first_stage_f = if ss_u > 0.0 && q > 0.0 {
+        ((ss_r - ss_u) / q) / (ss_u / (n as f64 - k_exog as f64 - q))
+    } else {
+        0.0
+    };
+
+    // --- Stage 2: X = [exog, endog], X_hat = [exog, endog_hat] ---
+    // beta = (X_hat'X)^{-1} X_hat'y
+    let mut x_flat = Vec::with_capacity(n * k);
+    let mut xhat_flat = Vec::with_capacity(n * k);
+    for i in 0..n {
+        x_flat.extend_from_slice(&exog_flat[i * k_exog..(i + 1) * k_exog]);
+        x_flat.extend_from_slice(&endog_flat[i * k_endog..(i + 1) * k_endog]);
+        xhat_flat.extend_from_slice(&exog_flat[i * k_exog..(i + 1) * k_exog]);
+        xhat_flat.extend_from_slice(&endog_hat_flat[i * k_endog..(i + 1) * k_endog]);
+    }
+
+    // X_hat'X (k x k)
+    let mut xhx = vec![0.0_f64; k * k];
+    for i in 0..n {
+        let xh_row = &xhat_flat[i * k..(i + 1) * k];
+        let x_row = &x_flat[i * k..(i + 1) * k];
+        for j in 0..k {
+            for l in 0..k {
+                xhx[j * k + l] += xh_row[j] * x_row[l];
+            }
+        }
+    }
+    // X_hat'y
+    let mut xhy = vec![0.0_f64; k];
+    for i in 0..n {
+        let xh_row = &xhat_flat[i * k..(i + 1) * k];
+        let yi = y_vec[i];
+        for j in 0..k { xhy[j] += xh_row[j] * yi; }
+    }
+
+    let beta = solve_kxk(&xhx, &xhy, k);
+    if beta.iter().any(|v| v.is_nan()) {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>("Singular matrix in 2SLS"));
+    }
+
+    // Residuals: e = y - X*beta (using actual X, not X_hat)
+    let mut resid = vec![0.0_f64; n];
+    for i in 0..n {
+        let x_row = &x_flat[i * k..(i + 1) * k];
+        let mut pred = 0.0;
+        for j in 0..k { pred += x_row[j] * beta[j]; }
+        resid[i] = y_vec[i] - pred;
+    }
+
+    // R-squared
+    let ss_res: f64 = resid.iter().map(|r| r * r).sum();
+    let y_mean: f64 = y_vec.iter().sum::<f64>() / n as f64;
+    let ss_tot: f64 = y_vec.iter().map(|yi| (yi - y_mean) * (yi - y_mean)).sum();
+    let r2 = if ss_tot > 0.0 { 1.0 - ss_res / ss_tot } else { 0.0 };
+
+    let df_abs = if has_fe { absorbed_dof_internal(&fe_work) } else { 0 };
+    let r2_adj = {
+        let denom = n as f64 - k as f64 - df_abs as f64;
+        if denom > 0.0 { 1.0 - (1.0 - r2) * (n as f64 - 1.0) / denom } else { 0.0 }
+    };
+
+    // --- Variance-covariance: bread = (X_hat'X)^{-1}, meat uses X_hat ---
+    let xhx_inv = invert_kxk(&xhx, k);
+    let vcov: Vec<f64>;
+    let mut cluster_n_groups: Vec<usize> = Vec::new();
+
+    if has_cluster {
+        let cl_recoded: Vec<(Vec<i32>, usize)> = cl_work.iter().map(|cl| recode_vec(cl)).collect();
+        for (_, g) in &cl_recoded {
+            cluster_n_groups.push(*g);
+        }
+        let d = cl_recoded.len();
+        let mut v_total = vec![0.0_f64; k * k];
+
+        for size in 1..=d {
+            let sign = if size % 2 == 1 { 1.0 } else { -1.0 };
+            for subset in combinations(d, size) {
+                let (codes, g) = if subset.len() == 1 {
+                    cl_recoded[subset[0]].clone()
+                } else {
+                    let arrays: Vec<&[i32]> = subset.iter().map(|&idx| cl_recoded[idx].0.as_slice()).collect();
+                    interaction_codes(&arrays)
+                };
+                // Use X_hat for clustered meat in IV
+                let meat = clustered_meat_raw(&xhat_flat, n, k, &resid, &codes, g);
+                let dfc = (g as f64 / (g as f64 - 1.0)) * ((n as f64 - 1.0) / (n as f64 - k as f64));
+                let tmp = matmul(&xhx_inv, &meat, k, k, k);
+                let term = matmul(&tmp, &xhx_inv, k, k, k);
+                for idx in 0..(k * k) {
+                    v_total[idx] += sign * dfc * term[idx];
+                }
+            }
+        }
+        vcov = v_total;
+    } else if vcov_type == "iid" {
+        let sigma2 = ss_res / (n as f64 - k as f64 - df_abs as f64);
+        vcov = xhx_inv.iter().map(|v| v * sigma2).collect();
+    } else {
+        // HC0/HC1: sandwich with X_hat
+        vcov = sandwich_vcov(&xhat_flat, &resid, &xhx_inv, n, k, &vcov_type);
+    }
+
+    // Build final names
+    let mut final_names = x_names;
+    if add_intercept {
+        final_names.push("_cons".to_string());
+    }
+    final_names.extend(endog_names);
+
+    let beta_arr = Array1::from_vec(beta);
+    let mut vcov_arr = Array2::<f64>::zeros((k, k));
+    for j in 0..k { for l in 0..k { vcov_arr[[j, l]] = vcov[j * k + l]; } }
+    let resid_arr = Array1::from_vec(resid);
+
+    Ok((
+        beta_arr.into_pyarray(py),
+        vcov_arr.into_pyarray(py),
+        resid_arr.into_pyarray(py),
+        r2,
+        r2_adj,
+        first_stage_f,
+        n,
+        df_abs,
+        n_dropped,
+        cluster_n_groups,
+        final_names,
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// rust_ols_nofe — full OLS pipeline for no-FE case, all SE types
+// ---------------------------------------------------------------------------
+
+/// Compute sandwich VCV: (X'X)^{-1} meat (X'X)^{-1} where meat depends on vcov_type.
+/// x_flat is row-major (n, k). Returns flat k*k VCV.
+fn sandwich_vcov(
+    x_flat: &[f64],
+    resid: &[f64],
+    xtx_inv: &[f64],
+    n: usize,
+    k: usize,
+    vcov_type: &str,
+) -> Vec<f64> {
+    match vcov_type {
+        "HC0" | "HC1" => {
+            // meat = X' diag(e²) X
+            let mut meat = vec![0.0_f64; k * k];
+            for i in 0..n {
+                let row = &x_flat[i * k..(i + 1) * k];
+                let e2 = resid[i] * resid[i];
+                for j in 0..k {
+                    for l in j..k {
+                        meat[j * k + l] += row[j] * row[l] * e2;
+                    }
+                }
+            }
+            for j in 0..k {
+                for l in (j + 1)..k {
+                    meat[l * k + j] = meat[j * k + l];
+                }
+            }
+            let tmp = matmul(xtx_inv, &meat, k, k, k);
+            let mut v = matmul(&tmp, xtx_inv, k, k, k);
+            if vcov_type == "HC1" {
+                let scale = n as f64 / (n as f64 - k as f64);
+                for val in v.iter_mut() {
+                    *val *= scale;
+                }
+            }
+            v
+        }
+        "HC2" | "HC3" => {
+            // hat_ii = x_i' (X'X)^{-1} x_i
+            let mut hat = vec![0.0_f64; n];
+            for i in 0..n {
+                let row = &x_flat[i * k..(i + 1) * k];
+                let mut h = 0.0;
+                for j in 0..k {
+                    for l in 0..k {
+                        h += row[j] * xtx_inv[j * k + l] * row[l];
+                    }
+                }
+                hat[i] = h;
+            }
+            let mut meat = vec![0.0_f64; k * k];
+            for i in 0..n {
+                let row = &x_flat[i * k..(i + 1) * k];
+                let e2 = resid[i] * resid[i];
+                let w = if vcov_type == "HC2" {
+                    e2 / (1.0 - hat[i])
+                } else {
+                    e2 / ((1.0 - hat[i]) * (1.0 - hat[i]))
+                };
+                for j in 0..k {
+                    for l in j..k {
+                        meat[j * k + l] += row[j] * row[l] * w;
+                    }
+                }
+            }
+            for j in 0..k {
+                for l in (j + 1)..k {
+                    meat[l * k + j] = meat[j * k + l];
+                }
+            }
+            let tmp = matmul(xtx_inv, &meat, k, k, k);
+            matmul(&tmp, xtx_inv, k, k, k)
+        }
+        _ => {
+            // iid: sigma² (X'X)^{-1} — caller handles this case
+            unreachable!("sandwich_vcov called with unsupported type: {}", vcov_type)
+        }
+    }
+}
+
+/// Full OLS for no-FE case. Accepts individual column arrays.
+/// Handles iid, HC0-HC3, and clustered SEs entirely in Rust.
+#[pyfunction]
+fn rust_ols_nofe<'py>(
+    py: Python<'py>,
+    y_col: PyReadonlyArray1<'py, f64>,
+    x_cols: Vec<PyReadonlyArray1<'py, f64>>,
+    x_names: Vec<String>,
+    add_intercept: bool,
+    cl_cols: Vec<PyReadonlyArray1<'py, i32>>,
+    cl_names: Vec<String>,
+    vcov_type: String,
+) -> PyResult<(
+    Bound<'py, PyArray1<f64>>,   // beta
+    Bound<'py, PyArray2<f64>>,   // vcov
+    Bound<'py, PyArray1<f64>>,   // residuals
+    f64,                          // r2
+    f64,                          // r2_adj
+    usize,                        // n_obs
+    Vec<usize>,                   // n_clusters per cluster dim
+    Vec<String>,                  // final x_names (with _cons if intercept)
+)> {
+    let y_src = y_col.as_slice().unwrap();
+    let n = y_src.len();
+    let has_cluster = !cl_cols.is_empty();
+
+    // Borrow x column slices
+    let x_slices: Vec<&[f64]> = x_cols.iter().map(|a| a.as_slice().unwrap()).collect();
+    let cl_slices: Vec<&[i32]> = cl_cols.iter().map(|a| a.as_slice().unwrap()).collect();
+
+    // Total number of regressors (including intercept)
+    let k_base = x_slices.len();
+    let k = if add_intercept { k_base + 1 } else { k_base };
+
+    // Build X row-major flat
+    let mut x_flat: Vec<f64> = Vec::with_capacity(n * k);
+    for i in 0..n {
+        for j in 0..k_base {
+            x_flat.push(x_slices[j][i]);
+        }
+        if add_intercept {
+            x_flat.push(1.0);
+        }
+    }
+
+    // Copy y
+    let y_vec: Vec<f64> = y_src.to_vec();
+
+    // --- OLS solve: beta = (X'X)^{-1} X'y ---
+    let mut xtx = vec![0.0_f64; k * k];
+    for i in 0..n {
+        let row = &x_flat[i * k..(i + 1) * k];
+        for j in 0..k {
+            for l in j..k {
+                xtx[j * k + l] += row[j] * row[l];
+            }
+        }
+    }
+    for j in 0..k {
+        for l in (j + 1)..k {
+            xtx[l * k + j] = xtx[j * k + l];
+        }
+    }
+
+    let mut xty = vec![0.0_f64; k];
+    for i in 0..n {
+        let row = &x_flat[i * k..(i + 1) * k];
+        let yi = y_vec[i];
+        for j in 0..k {
+            xty[j] += row[j] * yi;
+        }
+    }
+
+    let beta = solve_kxk(&xtx, &xty, k);
+
+    // --- Residuals ---
+    let mut resid = vec![0.0_f64; n];
+    for i in 0..n {
+        let mut pred = 0.0;
+        for j in 0..k {
+            pred += x_flat[i * k + j] * beta[j];
+        }
+        resid[i] = y_vec[i] - pred;
+    }
+
+    // --- R-squared ---
+    let ss_res: f64 = resid.iter().map(|r| r * r).sum();
+    let y_mean: f64 = y_vec.iter().sum::<f64>() / n as f64;
+    let ss_tot: f64 = y_vec.iter().map(|yi| (yi - y_mean) * (yi - y_mean)).sum();
+    let r2 = if ss_tot > 0.0 { 1.0 - ss_res / ss_tot } else { 0.0 };
+
+    // Check for NaN beta (singular matrix) — after residuals so we get
+    // a cleaner error rather than propagating NaN through R² and VCV
+    if beta.iter().any(|v| v.is_nan()) {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>("Singular matrix"));
+    }
+
+    let r2_adj = if (n as f64 - k as f64) > 0.0 {
+        1.0 - (1.0 - r2) * (n as f64 - 1.0) / (n as f64 - k as f64)
+    } else {
+        0.0
+    };
+
+    // --- Variance-covariance ---
+    let xtx_inv = invert_kxk(&xtx, k);
+    let vcov: Vec<f64>;
+    let mut cluster_n_groups: Vec<usize> = Vec::new();
+
+    if has_cluster {
+        // Clustered SE — reuse existing CGM logic
+        let cl_recoded: Vec<(Vec<i32>, usize)> = cl_slices.iter().map(|cl| recode_vec(cl)).collect();
+        for (_, g) in &cl_recoded {
+            cluster_n_groups.push(*g);
+        }
+
+        let d = cl_recoded.len();
+        let mut v_total = vec![0.0_f64; k * k];
+
+        for size in 1..=d {
+            let sign = if size % 2 == 1 { 1.0 } else { -1.0 };
+            for subset in combinations(d, size) {
+                let (codes, g) = if subset.len() == 1 {
+                    cl_recoded[subset[0]].clone()
+                } else {
+                    let arrays: Vec<&[i32]> = subset.iter().map(|&idx| cl_recoded[idx].0.as_slice()).collect();
+                    interaction_codes(&arrays)
+                };
+
+                let meat = clustered_meat_raw(&x_flat, n, k, &resid, &codes, g);
+                let dfc = (g as f64 / (g as f64 - 1.0)) * ((n as f64 - 1.0) / (n as f64 - k as f64));
+
+                let tmp = matmul(&xtx_inv, &meat, k, k, k);
+                let term = matmul(&tmp, &xtx_inv, k, k, k);
+                for idx in 0..(k * k) {
+                    v_total[idx] += sign * dfc * term[idx];
+                }
+            }
+        }
+        vcov = v_total;
+    } else if vcov_type == "iid" {
+        let sigma2 = ss_res / (n - k) as f64;
+        vcov = xtx_inv.iter().map(|v| v * sigma2).collect();
+    } else {
+        // HC0, HC1, HC2, HC3
+        vcov = sandwich_vcov(&x_flat, &resid, &xtx_inv, n, k, &vcov_type);
+    }
+
+    // Build final names
+    let mut final_names = x_names;
+    if add_intercept {
+        final_names.push("_cons".to_string());
+    }
+
+    // Convert outputs to numpy
+    let beta_arr = Array1::from_vec(beta);
+    let mut vcov_arr = Array2::<f64>::zeros((k, k));
+    for j in 0..k {
+        for l in 0..k {
+            vcov_arr[[j, l]] = vcov[j * k + l];
+        }
+    }
+    let resid_arr = Array1::from_vec(resid);
+
+    Ok((
+        beta_arr.into_pyarray(py),
+        vcov_arr.into_pyarray(py),
+        resid_arr.into_pyarray(py),
+        r2,
+        r2_adj,
+        n,
+        cluster_n_groups,
+        final_names,
+    ))
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(rust_demean, m)?)?;
@@ -1287,5 +1985,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(rust_ols_core, m)?)?;
     m.add_function(wrap_pyfunction!(rust_absorbed_dof, m)?)?;
     m.add_function(wrap_pyfunction!(rust_ols_from_arrays, m)?)?;
+    m.add_function(wrap_pyfunction!(rust_ols_nofe, m)?)?;
+    m.add_function(wrap_pyfunction!(rust_iv2sls, m)?)?;
     Ok(())
 }

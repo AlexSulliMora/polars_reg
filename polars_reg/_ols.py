@@ -25,6 +25,9 @@ try:
     from polars_reg._native import (
         rust_ols_from_arrays as _rust_ols_from_arrays,
     )
+    from polars_reg._native import (
+        rust_ols_nofe as _rust_ols_nofe,
+    )
 
     _HAS_NATIVE = True
 except ImportError:
@@ -85,6 +88,83 @@ def _to_codes_fast(series: pl.Series) -> np.ndarray:
     # String/other types: use Polars categorical encoding
     codes = series.cast(pl.Utf8).cast(pl.Categorical).to_physical().to_numpy()
     return codes.astype(np.int32)
+
+
+def _ols_nofe_rust(
+    data: pl.DataFrame | pl.LazyFrame,
+    spec,
+    cluster: list[str] | None,
+    vcov: str,
+) -> RegressionResult:
+    """Rust path for plain OLS (no FE) with all SE types."""
+    if isinstance(data, pl.LazyFrame):
+        all_cols = [spec.depvar] + list(spec.exog)
+        if cluster:
+            all_cols += [c for c in cluster if c not in all_cols]
+        all_cols = list(dict.fromkeys(all_cols))
+        data = data.select(all_cols).collect()
+
+    numeric_cols = [spec.depvar] + list(spec.exog)
+    df = data.drop_nulls(subset=numeric_cols)
+
+    y_col = df[spec.depvar].cast(pl.Float64).to_numpy()
+    x_arrays = [df[c].cast(pl.Float64).to_numpy() for c in spec.exog]
+    x_names = list(spec.exog)
+
+    cl_arrays = []
+    cl_names = []
+    if cluster:
+        for c in cluster:
+            cl_arrays.append(_to_codes_fast(df[c]).astype(np.int32))
+            cl_names.append(c)
+
+    (
+        beta,
+        V,
+        resid,
+        r2,
+        r2_adj,
+        n,
+        cl_n_groups,
+        final_names,
+    ) = _rust_ols_nofe(
+        np.ascontiguousarray(y_col, dtype=np.float64),
+        [np.ascontiguousarray(a, dtype=np.float64) for a in x_arrays],
+        x_names,
+        spec.add_intercept,
+        [np.ascontiguousarray(a, dtype=np.int32) for a in cl_arrays],
+        cl_names,
+        vcov if not cluster else "cluster",
+    )
+
+    beta = np.asarray(beta)
+    V = np.asarray(V)
+    resid = np.asarray(resid)
+    k = len(beta)
+
+    if cluster:
+        n_clusters = {c: g for c, g in zip(cluster, cl_n_groups)}
+        df_r = min(n_clusters.values()) - 1
+        vcov_type = "cluster"
+    else:
+        n_clusters = None
+        df_r = n - k
+        vcov_type = vcov
+
+    return RegressionResult(
+        coefficients=beta,
+        vcov=V,
+        residuals=resid,
+        names=list(final_names),
+        n_obs=n,
+        k=k,
+        df_r=df_r,
+        r_squared=r2,
+        r_squared_adj=r2_adj,
+        model_type="OLS",
+        vcov_type=vcov_type,
+        n_clusters=n_clusters,
+    )
 
 
 def _ols_direct_rust(
@@ -155,6 +235,7 @@ def _ols_direct_rust(
         cl_names,
         1e-8,
         100_000,
+        vcov if not cluster else "cluster",
     )
 
     beta = np.asarray(beta)
@@ -168,11 +249,8 @@ def _ols_direct_rust(
         vcov_type = "cluster"
     else:
         n_clusters = None
-        sigma2 = (resid @ resid) / (n - k - df_abs)
-        XtX_inv = V / ((resid @ resid) / (n - k)) if (n - k) > 0 else V
-        V = sigma2 * XtX_inv
         df_r = n - k - df_abs
-        vcov_type = "iid"
+        vcov_type = vcov
 
     return RegressionResult(
         coefficients=beta,
@@ -299,22 +377,25 @@ def ols(
 
     spec = parse_formula(formula)
 
-    # --- Ultra-fast Rust path: skip extract_arrays entirely ---
-    # Eligible when: FE present, no weights, no interactions/indicators,
-    # simple vcov (iid or cluster), no endog/IV, and native available
-    use_direct = (
+    # --- Rust fast paths: skip extract_arrays entirely ---
+    # Common eligibility: native available, no weights, no interactions/indicators, no endog
+    _rust_eligible = (
         _HAS_NATIVE
-        and spec.fe
         and not weights
         and not fweights
         and not spec.endog
         and not spec.indicators
         and not any(":" in c for c in spec.exog)
-        and vcov not in ("bootstrap", "wildboot", "NW", "DK", "HC2", "HC3")
-        and (cluster or vcov == "iid")
+        and vcov not in ("bootstrap", "wildboot", "NW", "DK")
     )
-    if use_direct:
+
+    # Path 1: FE present — use rust_ols_from_arrays (demean + solve + all SE types)
+    if _rust_eligible and spec.fe and (cluster or vcov in ("iid", "HC0", "HC1", "HC2", "HC3")):
         return _ols_direct_rust(data, spec, cluster, vcov)
+
+    # Path 2: No FE — use rust_ols_nofe (solve + iid/HC0-HC3/cluster SE)
+    if _rust_eligible and not spec.fe and (cluster or vcov in ("iid", "HC0", "HC1", "HC2", "HC3")):
+        return _ols_nofe_rust(data, spec, cluster, vcov)
 
     weight_col = weights or fweights
     arrays = extract_arrays(data, spec, cluster=cluster, time=time, weights=weight_col)
