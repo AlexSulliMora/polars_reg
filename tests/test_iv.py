@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from polars_reg._iv import iv2sls
 from polars_reg._ols import ols
@@ -40,3 +41,34 @@ def test_iv2sls_summary(iv_data):
     result = iv2sls("y ~ x_exog || x_endog ~ z1 + z2", data=iv_data)
     s = result.summary()
     assert "2SLS" in s
+
+
+def test_iv2sls_nw(iv_data_panel):
+    """2SLS with Newey-West HAC standard errors."""
+    result = iv2sls(
+        "y ~ x_exog || x_endog ~ z1 + z2",
+        data=iv_data_panel,
+        vcov="NW",
+        time="year_id",
+    )
+    assert result.vcov_type == "NW"
+    assert len(result.se) > 0
+    assert all(se > 0 for se in result.se)
+
+
+def test_iv2sls_dk(iv_data_panel):
+    """2SLS with Driscoll-Kraay standard errors."""
+    result = iv2sls(
+        "y ~ x_exog || x_endog ~ z1 + z2",
+        data=iv_data_panel,
+        vcov="DK",
+        time="year_id",
+    )
+    assert result.vcov_type == "DK"
+    assert len(result.se) > 0
+
+
+def test_iv2sls_nw_requires_time(iv_data):
+    """NW vcov should raise without time parameter."""
+    with pytest.raises(ValueError, match="requires time"):
+        iv2sls("y ~ x_exog || x_endog ~ z1 + z2", data=iv_data, vcov="NW")

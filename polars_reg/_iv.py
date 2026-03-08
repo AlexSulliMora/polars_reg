@@ -8,6 +8,8 @@ from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
 from polars_reg._se import (
     _clustered_meat,
+    _dk_meat,
+    _hac_meat,
     _interaction_codes,
     _recode_to_contiguous,
     vcov_wild_bootstrap,
@@ -169,6 +171,8 @@ def iv2sls(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    time: str | None = None,
+    bandwidth: int | None = None,
     n_boot: int = 999,
     seed: int | None = None,
 ) -> RegressionResult:
@@ -179,8 +183,10 @@ def iv2sls(
             "y ~ x_exog || x_endog ~ z1 + z2"          (no FE)
             "y ~ x_exog | fe | x_endog ~ z1 + z2"      (with FE)
         data: Polars DataFrame or LazyFrame
-        vcov: "iid", "HC0", "HC1", "bootstrap", or "wildboot"
+        vcov: "iid", "HC0", "HC1", "NW", "DK", "bootstrap", or "wildboot"
         cluster: Column name(s) for clustered SEs. Overrides vcov.
+        time: Column name for time dimension (required for NW/DK).
+        bandwidth: Kernel bandwidth for NW/DK (default: auto).
         n_boot: Bootstrap replications (default 999).
         seed: Random seed for bootstrap reproducibility.
     """
@@ -201,13 +207,13 @@ def iv2sls(
         _HAS_NATIVE
         and not spec.indicators
         and not any(":" in c for c in spec.exog)
-        and vcov not in ("bootstrap", "wildboot")
+        and vcov not in ("bootstrap", "wildboot", "NW", "DK")
         and (cluster or vcov in ("iid", "HC0", "HC1"))
     )
     if _rust_eligible:
         return _iv2sls_rust(data, spec, cluster, vcov)
 
-    arrays = extract_arrays(data, spec, cluster=cluster)
+    arrays = extract_arrays(data, spec, cluster=cluster, time=time)
 
     X_exog = arrays.X
     y = arrays.y
@@ -301,6 +307,20 @@ def iv2sls(
         vcov_type = "cluster"
         n_clusters_dict = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters_dict.values()) - 1
+    elif vcov in ("NW", "DK"):
+        if arrays.time_array is None:
+            raise ValueError(f"vcov='{vcov}' requires time= parameter")
+        score = X_hat * resid[:, None]
+        if vcov == "NW":
+            S = _hac_meat(score, arrays.time_array, bandwidth)
+            dfc = n / (n - k)
+        else:
+            S = _dk_meat(score, arrays.time_array, bandwidth)
+            T = len(np.unique(arrays.time_array))
+            dfc = T / (T - 1)
+        V = dfc * XhX_inv @ S @ XhX_inv
+        vcov_type = vcov
+        df_r = n - k - df_abs
     elif vcov == "bootstrap":
 
         def _iv_fit(X_b, y_b):

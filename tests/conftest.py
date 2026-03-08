@@ -60,3 +60,31 @@ def iv_data() -> pl.DataFrame:
             "z2": z2,
         }
     )
+
+
+@pytest.fixture
+def iv_data_panel() -> pl.DataFrame:
+    """IV dataset with panel structure (entity + time)."""
+    rng = np.random.default_rng(42)
+    n_firms, n_years = 50, 20
+    n = n_firms * n_years
+    firm_id = np.repeat(np.arange(n_firms), n_years)
+    year_id = np.tile(np.arange(n_years), n_firms)
+    z1 = rng.standard_normal(n)
+    z2 = rng.standard_normal(n)
+    u = rng.standard_normal(n)
+    x_endog = 0.5 * z1 + 0.3 * z2 + 0.8 * u
+    x_exog = rng.standard_normal(n)
+    firm_fe = rng.standard_normal(n_firms)
+    y = 1.0 + 2.0 * x_endog + 0.5 * x_exog + firm_fe[firm_id] + u
+    return pl.DataFrame(
+        {
+            "y": y,
+            "x_endog": x_endog,
+            "x_exog": x_exog,
+            "z1": z1,
+            "z2": z2,
+            "firm_id": firm_id,
+            "year_id": year_id,
+        }
+    )
