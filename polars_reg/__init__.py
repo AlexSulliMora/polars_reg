@@ -19,6 +19,7 @@ except ImportError:
     pass
 
 from polars_reg._arellano_bond import panel_ab, panel_sys_gmm
+from polars_reg._plotting import avplot, coefplot
 from polars_reg._binary import logit, marginal_effects, odds_ratios, probit
 from polars_reg._diagnostics import (
     hausman_test,
@@ -27,6 +28,7 @@ from polars_reg._diagnostics import (
     weak_instrument_test,
 )
 from polars_reg._groupby import GroupRegressionResult, groupby_reg
+from polars_reg._ppml import ppml
 from polars_reg._quantile import quantreg
 from polars_reg._regtable import RegTable, regtable
 from polars_reg.r_equiv import compare_r, to_r
@@ -60,4 +62,7 @@ __all__ = [
     "panel_ab",
     "panel_sys_gmm",
     "quantreg",
+    "ppml",
+    "coefplot",
+    "avplot",
 ]

@@ -127,26 +127,100 @@ class RegressionResult:
             raise ValueError("Fitted values not available (model was not stored).")
         return self._y - self.residuals
 
+    def _resolve_term(
+        self, term: str, newdata: pl.DataFrame
+    ) -> NDArray:
+        """Resolve a single term (column name or indicator dummy) to a float array.
+
+        Handles:
+        - ``_cons`` -> ones
+        - ``col=level`` indicator dummies -> binary 0/1
+        - plain column names -> column values
+        """
+        n = len(newdata)
+        if term == "_cons":
+            return np.ones(n, dtype=np.float64)
+        if "=" in term:
+            # Indicator dummy: format is col_name=level_value
+            col_name, level_value = term.split("=", 1)
+            if col_name not in newdata.columns:
+                raise KeyError(
+                    f"Column '{col_name}' (from indicator '{term}') not found in newdata. "
+                    f"Available columns: {newdata.columns}"
+                )
+            return (
+                newdata[col_name].cast(pl.Utf8).to_numpy().astype(str) == level_value
+            ).astype(np.float64)
+        # Plain column
+        if term not in newdata.columns:
+            raise KeyError(
+                f"Column '{term}' not found in newdata. "
+                f"Available columns: {newdata.columns}"
+            )
+        return newdata[term].to_numpy().astype(np.float64)
+
+    def _build_newdata_X(self, newdata: pl.DataFrame) -> NDArray:
+        """Build the design matrix from *newdata* using ``self.names``."""
+        n = len(newdata)
+        x_cols: list[NDArray] = []
+        for name in self.names:
+            if ":" in name:
+                # Interaction term: product of resolved parts.
+                # Each part may be a plain column or an indicator (``col=level``).
+                parts = name.split(":")
+                arr = np.ones(n, dtype=np.float64)
+                for p in parts:
+                    arr = arr * self._resolve_term(p, newdata)
+                x_cols.append(arr)
+            else:
+                x_cols.append(self._resolve_term(name, newdata))
+        return np.column_stack(x_cols) if x_cols else np.empty((n, 0), dtype=np.float64)
+
     def predict(self, newdata: pl.DataFrame | None = None) -> NDArray:
-        """Return predictions. Without newdata, returns in-sample fitted values."""
+        """Return predictions. Without newdata, returns in-sample fitted values.
+
+        Handles plain columns, ``_cons``, indicator dummies (``col=level``),
+        continuous interactions (``x1:x2``), and indicator-continuous
+        interactions (``col=level:x``).
+        """
         if newdata is not None:
-            n = len(newdata)
-            x_cols = []
-            for name in self.names:
-                if name == "_cons":
-                    x_cols.append(np.ones(n))
-                elif ":" in name:
-                    # Interaction term
-                    parts = name.split(":")
-                    arr = np.ones(n)
-                    for p in parts:
-                        arr = arr * newdata[p].to_numpy().astype(np.float64)
-                    x_cols.append(arr)
-                else:
-                    x_cols.append(newdata[name].to_numpy().astype(np.float64))
-            X_new = np.column_stack(x_cols)
+            X_new = self._build_newdata_X(newdata)
             return X_new @ self.coefficients
         return self.fitted()
+
+    def predict_interval(
+        self, newdata: pl.DataFrame, alpha: float = 0.05
+    ) -> dict[str, NDArray]:
+        """Return point predictions with prediction intervals.
+
+        Uses ``Var(pred_i) = x_i' V x_i`` where *V* is the estimated VCV of
+        the coefficients.
+
+        Args:
+            newdata: Polars DataFrame with the same columns as the training data.
+            alpha: Significance level (default 0.05 for 95 % intervals).
+
+        Returns:
+            dict with keys ``fit``, ``se``, ``lower``, ``upper`` as 1-D NumPy arrays.
+        """
+        X_new = self._build_newdata_X(newdata)
+        fit = X_new @ self.coefficients
+
+        # Var(x_i' beta) = x_i' V x_i  for each row i
+        # Efficiently: (X_new @ V) * X_new  summed across columns
+        XnV = X_new @ self.vcov  # (n, k)
+        var_pred = np.sum(XnV * X_new, axis=1)  # (n,)
+        se_pred = np.sqrt(np.maximum(var_pred, 0.0))
+
+        t_crit = stats.t.ppf(1 - alpha / 2, df=self.df_r)
+        margin = t_crit * se_pred
+
+        return {
+            "fit": fit,
+            "se": se_pred,
+            "lower": fit - margin,
+            "upper": fit + margin,
+        }
 
     def coef_table(self) -> pl.DataFrame:
         """Return coefficient table as a Polars DataFrame."""
@@ -256,6 +330,18 @@ class RegressionResult:
             "df": (j, self.df_r),
             "chi2": chi2_stat,
         }
+
+    def coefplot(self, **kwargs):
+        """Coefficient plot with CI whiskers. See :func:`polars_reg._plotting.coefplot`."""
+        from polars_reg._plotting import coefplot
+
+        return coefplot(self, **kwargs)
+
+    def avplot(self, **kwargs):
+        """Added-variable (partial regression) plot. See :func:`polars_reg._plotting.avplot`."""
+        from polars_reg._plotting import avplot
+
+        return avplot(self, **kwargs)
 
     def __repr__(self) -> str:
         return (

@@ -40,18 +40,45 @@ def _strip_indicator(term: str) -> tuple[str, bool]:
 def parse_formula(formula: str) -> FormulaSpec:
     """Parse a formula string into a FormulaSpec.
 
-    Syntax:
-        y ~ x1 + x2                        (OLS)
-        y ~ x1 + x2 | fe1 + fe2            (OLS with absorbed FE)
-        y ~ x1 | fe1 | x_endog ~ z1 + z2   (IV with FE)
-        y ~ x1 + x2 - 1                    (no intercept)
-        y ~ x_exog || x_endog ~ z1          (IV, no FE, empty FE slot)
-        y ~ x1*x2                           (expands to x1 + x2 + x1:x2)
-        y ~ x1:x2                           (interaction term only)
-        y ~ i.x1 + x2                      (x1 as indicator dummies)
-        y ~ i.x1*x2                        (indicator + continuous interaction)
+    The formula uses ``|`` to separate up to three parts:
+
+    1. **Dependent variable ~ exogenous regressors**
+    2. **Fixed effects** (optional, absorbed)
+    3. **Endogenous ~ instruments** (optional, IV)
+
+    Supported syntaxes
+    ------------------
+    ``y ~ x1 + x2``
+        OLS with intercept.
+    ``y ~ x1 + x2 - 1``
+        OLS without intercept.
+    ``y ~ x1 + x2 | fe1 + fe2``
+        OLS with absorbed fixed effects (reghdfe-style).
+    ``y ~ x1 | fe1 | endog ~ z1 + z2``
+        IV (2SLS / LIML / GMM) with one FE and an endogenous variable
+        instrumented by *z1* and *z2* (fixest-style three-part formula).
+    ``y ~ x1 || endog ~ z1 + z2``
+        IV without fixed effects.  The double-pipe ``||`` is shorthand for
+        an empty FE slot: it is normalised to ``| |`` internally so the
+        parser sees three pipe-separated parts with an empty second part.
+    ``y ~ x1 + x2 | | endog ~ z1``
+        Equivalent to the ``||`` form above — the FE slot is explicitly
+        empty (single space between pipes).
+    ``y ~ x1*x2``
+        Interaction expansion: produces ``x1 + x2 + x1:x2``.
+    ``y ~ x1:x2``
+        Interaction term only (no main effects).
+    ``y ~ i.group + x1``
+        Indicator (dummy) variable expansion for *group*.
+    ``y ~ i.group*x``
+        Indicator variable with full interaction expansion.
     """
     formula = formula.strip()
+
+    # Normalise double-pipe shorthand: "||" → "| |" so the split on "|"
+    # produces an explicit empty FE slot between the two pipes.
+    formula = formula.replace("||", "| |")
+
     parts = [p.strip() for p in formula.split("|")]
 
     # First part: depvar ~ exog

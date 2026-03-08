@@ -182,3 +182,47 @@ Accept `pandas.DataFrame` as input — convert to Polars internally, run as norm
 - [x] `quantreg("y ~ x1 + x2", data=df, tau=0.5)` (median regression)
 - [x] Multiple quantiles: tau=[0.25, 0.5, 0.75]
 - [x] Bootstrap SEs for inference
+
+---
+
+## 13. Out-of-Sample Prediction (DONE)
+
+- [x] `result.predict(new_df)` on `RegressionResult`
+- [x] Handle intercept, interactions, indicator dummies (`col=level` format)
+- [x] `result.predict_interval(new_df, alpha=0.05)` — fit, se, lower, upper
+- [x] Indicator-continuous interaction support (`i.group:x1`)
+
+---
+
+## 14. fixest-Style IV Formula Syntax (DONE)
+
+- [x] Explicit `||` pre-processing (normalizes to `| |` before split)
+- [x] Support `y ~ x1 | fe1 | x_endog ~ z1 + z2` (single `|` separators)
+- [x] Both `||` and `| |` produce identical FormulaSpec
+- [x] Comprehensive formula parser tests (28 total)
+
+---
+
+## 15. Poisson Pseudo-Maximum Likelihood (PPML) (DONE)
+
+- [x] `ppml("y ~ x1 + x2", data=df)` via Newton-Raphson/IRLS
+- [x] Robust (HC1) and clustered SEs (sandwich VCV, pseudo-ML)
+- [x] Separation detection (warns on |beta| > 10 or mu > 1e10)
+- [x] Pseudo R² via deviance ratio
+
+---
+
+## 16. Coefficient Plots (DONE)
+
+- [x] `result.coefplot()` — matplotlib coefficient plot with CIs
+- [x] Customizable: variable selection, exclude, horizontal/vertical
+- [x] `coefplot(*results, labels=)` — multi-model overlay
+
+---
+
+## 17. Partial Regression (Added-Variable) Plots (DONE)
+
+- [x] `result.avplot(var)` — added-variable plot for a single regressor
+- [x] Residualize y and x on all other regressors, scatter + fitted line
+- [x] `result.avplot()` — grid of all regressors (skips `_cons`)
+- [x] FWL theorem verified: slope matches full regression coefficient
