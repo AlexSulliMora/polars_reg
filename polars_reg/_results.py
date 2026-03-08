@@ -327,13 +327,13 @@ class RegressionResult:
         }
 
     def coefplot(self, **kwargs):
-        """Coefficient plot with CI whiskers. See :func:`polars_reg._plotting.coefplot`."""
+        """Coefficient plot with CI whiskers (Altair). See :func:`polars_reg._plotting.coefplot`."""
         from polars_reg._plotting import coefplot
 
         return coefplot(self, **kwargs)
 
     def avplot(self, **kwargs):
-        """Added-variable (partial regression) plot. See :func:`polars_reg._plotting.avplot`."""
+        """Added-variable plot (Altair). See :func:`polars_reg._plotting.avplot`."""
         from polars_reg._plotting import avplot
 
         return avplot(self, **kwargs)

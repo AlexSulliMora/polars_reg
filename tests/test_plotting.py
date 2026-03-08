@@ -1,13 +1,9 @@
 import numpy as np
 import pytest
 
-matplotlib = pytest.importorskip("matplotlib")
-matplotlib.use("Agg")
+alt = pytest.importorskip("altair")
 
-import matplotlib.axes  # noqa: E402
-import matplotlib.figure  # noqa: E402
-
-from polars_reg._plotting import avplot, coefplot  # noqa: E402
+from polars_reg._plotting import _partial_residuals, avplot, coefplot  # noqa: E402
 from polars_reg._results import RegressionResult  # noqa: E402
 
 
@@ -54,64 +50,81 @@ def _make_result(names=None, store_Xy=True):
 # --- coefplot tests ---
 
 
-def test_coefplot_returns_axes():
+def test_coefplot_returns_chart():
     res = _make_result()
-    ax = coefplot(res)
-    assert isinstance(ax, matplotlib.axes.Axes)
+    chart = coefplot(res)
+    assert isinstance(chart, (alt.Chart, alt.LayerChart))
 
 
 def test_coefplot_excludes_cons():
     res = _make_result()
-    ax = coefplot(res)
-    # y-axis labels should not contain _cons (horizontal mode)
-    labels = [t.get_text() for t in ax.get_yticklabels()]
-    assert "_cons" not in labels
-    assert "x1" in labels
-    assert "x2" in labels
+    chart = coefplot(res)
+    # Check the underlying data doesn't contain _cons
+    chart_dict = chart.to_dict()
+    # Find data in the spec — look for variable values in datasets
+    found_cons = False
+    for dataset in chart_dict.get("datasets", {}).values():
+        for row in dataset:
+            if row.get("variable") == "_cons":
+                found_cons = True
+    assert not found_cons
 
 
 def test_coefplot_variables_filter():
     res = _make_result()
-    ax = coefplot(res, variables=["x1"])
-    labels = [t.get_text() for t in ax.get_yticklabels()]
-    assert "x1" in labels
-    assert "x2" not in labels
+    chart = coefplot(res, variables=["x1"])
+    chart_dict = chart.to_dict()
+    variables_found = set()
+    for dataset in chart_dict.get("datasets", {}).values():
+        for row in dataset:
+            if "variable" in row:
+                variables_found.add(row["variable"])
+    assert "x1" in variables_found
+    assert "x2" not in variables_found
 
 
 def test_coefplot_exclude_filter():
     res = _make_result()
-    ax = coefplot(res, exclude=["_cons", "x2"])
-    labels = [t.get_text() for t in ax.get_yticklabels()]
-    assert "x1" in labels
-    assert "x2" not in labels
-    assert "_cons" not in labels
+    chart = coefplot(res, exclude=["_cons", "x2"])
+    chart_dict = chart.to_dict()
+    variables_found = set()
+    for dataset in chart_dict.get("datasets", {}).values():
+        for row in dataset:
+            if "variable" in row:
+                variables_found.add(row["variable"])
+    assert "x1" in variables_found
+    assert "x2" not in variables_found
+    assert "_cons" not in variables_found
 
 
 def test_coefplot_multi_model_with_labels():
     res1 = _make_result()
     res2 = _make_result()
-    ax = coefplot(res1, res2, labels=["Model A", "Model B"])
-    assert isinstance(ax, matplotlib.axes.Axes)
-    legend = ax.get_legend()
-    assert legend is not None
-    legend_texts = [t.get_text() for t in legend.get_texts()]
-    assert "Model A" in legend_texts
-    assert "Model B" in legend_texts
+    chart = coefplot(res1, res2, labels=["Model A", "Model B"])
+    assert isinstance(chart, (alt.Chart, alt.LayerChart))
+    chart_dict = chart.to_dict()
+    models_found = set()
+    for dataset in chart_dict.get("datasets", {}).values():
+        for row in dataset:
+            if "model" in row:
+                models_found.add(row["model"])
+    assert "Model A" in models_found
+    assert "Model B" in models_found
 
 
 # --- avplot tests ---
 
 
-def test_avplot_single_variable_returns_axes():
+def test_avplot_single_variable_returns_chart():
     res = _make_result()
-    ax = avplot(res, variable="x1")
-    assert isinstance(ax, matplotlib.axes.Axes)
+    chart = avplot(res, variable="x1")
+    assert isinstance(chart, (alt.Chart, alt.LayerChart))
 
 
-def test_avplot_all_variables_returns_figure():
+def test_avplot_all_variables_returns_concat():
     res = _make_result()
-    fig = avplot(res)
-    assert isinstance(fig, matplotlib.figure.Figure)
+    chart = avplot(res)
+    assert isinstance(chart, (alt.VConcatChart, alt.HConcatChart, alt.ConcatChart))
 
 
 def test_avplot_slope_equals_coefficient():
@@ -125,9 +138,6 @@ def test_avplot_slope_equals_coefficient():
     for j, name in enumerate(names):
         if name == "_cons":
             continue
-        # Get partial residuals
-        from polars_reg._plotting import _partial_residuals
-
         e_y, e_x = _partial_residuals(X, y, j)
 
         # Regress e_y on e_x (simple OLS, no intercept)
@@ -148,25 +158,34 @@ def test_avplot_raises_without_Xy():
 
 def test_avplot_skips_cons_in_grid():
     res = _make_result()
-    fig = avplot(res)
-    # Should produce a figure with 2 subplots (x1, x2) — _cons is skipped
-    visible_axes = [ax for ax in fig.get_axes() if ax.get_visible()]
-    assert len(visible_axes) == 2
-    titles = [ax.get_title() for ax in visible_axes]
-    assert "_cons" not in titles
-    assert "x1" in titles
-    assert "x2" in titles
+    chart = avplot(res)
+    chart_dict = chart.to_dict()
+    # Check no subplot has _cons in its title
+    titles = []
+
+    def _collect_titles(d):
+        if isinstance(d, dict):
+            if "title" in d and isinstance(d["title"], str):
+                titles.append(d["title"])
+            for v in d.values():
+                _collect_titles(v)
+        elif isinstance(d, list):
+            for item in d:
+                _collect_titles(item)
+
+    _collect_titles(chart_dict)
+    assert not any("_cons" in t for t in titles)
 
 
 def test_coefplot_method_on_result():
     """RegressionResult.coefplot() convenience method works."""
     res = _make_result()
-    ax = res.coefplot()
-    assert isinstance(ax, matplotlib.axes.Axes)
+    chart = res.coefplot()
+    assert isinstance(chart, (alt.Chart, alt.LayerChart))
 
 
 def test_avplot_method_on_result():
     """RegressionResult.avplot() convenience method works."""
     res = _make_result()
-    ax = res.avplot(variable="x1")
-    assert isinstance(ax, matplotlib.axes.Axes)
+    chart = res.avplot(variable="x1")
+    assert isinstance(chart, (alt.Chart, alt.LayerChart))
