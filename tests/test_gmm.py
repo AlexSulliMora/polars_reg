@@ -40,3 +40,56 @@ def test_gmm_summary(iv_data):
     s = result.summary()
     assert "GMM" in s
     assert "Hansen J" in s
+
+
+def test_liml_nw(iv_data_panel):
+    """LIML with Newey-West SEs."""
+    from polars_reg._gmm import liml
+
+    result = liml(
+        "y ~ x_exog || x_endog ~ z1 + z2",
+        data=iv_data_panel,
+        vcov="NW",
+        time="year_id",
+    )
+    assert result.vcov_type == "NW"
+    assert all(se > 0 for se in result.se)
+
+
+def test_liml_dk(iv_data_panel):
+    """LIML with Driscoll-Kraay SEs."""
+    from polars_reg._gmm import liml
+
+    result = liml(
+        "y ~ x_exog || x_endog ~ z1 + z2",
+        data=iv_data_panel,
+        vcov="DK",
+        time="year_id",
+    )
+    assert result.vcov_type == "DK"
+
+
+def test_gmm_nw(iv_data_panel):
+    """GMM with Newey-West SEs."""
+    from polars_reg._gmm import gmm_iv
+
+    result = gmm_iv(
+        "y ~ x_exog || x_endog ~ z1 + z2",
+        data=iv_data_panel,
+        vcov="NW",
+        time="year_id",
+    )
+    assert result.vcov_type == "NW"
+
+
+def test_gmm_dk(iv_data_panel):
+    """GMM with Driscoll-Kraay SEs."""
+    from polars_reg._gmm import gmm_iv
+
+    result = gmm_iv(
+        "y ~ x_exog || x_endog ~ z1 + z2",
+        data=iv_data_panel,
+        vcov="DK",
+        time="year_id",
+    )
+    assert result.vcov_type == "DK"

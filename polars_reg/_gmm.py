@@ -9,6 +9,8 @@ from scipy import linalg, stats
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
 from polars_reg._se import (
+    _dk_meat,
+    _hac_meat,
     vcov_clustered,
     vcov_multiway_clustered,
     vcov_pairs_bootstrap,
@@ -23,6 +25,8 @@ def liml(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    time: str | None = None,
+    bandwidth: int | None = None,
     n_boot: int = 999,
     seed: int | None = None,
 ) -> RegressionResult:
@@ -31,8 +35,10 @@ def liml(
     Args:
         formula: IV formula, e.g. "y ~ x_exog || x_endog ~ z1 + z2"
         data: Polars DataFrame or LazyFrame.
-        vcov: "iid", "HC0"-"HC3", "bootstrap", or "wildboot".
+        vcov: "iid", "HC0"-"HC3", "NW", "DK", "bootstrap", or "wildboot".
         cluster: Column name(s) for clustered SEs. Overrides vcov.
+        time: Column name for time dimension (required for NW/DK).
+        bandwidth: Kernel bandwidth for NW/DK (default: auto).
         n_boot: Bootstrap replications (default 999).
         seed: Random seed for bootstrap reproducibility.
     """
@@ -41,7 +47,7 @@ def liml(
     data = ensure_polars(data)
 
     spec = parse_formula(formula)
-    arrays = extract_arrays(data, spec, cluster=cluster)
+    arrays = extract_arrays(data, spec, cluster=cluster, time=time)
 
     y = arrays.y
     X_exog = arrays.X  # includes intercept if add_intercept
@@ -148,6 +154,20 @@ def liml(
         vcov_type = "wildboot"
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1
+    elif vcov in ("NW", "DK"):
+        if arrays.time_array is None:
+            raise ValueError(f"vcov='{vcov}' requires time= parameter")
+        score = X_w * resid[:, None]
+        if vcov == "NW":
+            S = _hac_meat(score, arrays.time_array, bandwidth)
+            dfc = n / (n - k)
+        else:
+            S = _dk_meat(score, arrays.time_array, bandwidth)
+            T = len(np.unique(arrays.time_array))
+            dfc = T / (T - 1)
+        V = dfc * XwX_inv @ S @ XwX_inv
+        vcov_type = vcov
+        df_r = n - k
     elif vcov == "iid":
         sigma2 = resid @ resid / (n - k)
         V = sigma2 * XwX_inv
@@ -179,6 +199,8 @@ def gmm_iv(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    time: str | None = None,
+    bandwidth: int | None = None,
     n_boot: int = 999,
     seed: int | None = None,
 ) -> RegressionResult:
@@ -187,15 +209,19 @@ def gmm_iv(
     Args:
         formula: IV formula, e.g. "y ~ x_exog || x_endog ~ z1 + z2"
         data: Polars DataFrame or LazyFrame.
-        vcov: "iid", "HC0", "HC1", "HC2", or "HC3".
+        vcov: "iid", "HC0", "HC1", "HC2", "HC3", "NW", or "DK".
         cluster: Column name(s) for clustered SEs. Overrides vcov.
+        time: Column name for time dimension (required for NW/DK).
+        bandwidth: Kernel bandwidth for NW/DK (default: auto).
+        n_boot: Bootstrap replications (default 999).
+        seed: Random seed for bootstrap reproducibility.
     """
     if isinstance(cluster, str):
         cluster = [cluster]
     data = ensure_polars(data)
 
     spec = parse_formula(formula)
-    arrays = extract_arrays(data, spec, cluster=cluster)
+    arrays = extract_arrays(data, spec, cluster=cluster, time=time)
 
     y = arrays.y
     X_exog = arrays.X
@@ -312,6 +338,23 @@ def gmm_iv(
         vcov_type = "cluster"
         n_clusters_dict = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters_dict.values()) - 1
+    elif vcov in ("NW", "DK"):
+        if arrays.time_array is None:
+            raise ValueError(f"vcov='{vcov}' requires time= parameter")
+        bread = np.linalg.inv(A_final)
+        XZ_Sinv = XtZ @ S_final_inv
+        score = (XZ_Sinv @ Z.T).T * resid[:, None]  # n x k effective scores
+        if vcov == "NW":
+            S_nw = _hac_meat(score, arrays.time_array, bandwidth)
+            dfc = n / (n - k)
+        else:
+            S_nw = _dk_meat(score, arrays.time_array, bandwidth)
+            T_unique = len(np.unique(arrays.time_array))
+            dfc = T_unique / (T_unique - 1)
+        V = dfc * bread @ S_nw @ bread / (n * n)
+        vcov_type = vcov
+        n_clusters_dict = None
+        df_r = n - k
     else:
         vcov_type = "robust"  # GMM naturally uses heteroskedasticity-robust VCV
         n_clusters_dict = None
