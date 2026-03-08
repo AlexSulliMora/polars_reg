@@ -74,11 +74,17 @@ def _to_codes_fast(series: pl.Series) -> np.ndarray:
     """Convert Polars Series to int32 codes via Rust recode. Minimal overhead path."""
     from polars_reg._native import rust_recode
 
-    arr = series.to_numpy()
-    if arr.dtype != np.int64:
-        arr = arr.astype(np.int64)
-    codes, _ = rust_recode(arr)
-    return np.asarray(codes)
+    dtype = series.dtype
+    if dtype in (
+        pl.Int8, pl.Int16, pl.Int32, pl.Int64,
+        pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64,
+    ):
+        arr = series.to_numpy().astype(np.int64)
+        codes, _ = rust_recode(arr)
+        return np.asarray(codes)
+    # String/other types: use Polars categorical encoding
+    codes = series.cast(pl.Utf8).cast(pl.Categorical).to_physical().to_numpy()
+    return codes.astype(np.int32)
 
 
 def _ols_direct_rust(

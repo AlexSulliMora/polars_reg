@@ -56,11 +56,10 @@ def ensure_polars(data: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFr
     """Convert pandas DataFrame to Polars if needed. Passes through Polars data unchanged."""
     try:
         import pandas as pd
-
-        if isinstance(data, pd.DataFrame):
-            return pl.from_pandas(data)
     except ImportError:
-        pass
+        return data
+    if isinstance(data, pd.DataFrame):
+        return pl.from_pandas(data)
     return data
 
 
