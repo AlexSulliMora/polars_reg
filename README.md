@@ -14,6 +14,9 @@ Econometric regression methods using [Polars](https://pola.rs/) DataFrames. Also
 - **Dynamic panel GMM**: Arellano-Bond (difference GMM) and Blundell-Bond (system GMM)
 - **Probit / Logit** with MLE, marginal effects, and odds ratios
 - **Quantile regression** — median and arbitrary quantiles with bootstrap SEs
+- **PPML** — Poisson pseudo-maximum likelihood for count/gravity models
+- **Coefficient plots** and **added-variable plots** via Altair
+- **Out-of-sample prediction** with `predict()` and `predict_interval()`
 - **Bootstrap SEs** — pairs bootstrap and wild cluster bootstrap (Webb 6-point)
 - **HAC / Driscoll-Kraay** standard errors for time series and panel data
 - **GroupBy regression**: run the same regression per group (e.g., per stock, per industry)
@@ -82,6 +85,20 @@ result = pr.quantreg("y ~ x1 + x2", data=df, tau=0.5)
 result = pr.panel_ab("y ~ x1", data=df, entity="firm_id", time="year_id")
 result = pr.panel_sys_gmm("y ~ x1", data=df, entity="firm_id", time="year_id")
 
+# PPML (Poisson / gravity model)
+result = pr.ppml("count ~ x1 + x2", data=df, cluster=["firm_id"])
+
+# Coefficient plot (interactive Altair chart)
+result.coefplot()
+pr.coefplot(m1, m2, m3, labels=["OLS", "IV", "FE"])
+
+# Added-variable (partial regression) plot
+result.avplot("x1")
+
+# Out-of-sample prediction
+preds = result.predict(new_df)
+intervals = result.predict_interval(new_df, alpha=0.05)  # fit, se, lower, upper
+
 # Access results
 result.coefficients  # coefficient vector
 result.se            # standard errors
@@ -90,6 +107,9 @@ result.pvalue        # p-values
 result.confint()     # confidence intervals
 result.coef_table()  # Polars DataFrame
 result.wald_test(R)  # Wald test for linear restrictions
+result.predict(new_df)   # out-of-sample predictions
+result.coefplot()        # coefficient plot
+result.avplot()          # added-variable plots
 ```
 
 ## Formula Syntax
@@ -122,6 +142,8 @@ result.wald_test(R)  # Wald test for linear restrictions
 | `probit()` | Probit MLE |
 | `logit()` | Logit MLE |
 | `quantreg()` | Quantile regression (IRLS + bootstrap) |
+| `ppml()` | Poisson pseudo-maximum likelihood |
+| `coefplot()` | Coefficient plot with CIs (Altair) |
 | `groupby_reg()` | Run any estimator per group |
 | `regtable()` | Side-by-side regression table |
 | `marginal_effects()` | Probit/logit marginal effects |
@@ -167,3 +189,4 @@ print(pr.to_r("ols", "y ~ x1 + x2 | firm_id", cluster=["firm_id"]))
 - NumPy >= 1.24
 - SciPy >= 1.10
 - pandas (optional — for pandas DataFrame input)
+- Altair (optional — for plotting)
