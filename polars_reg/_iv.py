@@ -28,8 +28,14 @@ def _to_codes_fast(series: pl.Series) -> np.ndarray:
 
     dtype = series.dtype
     if dtype in (
-        pl.Int8, pl.Int16, pl.Int32, pl.Int64,
-        pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64,
+        pl.Int8,
+        pl.Int16,
+        pl.Int32,
+        pl.Int64,
+        pl.UInt8,
+        pl.UInt16,
+        pl.UInt32,
+        pl.UInt64,
     ):
         arr = series.to_numpy().astype(np.int64)
         codes, _ = rust_recode(arr)
@@ -47,8 +53,11 @@ def _iv2sls_rust(
     """Rust fast path for 2SLS IV regression."""
     if isinstance(data, pl.LazyFrame):
         all_cols = (
-            [spec.depvar] + list(spec.exog) + list(spec.endog)
-            + list(spec.instruments) + list(spec.fe)
+            [spec.depvar]
+            + list(spec.exog)
+            + list(spec.endog)
+            + list(spec.instruments)
+            + list(spec.fe)
         )
         if cluster:
             all_cols += [c for c in cluster if c not in all_cols]
@@ -75,8 +84,17 @@ def _iv2sls_rust(
             cl_names.append(c)
 
     (
-        beta, V, resid, r2, r2_adj, first_stage_f,
-        n, df_abs, n_dropped, cl_n_groups, final_names,
+        beta,
+        V,
+        resid,
+        r2,
+        r2_adj,
+        first_stage_f,
+        n,
+        df_abs,
+        n_dropped,
+        cl_n_groups,
+        final_names,
     ) = _rust_iv2sls(
         np.ascontiguousarray(y_col, dtype=np.float64),
         [np.ascontiguousarray(a, dtype=np.float64) for a in x_exog],
@@ -139,9 +157,7 @@ def _iv2sls_rust(
         result._iv_X_exog = np.column_stack(exog_parts) if exog_parts else np.empty((n, 0))
         result._iv_X_endog = np.column_stack([np.asarray(a) for a in x_endog])
         result._iv_Z_excl = np.column_stack([np.asarray(a) for a in z_excl])
-        result._iv_cluster_arrays = (
-            [np.asarray(a) for a in cl_arrays] if cluster else None
-        )
+        result._iv_cluster_arrays = [np.asarray(a) for a in cl_arrays] if cluster else None
     else:
         # Singletons dropped — arrays mismatch, can't stash for KP
         pass
