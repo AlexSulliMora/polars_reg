@@ -1,41 +1,55 @@
 # polars_reg
 
-Econometric regression methods using [Polars](https://pola.rs/) DataFrames. Also accepts pandas DataFrames.
+Fast econometric regressions for Python, built on [Polars](https://pola.rs/) and Rust. Covers OLS, IV, panel, and limited-dependent-variable models with robust and clustered standard errors — validated against Stata and R to 5+ decimal places. Also accepts pandas DataFrames.
+
+The computational backend is written in Rust (via PyO3), with parallel demeaning and sandwich estimators powered by Rayon. On fixed-effects and clustered models, polars_reg matches or beats R/fixest and is 2–8× faster than statsmodels, pyfixest, and linearmodels.
 
 ## Features
 
-- **OLS** with robust (HC0-HC3) and multi-way clustered standard errors
-- **High-dimensional fixed effects** absorption (reghdfe-style iterative demeaning)
-- **Weighted Least Squares** — analytic weights (`weights=`) and frequency weights (`fweights=`)
-- **2SLS / IV** with first-stage F-statistics and weak instrument diagnostics
-- **LIML** (limited information maximum likelihood)
-- **GMM-IV** with Hansen J overidentification test
-- **Panel estimators**: fixed effects (within), random effects (Swamy-Arora GLS), first-difference
-- **Dynamic panel GMM**: Arellano-Bond (difference GMM) and Blundell-Bond (system GMM)
-- **Probit / Logit** with MLE, marginal effects, and odds ratios
-- **Quantile regression** — median and arbitrary quantiles with bootstrap SEs
-- **PPML** — Poisson pseudo-maximum likelihood for count/gravity models
-- **Coefficient plots** and **added-variable plots** via Altair
-- **Out-of-sample prediction** with `predict()` and `predict_interval()`
-- **Bootstrap SEs** — pairs bootstrap and wild cluster bootstrap (Webb 6-point)
-- **HAC / Driscoll-Kraay** standard errors for time series and panel data
-- **GroupBy regression**: run the same regression per group (e.g., per stock, per industry)
-- **regtable**: side-by-side regression comparison tables (estout/esttab-style), with LaTeX and HTML export
-- **Diagnostics**: Wald test, Hausman test (FE vs RE), Kleibergen-Paap, Stock-Yogo weak IV
-- **Stata/R equivalence**: generate equivalent Stata or R code for any specification
+### Regression Estimators
 
-All estimators are validated against Stata output to 5+ decimal places.
+- **OLS / WLS** — analytic weights (`weights=`) and frequency weights (`fweights=`)
+- **High-dimensional fixed effects** — reghdfe-style absorption via iterative demeaning
+- **2SLS / IV** with first-stage F-statistics and weak instrument diagnostics
+- **LIML** — limited information maximum likelihood
+- **GMM-IV** — two-step efficient GMM with Hansen J test
+- **Panel**: fixed effects (within), random effects (Swamy-Arora GLS), first-difference
+- **Dynamic panel GMM**: Arellano-Bond (difference GMM) and Blundell-Bond (system GMM)
+- **Probit / Logit** — MLE with marginal effects and odds ratios
+- **Quantile regression** — median and arbitrary quantiles via IRLS
+- **PPML** — Poisson pseudo-maximum likelihood for count/gravity models
+
+### Standard Errors
+
+- **Robust** — HC0, HC1 (Stata's `robust`), HC2, HC3
+- **Clustered** — one-way and multi-way (Cameron-Gelbach-Miller)
+- **HAC** — Newey-West for time series
+- **Driscoll-Kraay** — robust to cross-sectional dependence in panels
+- **Bootstrap** — pairs bootstrap and wild cluster bootstrap (Webb 6-point)
+
+### Convenience Features
+
+- **GroupBy regression** — run any estimator per group (e.g., per stock or industry)
+- **regtable** — side-by-side regression tables (estout/esttab-style) with LaTeX and HTML export
+- **Coefficient plots** and **added-variable plots** via Altair
+- **Diagnostics** — Wald test, Hausman test (FE vs RE), Kleibergen-Paap, Stock-Yogo weak IV
+- **Formula API** with interaction terms (`x1*x2`, `x1:x2`) and indicator expansion (`i.group`)
+
+### Validation
+
+- **Stata equivalence** — `to_stata()` generates the matching Stata command for any specification
+- **R equivalence** — `to_r()` generates the matching fixest/lm call
+- **Automated comparison** — `compare_stata()` and `compare_r()` run the command and diff coefficients
 
 ## Performance
 
 ![Benchmarks](benchmarks/benchmark_chart.png)
 
-Wall-clock time across dataset sizes (1K–1M rows), compared to statsmodels, pyfixest, linearmodels, R/fixest, and Stata. Key findings:
+Wall-clock time across dataset sizes (1K–1M rows), compared to statsmodels, pyfixest, linearmodels, R/fixest, and Stata:
 
-- **Plain OLS**: statsmodels and Stata are faster at small N (lower overhead); R/fixest is competitive throughout
-- **Fixed effects + clustering**: polars_reg and R/fixest are fastest; both 2-5x faster than pyfixest, 4-8x faster than linearmodels
-- **2SLS / IV**: polars_reg is 4-6x faster than linearmodels across all scales
-- **High-dimensional FE** (5K groups + 2-way clustering): polars_reg and R/fixest scale well; Stata BE slows at large N (single-threaded)
+- **Plain OLS**: statsmodels is faster below ~100K rows due to lower call overhead
+- **FE, IV, and clustered models**: polars_reg is consistently faster than other Python packages, especially at smaller N
+- **At large N**: performance converges with R/fixest — the difference between the two is roughly negligible
 
 Reproduce with `python benchmarks/generate_chart.py` (requires R with fixest; Stata optional).
 
