@@ -125,18 +125,16 @@ def test_extract_arrays_nan_in_fe():
 
 
 def test_extract_arrays_inf_in_x():
-    """Inf values in x should raise ValueError after all rows are dropped."""
+    """Inf values in x are converted to null and dropped alongside NaN."""
     rng = np.random.default_rng(103)
     x1 = rng.standard_normal(10)
     x1[0] = np.inf
     x1[1] = -np.inf
     df = pl.DataFrame({"y": rng.standard_normal(10), "x1": x1})
     spec = FormulaSpec(depvar="y", exog=["x1"], add_intercept=True)
-    # Inf is not NaN, so it will pass through. The arrays should still have Inf.
-    # This tests that the code doesn't silently eat Inf. Users should clean data.
     arrays = extract_arrays(df, spec)
-    assert arrays.n_obs == 10  # Inf is not dropped
-    assert np.any(np.isinf(arrays.X))
+    assert arrays.n_obs == 8  # Inf rows are dropped
+    assert not np.any(np.isinf(arrays.X))
 
 
 # ── Empty / minimal DataFrame ──────────────────────────────────

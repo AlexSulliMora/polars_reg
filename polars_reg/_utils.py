@@ -72,6 +72,22 @@ def ensure_polars(data: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFr
     return data
 
 
+def sanitize_inf(df: pl.DataFrame, cols: list[str]) -> pl.DataFrame:
+    """Convert inf/-inf and NaN to null in float columns for uniform null-drop."""
+    float_cols = [c for c in cols if df[c].dtype.is_float()]
+    if float_cols:
+        df = df.with_columns(
+            [
+                pl.when(pl.col(c).is_nan() | pl.col(c).is_infinite())
+                .then(None)
+                .otherwise(pl.col(c))
+                .alias(c)
+                for c in float_cols
+            ]
+        )
+    return df
+
+
 @dataclass
 class ExtractedArrays:
     y: np.ndarray
@@ -144,12 +160,15 @@ def extract_arrays(
         numeric_cols.append(time)
     numeric_cols = list(dict.fromkeys(numeric_cols))  # dedupe preserving order
 
-    # Convert IEEE NaN to Polars null (NaN passes through drop_nulls silently)
+    # Convert IEEE NaN and inf/-inf to Polars null (they pass through drop_nulls silently)
     float_cols = [c for c in numeric_cols if df[c].dtype.is_float()]
     if float_cols:
         df = df.with_columns(
             [
-                pl.when(pl.col(c).is_nan()).then(None).otherwise(pl.col(c)).alias(c)
+                pl.when(pl.col(c).is_nan() | pl.col(c).is_infinite())
+                .then(None)
+                .otherwise(pl.col(c))
+                .alias(c)
                 for c in float_cols
             ]
         )

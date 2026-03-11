@@ -16,7 +16,7 @@ from polars_reg._se import (
     vcov_robust,
     vcov_wild_bootstrap,
 )
-from polars_reg._utils import ensure_polars, extract_arrays
+from polars_reg._utils import ensure_polars, extract_arrays, sanitize_inf
 
 try:
     from polars_reg._native import (
@@ -111,7 +111,15 @@ def _ols_nofe_rust(
         data = data.select(all_cols).collect()
 
     numeric_cols = [spec.depvar] + list(spec.exog)
+    if cluster:
+        numeric_cols = list(dict.fromkeys(numeric_cols + cluster))
+    data = sanitize_inf(data, numeric_cols)
     df = data.drop_nulls(subset=numeric_cols)
+    if len(df) == 0:
+        raise ValueError(
+            "No observations remain after dropping nulls. "
+            "Check for missing data in columns: " + ", ".join(numeric_cols)
+        )
 
     y_col = df[spec.depvar].cast(pl.Float64).to_numpy()
     x_arrays = [df[c].cast(pl.Float64).to_numpy() for c in spec.exog]
@@ -190,9 +198,17 @@ def _ols_direct_rust(
         all_cols = list(dict.fromkeys(all_cols))
         data = data.select(all_cols).collect()
 
-    # Drop nulls on numeric columns only
+    # Drop nulls on numeric columns (after sanitizing inf/-inf)
     numeric_cols = [spec.depvar] + list(spec.exog)
+    if cluster:
+        numeric_cols = list(dict.fromkeys(numeric_cols + cluster))
+    data = sanitize_inf(data, numeric_cols)
     df = data.drop_nulls(subset=numeric_cols)
+    if len(df) == 0:
+        raise ValueError(
+            "No observations remain after dropping nulls. "
+            "Check for missing data in columns: " + ", ".join(numeric_cols)
+        )
 
     # Extract y as f64
     y_col = df[spec.depvar].cast(pl.Float64).to_numpy()

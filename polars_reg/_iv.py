@@ -14,7 +14,7 @@ from polars_reg._se import (
     _recode_to_contiguous,
     vcov_wild_bootstrap,
 )
-from polars_reg._utils import ensure_polars, extract_arrays
+from polars_reg._utils import ensure_polars, extract_arrays, sanitize_inf
 
 try:
     from polars_reg._native import rust_iv2sls as _rust_iv2sls
@@ -69,7 +69,15 @@ def _iv2sls_rust(
         data = data.select(all_cols).collect()
 
     numeric_cols = [spec.depvar] + list(spec.exog) + list(spec.endog) + list(spec.instruments)
+    if cluster:
+        numeric_cols = list(dict.fromkeys(numeric_cols + cluster))
+    data = sanitize_inf(data, numeric_cols)
     df = data.drop_nulls(subset=numeric_cols)
+    if len(df) == 0:
+        raise ValueError(
+            "No observations remain after dropping nulls. "
+            "Check for missing data in columns: " + ", ".join(numeric_cols)
+        )
 
     y_col = df[spec.depvar].cast(pl.Float64).to_numpy()
     x_exog = [df[c].cast(pl.Float64).to_numpy() for c in spec.exog]
