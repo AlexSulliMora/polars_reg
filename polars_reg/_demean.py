@@ -191,11 +191,22 @@ def _demean_cg(
         x += alpha * u
         r -= alpha * v
         ssr_new = np.sum(r * r)
+        if not np.isfinite(ssr_new):
+            raise ValueError(
+                "Demeaning diverged (numerical overflow). "
+                "Check for near-collinear fixed effects or degenerate data."
+            )
         beta = ssr_new / ssr
         u = r + beta * u
         ssr = ssr_new
     else:
         warnings.warn(f"Demeaning did not converge after {max_iter} iterations")
+
+    if not np.all(np.isfinite(x)):
+        raise ValueError(
+            "Demeaning produced non-finite values. "
+            "Check for collinear fixed effects or degenerate data."
+        )
 
     return x
 
@@ -219,6 +230,15 @@ def drop_singletons(fe_dict: dict[str, NDArray]) -> NDArray:
     return keep
 
 
+def reindex_fe_codes(fe_dict: dict[str, NDArray]) -> dict[str, NDArray]:
+    """Re-index FE codes to be contiguous (0, 1, 2, ...) after filtering.
+
+    Must be called after applying a drop_singletons mask to avoid phantom
+    zero-count groups that cause numerical instability in the CG demeaner.
+    """
+    return {k: np.unique(v, return_inverse=True)[1] for k, v in fe_dict.items()}
+
+
 def absorbed_dof(fe_dict: dict[str, NDArray]) -> int:
     """Count degrees of freedom absorbed by fixed effects.
 
@@ -227,14 +247,14 @@ def absorbed_dof(fe_dict: dict[str, NDArray]) -> int:
     multipartite graph (offset each FE dimension into a single node space,
     build edges between all pairs at each observation, count components once).
     """
-    if _HAS_NATIVE:
-        fe_codes_list = [np.ascontiguousarray(v, dtype=np.int32) for v in fe_dict.values()]
-        return _rust_absorbed_dof(fe_codes_list)
-
     fe_list = list(fe_dict.values())
 
     if not fe_list or len(fe_list[0]) == 0:
         return 0
+
+    if _HAS_NATIVE:
+        fe_codes_list = [np.ascontiguousarray(v, dtype=np.int32) for v in fe_list]
+        return _rust_absorbed_dof(fe_codes_list)
 
     n_groups = [int(codes.max()) + 1 for codes in fe_list]
     total_groups = sum(n_groups)

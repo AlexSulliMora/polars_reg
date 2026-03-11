@@ -250,3 +250,33 @@ def test_parse_formula_empty_lhs():
     """Empty LHS produces an empty depvar string."""
     spec = parse_formula("~ x1 + x2")
     assert spec.depvar == ""
+
+
+# ── Additional error-path tests ─────────────────────────────────
+
+
+def test_formula_empty_string():
+    """Empty formula string raises ValueError."""
+    with pytest.raises((ValueError, IndexError)):
+        parse_formula("")
+
+
+def test_formula_no_rhs():
+    """Formula with empty RHS produces empty exog list."""
+    spec = parse_formula("y ~")
+    assert spec.depvar == "y"
+    assert spec.exog == []
+    assert spec.add_intercept is True
+
+
+def test_formula_duplicate_vars():
+    """Duplicate variables in formula are deduplicated."""
+    spec = parse_formula("y ~ x1 + x1")
+    assert spec.exog.count("x1") == 1
+
+
+def test_formula_special_chars_in_names():
+    """Column names with underscores and numbers parse correctly."""
+    spec = parse_formula("y ~ var_1 + x2 + col_name_3")
+    assert spec.depvar == "y"
+    assert spec.exog == ["var_1", "x2", "col_name_3"]

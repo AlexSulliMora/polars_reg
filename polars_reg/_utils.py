@@ -108,6 +108,14 @@ def extract_arrays(
         all_cols.append(weights)
     all_cols = list(dict.fromkeys(all_cols))  # dedupe preserving order
 
+    # Early guard: reject empty DataFrames before any processing
+    if isinstance(df, pl.LazyFrame):
+        row_count = df.select(pl.len()).collect().item()
+    else:
+        row_count = len(df)
+    if row_count == 0:
+        raise ValueError("DataFrame has no observations")
+
     # Push column selection into LazyFrame before collecting (avoids materializing unused columns)
     if isinstance(df, pl.LazyFrame):
         df = df.select(all_cols).collect()
@@ -130,6 +138,15 @@ def extract_arrays(
     if time:
         numeric_cols.append(time)
     numeric_cols = list(dict.fromkeys(numeric_cols))  # dedupe preserving order
+
+    # Convert IEEE NaN to Polars null (NaN passes through drop_nulls silently)
+    float_cols = [c for c in numeric_cols if df[c].dtype.is_float()]
+    if float_cols:
+        df = df.with_columns([
+            pl.when(pl.col(c).is_nan()).then(None).otherwise(pl.col(c)).alias(c)
+            for c in float_cols
+        ])
+
     df_clean = df.drop_nulls(subset=numeric_cols)
 
     if len(df_clean) == 0:

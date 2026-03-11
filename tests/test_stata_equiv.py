@@ -118,6 +118,12 @@ def test_to_stata_unknown_estimator():
         to_stata("bad_estimator", "y ~ x1")
 
 
+def test_to_stata_unsupported_estimator():
+    """to_stata() with an unsupported estimator name raises ValueError."""
+    with pytest.raises(ValueError, match="Unknown estimator"):
+        to_stata("probit", "y ~ x1")
+
+
 def test_to_stata_panel_fe_no_entity():
     with pytest.raises(ValueError, match="entity"):
         to_stata("panel_fe", "y ~ x1")

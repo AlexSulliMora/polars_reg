@@ -156,3 +156,24 @@ def test_groupby_iv(grouped_data):
     )
     result = pr.groupby_reg(pr.iv2sls, "y ~ 1 || x_end ~ z1 + z2", df, group_by="group")
     assert len(result) == 3
+
+
+# ── Additional robustness tests ───────────────────────────────────
+
+
+def test_groupby_group_fewer_obs_than_params():
+    """Group with N < k handled gracefully (fails, not crashes)."""
+    rng = np.random.default_rng(42)
+    # Group A has only 1 obs but 3 params (x1, x2, _cons) -> singular
+    df = pl.DataFrame(
+        {
+            "y": [1.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+            "x1": rng.standard_normal(7).tolist(),
+            "x2": rng.standard_normal(7).tolist(),
+            "group": ["A", "B", "B", "B", "B", "B", "B"],
+        }
+    )
+    result = pr.groupby_reg(pr.ols, "y ~ x1 + x2", df, group_by="group")
+    # Group A should fail (N=1 < k=3), group B should succeed (N=6 >= k=3)
+    assert "B" in result
+    assert "A" in result.failed

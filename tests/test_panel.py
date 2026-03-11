@@ -1,5 +1,6 @@
 import numpy as np
 import polars as pl
+import pytest
 
 from polars_reg._ols import ols
 from polars_reg._panel import panel_fd, panel_fe, panel_re
@@ -208,3 +209,137 @@ def test_panel_fd_manual_check():
     # b = 1, a = 3 - 1*1.5 = 1.5
     np.testing.assert_allclose(result.coefficients[0], 1.0, atol=1e-10)  # x coef
     np.testing.assert_allclose(result.coefficients[1], 1.5, atol=1e-10)  # intercept
+
+
+# ── Additional robustness tests ───────────────────────────────────
+
+
+def test_panel_fe_single_entity():
+    """Panel with 1 entity, many time periods (entity FE only)."""
+    rng = np.random.default_rng(42)
+    n = 50
+    df = pl.DataFrame(
+        {
+            "y": rng.standard_normal(n),
+            "x1": rng.standard_normal(n),
+            "entity": np.zeros(n, dtype=int),
+        }
+    )
+    # Entity-only FE (no time FE) -- single entity means FE just demeans
+    result = panel_fe("y ~ x1", data=df, entity="entity", cluster=[])
+    assert result.n_obs == n
+    assert result.model_type == "Panel FE"
+    assert len(result.coefficients) == 1
+
+
+def test_panel_fe_nan_in_entity():
+    """NaN in entity column is handled by dropping those rows."""
+    rng = np.random.default_rng(42)
+    n = 100
+    entity = np.repeat(np.arange(10), 10).astype(float)
+    entity[0] = np.nan  # inject NaN into entity column
+    df = pl.DataFrame(
+        {
+            "y": rng.standard_normal(n),
+            "x1": rng.standard_normal(n),
+            "entity": entity,
+            "time": np.tile(np.arange(10), 10),
+        }
+    )
+    result = panel_fe("y ~ x1", data=df, entity="entity", time="time")
+    # One observation dropped due to NaN in entity
+    assert result.n_obs < n
+
+
+def test_panel_re_lazyframe():
+    """LazyFrame input works for panel_re."""
+    rng = np.random.default_rng(42)
+    n_firms, n_years = 20, 10
+    n = n_firms * n_years
+    df = pl.DataFrame(
+        {
+            "y": rng.standard_normal(n),
+            "x1": rng.standard_normal(n),
+            "entity": np.repeat(np.arange(n_firms), n_years),
+            "time": np.tile(np.arange(n_years), n_firms),
+        }
+    )
+    lazy = df.lazy()
+    result = panel_re("y ~ x1", data=lazy, entity="entity")
+    assert result.model_type == "Panel RE"
+    assert result.n_obs == n
+
+
+def test_panel_fd_two_periods_only():
+    """T=2 minimum viable first-difference."""
+    rng = np.random.default_rng(42)
+    n_entities = 30
+    df = pl.DataFrame(
+        {
+            "y": rng.standard_normal(n_entities * 2),
+            "x1": rng.standard_normal(n_entities * 2),
+            "entity": np.repeat(np.arange(n_entities), 2),
+            "time": np.tile([0, 1], n_entities),
+        }
+    )
+    result = panel_fd("y ~ x1", data=df, entity="entity", time="time")
+    assert result.model_type == "Panel FD"
+    # With T=2, lose 1 obs per entity
+    assert result.n_obs == n_entities
+
+
+def test_panel_fe_iid_se_explicit(panel_data):
+    """cluster=[] forces iid SEs in panel_fe."""
+    result = panel_fe("y ~ x1 + x2", data=panel_data, entity="firm_id", cluster=[])
+    assert result.vcov_type == "iid"
+
+
+def test_panel_unbalanced_extreme():
+    """Unbalanced panel: some entities 2 obs, others 50."""
+    rng = np.random.default_rng(42)
+    rows = []
+    entity_id = []
+    time_id = []
+    idx = 0
+    # 10 entities with 2 obs each
+    for e in range(10):
+        for t in range(2):
+            entity_id.append(e)
+            time_id.append(t)
+            idx += 1
+    # 5 entities with 50 obs each
+    for e in range(10, 15):
+        for t in range(50):
+            entity_id.append(e)
+            time_id.append(t)
+            idx += 1
+    n = len(entity_id)
+    df = pl.DataFrame(
+        {
+            "y": rng.standard_normal(n),
+            "x1": rng.standard_normal(n),
+            "entity": entity_id,
+            "time": time_id,
+        }
+    )
+    result = panel_fe("y ~ x1", data=df, entity="entity", time="time")
+    assert result.model_type == "Panel FE"
+    assert result.n_obs > 0
+
+
+def test_panel_fd_iid_vcov():
+    """panel_fd with vcov='iid' works correctly."""
+    rng = np.random.default_rng(42)
+    n_entities, n_times = 30, 10
+    n = n_entities * n_times
+    df = pl.DataFrame(
+        {
+            "y": rng.standard_normal(n),
+            "x1": rng.standard_normal(n),
+            "entity": np.repeat(np.arange(n_entities), n_times),
+            "time": np.tile(np.arange(n_times), n_entities),
+        }
+    )
+    result = panel_fd("y ~ x1", data=df, entity="entity", time="time", vcov="iid", cluster=[])
+    assert result.vcov_type == "iid"
+    assert np.all(result.se > 0)

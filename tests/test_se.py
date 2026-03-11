@@ -8,6 +8,7 @@ from polars_reg._se import (
     vcov_hac,
     vcov_iid,
     vcov_multiway_clustered,
+    vcov_pairs_bootstrap,
     vcov_robust,
 )
 
@@ -191,3 +192,109 @@ def test_hac_meat_standalone():
     V_manual = dfc * XtX_inv @ meat @ XtX_inv
     V_func = vcov_hac(X, resid, time_ids, bandwidth=5)
     np.testing.assert_allclose(V_manual, V_func, rtol=1e-12)
+
+
+def test_vcov_clustered_single_group():
+    """G=1 raises ValueError."""
+    rng = np.random.default_rng(42)
+    n = 20
+    X = np.column_stack([rng.standard_normal(n), np.ones(n)])
+    resid = rng.standard_normal(n)
+    clusters = np.zeros(n, dtype=np.int32)  # all same group
+    with pytest.raises(ValueError, match="at least 2 cluster groups"):
+        vcov_clustered(X, resid, clusters)
+
+
+def test_vcov_clustered_singleton_cluster():
+    """One cluster group with single obs, rest normal."""
+    rng = np.random.default_rng(42)
+    n = 21
+    X = np.column_stack([rng.standard_normal(n), np.ones(n)])
+    resid = rng.standard_normal(n)
+    clusters = np.repeat(np.arange(3), 7)  # 3 groups of 7
+    # Make one group have a single observation
+    clusters = np.concatenate([np.zeros(1, dtype=int), np.repeat([1, 2], 10)])
+    X = np.column_stack([rng.standard_normal(n), np.ones(n)])
+    resid = rng.standard_normal(n)
+    V = vcov_clustered(X, resid, clusters)
+    assert V.shape == (2, 2)
+    assert np.all(np.isfinite(V))
+
+
+def test_vcov_multiway_two_identical_dims():
+    """Two identical cluster arrays."""
+    rng = np.random.default_rng(42)
+    n = 100
+    X = np.column_stack([rng.standard_normal(n), np.ones(n)])
+    resid = rng.standard_normal(n)
+    clusters = np.repeat(np.arange(10), 10)
+    V = vcov_multiway_clustered(X, resid, [clusters, clusters.copy()])
+    # With two identical dims: V = V_A + V_A - V_{A*A} = 2*V_A - V_A = V_A
+    V_single = vcov_clustered(X, resid, clusters)
+    np.testing.assert_allclose(V, V_single, rtol=1e-10)
+
+
+def test_vcov_hac_single_time():
+    """T=1 for HAC should still produce a result (degenerate but finite)."""
+    rng = np.random.default_rng(42)
+    n = 20
+    X = np.column_stack([rng.standard_normal(n), np.ones(n)])
+    resid = rng.standard_normal(n)
+    time_ids = np.zeros(n)  # all same time period
+    V = vcov_hac(X, resid, time_ids)
+    assert V.shape == (2, 2)
+    assert np.all(np.isfinite(V))
+
+
+def test_vcov_dk_single_time():
+    """T=1 for DK raises ValueError."""
+    rng = np.random.default_rng(42)
+    n = 20
+    X = np.column_stack([rng.standard_normal(n), np.ones(n)])
+    resid = rng.standard_normal(n)
+    time_ids = np.zeros(n)  # all same time period
+    with pytest.raises(ValueError, match="at least 2 time periods"):
+        vcov_driscoll_kraay(X, resid, time_ids)
+
+
+def test_vcov_all_variants_finite():
+    """Create clean X/resid data, call iid/HC0/HC1/HC2/HC3, all finite."""
+    rng = np.random.default_rng(42)
+    n = 50
+    X = np.column_stack([rng.standard_normal(n), np.ones(n)])
+    y = 2.0 + 3.0 * X[:, 0] + rng.standard_normal(n) * 0.5
+    beta = np.linalg.solve(X.T @ X, X.T @ y)
+    resid = y - X @ beta
+
+    V_iid = vcov_iid(X, resid)
+    assert np.all(np.isfinite(V_iid))
+
+    for kind in ["HC0", "HC1", "HC2", "HC3"]:
+        V = vcov_robust(X, resid, kind=kind)
+        assert np.all(np.isfinite(V)), f"{kind} produced non-finite values"
+
+
+def test_vcov_hc2_high_leverage():
+    """X matrix near-singular, hat diagonal near 1."""
+    rng = np.random.default_rng(42)
+    n = 10
+    k = 8  # high leverage: k close to n
+    X = rng.standard_normal((n, k))
+    y = rng.standard_normal(n)
+    beta = np.linalg.lstsq(X, y, rcond=None)[0]
+    resid = y - X @ beta
+    V = vcov_robust(X, resid, kind="HC2")
+    assert V.shape == (k, k)
+    # May have large values but should be finite
+    assert np.all(np.isfinite(V))
+
+
+def test_vcov_bootstrap_small_n():
+    """N=5, k=3, bootstrap handles gracefully."""
+    rng = np.random.default_rng(42)
+    n, k = 5, 3
+    X = rng.standard_normal((n, k))
+    y = rng.standard_normal(n)
+    V = vcov_pairs_bootstrap(X, y, n_boot=999, seed=42)
+    assert V.shape == (k, k)
+    assert np.all(np.isfinite(V))

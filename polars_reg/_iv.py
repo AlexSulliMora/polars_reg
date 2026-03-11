@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import polars as pl
 
-from polars_reg._demean import absorbed_dof, demean, drop_singletons
+from polars_reg._demean import absorbed_dof, demean, drop_singletons, reindex_fe_codes
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
 from polars_reg._se import (
@@ -231,11 +231,14 @@ def iv2sls(
     if has_fe:
         keep = drop_singletons(fe_dict)
         if not keep.all():
+            if keep.sum() == 0:
+                raise ValueError("All observations dropped as singletons")
             y = y[keep]
             X_exog = X_exog[keep]
             X_endog = X_endog[keep]
             Z_excl = Z_excl[keep]
             fe_dict = {k: v[keep] for k, v in fe_dict.items()}
+            fe_dict = reindex_fe_codes(fe_dict)
             if cluster:
                 arrays.cluster_arrays = {k: v[keep] for k, v in arrays.cluster_arrays.items()}
 
@@ -285,7 +288,12 @@ def iv2sls(
 
     XhX = X_hat.T @ X
     Xhy = X_hat.T @ y
-    beta = np.linalg.solve(XhX, Xhy)
+    try:
+        beta = np.linalg.solve(XhX, Xhy)
+    except np.linalg.LinAlgError:
+        raise ValueError(
+            "Design matrix is singular. Check for perfect collinearity among regressors."
+        )
 
     resid = y - X @ beta
 

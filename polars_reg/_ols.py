@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import polars as pl
 
-from polars_reg._demean import absorbed_dof, demean, drop_singletons
+from polars_reg._demean import absorbed_dof, demean, drop_singletons, reindex_fe_codes
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
 from polars_reg._se import (
@@ -452,9 +452,12 @@ def ols(
         # Drop singletons
         keep = drop_singletons(fe_dict)
         if not keep.all():
+            if keep.sum() == 0:
+                raise ValueError("All observations dropped as singletons")
             y = y[keep]
             X = X[keep]
             fe_dict = {k: v[keep] for k, v in fe_dict.items()}
+            fe_dict = reindex_fe_codes(fe_dict)
             if w is not None:
                 w = w[keep]
             if fw is not None:
@@ -495,7 +498,12 @@ def ols(
         Xw, yw = X, y
 
     # Solve: beta = (Xw'Xw)^{-1} Xw'yw
-    beta = np.linalg.solve(Xw.T @ Xw, Xw.T @ yw)
+    try:
+        beta = np.linalg.solve(Xw.T @ Xw, Xw.T @ yw)
+    except np.linalg.LinAlgError:
+        raise ValueError(
+            "Design matrix is singular. Check for perfect collinearity among regressors."
+        )
     resid_w = yw - Xw @ beta  # weighted residuals (for SE computation)
     resid = y - X @ beta  # unweighted residuals (for output)
 

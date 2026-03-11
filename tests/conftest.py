@@ -88,3 +88,30 @@ def iv_data_panel() -> pl.DataFrame:
             "year_id": year_id,
         }
     )
+
+
+@pytest.fixture
+def messy_data():
+    """DataFrame with nulls, extreme values, singletons, and mixed types."""
+    rng = np.random.default_rng(777)
+    n = 500
+    fe1_values = rng.integers(0, 50, size=n)
+    fe1_values[:3] = [997, 998, 999]  # Force singletons
+    df = pl.DataFrame({
+        "y": rng.standard_normal(n),
+        "x1": rng.standard_normal(n),
+        "x2": rng.standard_normal(n),
+        "x_const": np.ones(n),
+        "x_with_nan": np.where(rng.random(n) < 0.05, np.nan, rng.standard_normal(n)),
+        "fe1": fe1_values,
+        "fe2": rng.integers(0, 30, size=n),
+        "cluster1": rng.integers(0, 20, size=n),
+        "entity": np.repeat(np.arange(50), 10),
+        "time": np.tile(np.arange(10), 50),
+        "z1": rng.standard_normal(n),
+        "z2": rng.standard_normal(n),
+        "x_endog": rng.standard_normal(n),
+        "binary_y": rng.integers(0, 2, size=n),
+        "count_y": rng.poisson(3, size=n).astype(float),
+    })
+    return df

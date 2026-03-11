@@ -251,6 +251,9 @@ fn demean_cg_slices(
         r.scaled_add(-alpha, &v);
 
         let ssr_new: f64 = r.sum_sq();
+        if !ssr_new.is_finite() {
+            break;
+        }
         let beta = ssr_new / ssr;
         u.update_from(&r, beta);
         ssr = ssr_new;
@@ -456,6 +459,26 @@ fn is_nested(fe_codes: &[i32], cluster_codes: &[i32]) -> bool {
         if c > cl_max[g] { cl_max[g] = c; }
     }
     cl_min.iter().zip(cl_max.iter()).all(|(mn, mx)| mn == mx)
+}
+
+/// Re-index codes to be contiguous (0, 1, 2, ...) after filtering.
+/// Prevents phantom zero-count groups that cause numerical instability.
+fn reindex_codes(codes: &mut [i32]) {
+    if codes.is_empty() {
+        return;
+    }
+    let max_code = *codes.iter().max().unwrap() as usize;
+    let mut mapping = vec![-1i32; max_code + 1];
+    let mut next_id = 0i32;
+    for &c in codes.iter() {
+        if mapping[c as usize] < 0 {
+            mapping[c as usize] = next_id;
+            next_id += 1;
+        }
+    }
+    for c in codes.iter_mut() {
+        *c = mapping[*c as usize];
+    }
 }
 
 fn drop_singletons_mask(fe_list: &[&[i32]]) -> Vec<bool> {
@@ -797,6 +820,10 @@ fn rust_ols_core<'py>(
                 }
                 fe_owned.push(new_codes);
             }
+            // Re-index FE codes to be contiguous after singleton removal
+            for codes in &mut fe_owned {
+                reindex_codes(codes);
+            }
             // Filter cluster codes
             for codes in &cl_slices {
                 let mut new_codes = Vec::with_capacity(n_keep);
@@ -1091,6 +1118,10 @@ fn rust_ols_from_arrays<'py>(
             for codes in &fe_slices {
                 let new_codes: Vec<i32> = (0..n_orig).filter(|&i| keep[i]).map(|i| codes[i]).collect();
                 fe_owned.push(new_codes);
+            }
+            // Re-index FE codes to be contiguous after singleton removal
+            for codes in &mut fe_owned {
+                reindex_codes(codes);
             }
             for codes in &cl_slices {
                 let new_codes: Vec<i32> = (0..n_orig).filter(|&i| keep[i]).map(|i| codes[i]).collect();
@@ -1401,6 +1432,10 @@ fn rust_iv2sls<'py>(
             for codes in &fe_slices {
                 let new_codes: Vec<i32> = (0..n_orig).filter(|&i| keep[i]).map(|i| codes[i]).collect();
                 fe_owned.push(new_codes);
+            }
+            // Re-index FE codes to be contiguous after singleton removal
+            for codes in &mut fe_owned {
+                reindex_codes(codes);
             }
             for codes in &cl_slices {
                 let new_codes: Vec<i32> = (0..n_orig).filter(|&i| keep[i]).map(|i| codes[i]).collect();

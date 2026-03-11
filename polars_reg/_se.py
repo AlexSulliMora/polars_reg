@@ -124,6 +124,8 @@ def vcov_clustered(
     n, k = X.shape
     XtX_inv = np.linalg.inv(X.T @ X)
     codes, G = _recode_to_contiguous(clusters)
+    if G < 2:
+        raise ValueError("Clustered SEs require at least 2 cluster groups")
     meat = _clustered_meat(X, resid, codes, G)
     if df_correction:
         if df_a_non_nested >= 0:
@@ -273,6 +275,8 @@ def vcov_driscoll_kraay(
     score = X * resid[:, None]
     S = _dk_meat(score, time_ids, bandwidth)
     T = len(np.unique(time_ids))
+    if T < 2:
+        raise ValueError("Driscoll-Kraay SEs require at least 2 time periods")
     dfc = T / (T - 1)
     return dfc * XtX_inv @ S @ XtX_inv
 

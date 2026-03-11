@@ -238,3 +238,57 @@ def test_odds_ratios_wrong_model(binary_data):
     r = probit("y ~ x1 + x2", data=binary_data)
     with pytest.raises(ValueError, match="Logit"):
         odds_ratios(r)
+
+
+# ── Additional robustness tests ───────────────────────────────────
+
+
+def test_logit_nan_dropped():
+    """NaN in x columns handled by dropping those rows."""
+    rng = np.random.default_rng(42)
+    n = 500
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    xb = 0.5 + 1.0 * x1 - 0.5 * x2
+    prob = 1.0 / (1.0 + np.exp(-xb))
+    y = (rng.uniform(size=n) < prob).astype(float)
+    # Inject NaN
+    x1[0] = np.nan
+    x1[10] = np.nan
+    x2[5] = np.nan
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+    r = logit("y ~ x1 + x2", data=df)
+    assert r.n_obs == n - 3
+    assert np.all(np.isfinite(r.coefficients))
+
+
+def test_probit_lazyframe():
+    """LazyFrame input works for probit."""
+    rng = np.random.default_rng(42)
+    n = 500
+    x1 = rng.standard_normal(n)
+    xb = 0.5 + 1.0 * x1
+    prob = stats.norm.cdf(xb)
+    y = (rng.uniform(size=n) < prob).astype(float)
+    df = pl.DataFrame({"y": y, "x1": x1}).lazy()
+    r = probit("y ~ x1", data=df)
+    assert r.model_type == "Probit"
+    assert r.n_obs == n
+
+
+def test_marginal_effects_finite(binary_data):
+    """marginal_effects() returns all finite values."""
+    r = probit("y ~ x1 + x2", data=binary_data)
+    me = marginal_effects(r, at="mean")
+    assert np.all(np.isfinite(me["dy_dx"].to_numpy()))
+    assert np.all(np.isfinite(me["se"].to_numpy()))
+
+
+def test_odds_ratios_positive(logit_data):
+    """odds_ratios() returns all positive values."""
+    r = logit("y ~ x1 + x2", data=logit_data)
+    ordf = odds_ratios(r)
+    assert np.all(ordf["or"].to_numpy() > 0)
+    assert np.all(ordf["se"].to_numpy() > 0)
+    assert np.all(ordf["ci_lower"].to_numpy() > 0)
+    assert np.all(ordf["ci_upper"].to_numpy() > 0)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import polars as pl
 
-from polars_reg._demean import absorbed_dof, demean, drop_singletons
+from polars_reg._demean import absorbed_dof, demean, drop_singletons, reindex_fe_codes
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
 from polars_reg._se import (
@@ -67,8 +67,11 @@ def panel_fe(
 
     keep = drop_singletons(fe_dict)
     if not keep.all():
+        if keep.sum() == 0:
+            raise ValueError("All observations dropped as singletons")
         y, X = y[keep], X[keep]
         fe_dict = {k: v[keep] for k, v in fe_dict.items()}
+        fe_dict = reindex_fe_codes(fe_dict)
         arrays.cluster_arrays = {k: v[keep] for k, v in arrays.cluster_arrays.items()}
         if arrays.time_array is not None:
             arrays.time_array = arrays.time_array[keep]

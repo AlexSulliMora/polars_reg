@@ -363,3 +363,35 @@ class TestPPMLEdgeCases:
         assert "name" in ct.columns
         assert "coef" in ct.columns
         assert len(ct) == 3
+
+
+# ── Additional robustness tests ───────────────────────────────────
+
+
+def test_ppml_nan_dropped():
+    """NaN in x columns handled by dropping those rows."""
+    rng = np.random.default_rng(42)
+    n = 500
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    mu = np.exp(0.5 + 0.5 * x1 - 0.3 * x2)
+    y = rng.poisson(mu).astype(float)
+    x1[0] = np.nan
+    x2[10] = np.nan
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+    res = ppml("y ~ x1 + x2", data=df)
+    assert res.n_obs == n - 2
+    assert np.all(np.isfinite(res.coefficients))
+
+
+def test_ppml_lazyframe():
+    """LazyFrame input works for PPML."""
+    rng = np.random.default_rng(42)
+    n = 300
+    x1 = rng.standard_normal(n)
+    mu = np.exp(0.5 + 0.5 * x1)
+    y = rng.poisson(mu).astype(float)
+    df = pl.DataFrame({"y": y, "x1": x1}).lazy()
+    res = ppml("y ~ x1", data=df)
+    assert res.model_type == "PPML"
+    assert res.n_obs == n

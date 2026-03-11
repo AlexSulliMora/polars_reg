@@ -1,6 +1,10 @@
+import warnings
+
 import numpy as np
 import polars as pl
+import pytest
 
+import polars_reg as pr
 from polars_reg._ols import ols
 
 
@@ -220,3 +224,124 @@ def test_indicator_with_fe():
     assert "group=2" in r.names
     assert "group=3" in r.names
     assert np.all(r.se > 0)
+
+
+def test_ols_with_singletons_no_warnings():
+    """OLS with FE should not produce RuntimeWarnings when singletons are dropped."""
+    rng = np.random.default_rng(123)
+    n = 500
+    fe1 = rng.integers(0, 50, size=n)
+    fe2 = rng.integers(0, 30, size=n)
+    # Force singletons in first 3 observations
+    fe1[:3] = [997, 998, 999]
+
+    df = pl.DataFrame({
+        "y": rng.standard_normal(n),
+        "x1": rng.standard_normal(n),
+        "fe1": fe1,
+        "fe2": fe2,
+    })
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        result = pr.ols("y ~ x1 | fe1 + fe2", data=df)
+
+    assert np.all(np.isfinite(result.coefficients))
+    assert np.all(np.isfinite(result.se))
+
+
+# ── Robustness edge cases ──────────────────────────────────────
+
+
+def test_ols_nan_in_x_dropped():
+    """Null rows in x should be dropped, producing finite results with fewer N."""
+    rng = np.random.default_rng(42)
+    n = 200
+    x1 = rng.standard_normal(n)
+    y = 1.0 + 2.0 * x1 + rng.standard_normal(n) * 0.5
+    df = pl.DataFrame({"y": y, "x1": x1})
+    # Set first 10 x1 values to null via Polars
+    mask = pl.Series("mask", [True] * 10 + [False] * (n - 10))
+    df = df.with_columns(pl.when(mask).then(None).otherwise(pl.col("x1")).alias("x1"))
+    assert df["x1"].null_count() == 10
+    result = ols("y ~ x1", data=df)
+    assert result.n_obs == n - 10
+    assert np.all(np.isfinite(result.coefficients))
+    assert np.all(np.isfinite(result.se))
+
+
+def test_ols_lazyframe_input(simple_data):
+    """LazyFrame input should produce same coefficients as DataFrame."""
+    result_df = ols("y ~ x1 + x2", data=simple_data)
+    result_lf = ols("y ~ x1 + x2", data=simple_data.lazy())
+    np.testing.assert_allclose(result_lf.coefficients, result_df.coefficients, rtol=1e-10)
+
+
+def test_ols_integer_columns():
+    """OLS should handle integer-typed y and x columns without error."""
+    rng = np.random.default_rng(42)
+    n = 100
+    x = rng.integers(0, 10, size=n)
+    y = 2 * x + rng.integers(-2, 3, size=n)
+    df = pl.DataFrame({"y": y, "x": x})
+    result = ols("y ~ x", data=df)
+    assert np.all(np.isfinite(result.coefficients))
+    assert result.n_obs == n
+
+
+def test_ols_all_vcov_variants_finite():
+    """All vcov types (iid, HC0-HC3, cluster) should produce finite SEs."""
+    rng = np.random.default_rng(42)
+    n = 300
+    x1 = rng.standard_normal(n)
+    fe1 = rng.integers(0, 10, size=n)
+    y = 1.0 + 2.0 * x1 + rng.standard_normal(n) * 0.5
+    df = pl.DataFrame({"y": y, "x1": x1, "fe1": fe1})
+    for v in ["iid", "HC0", "HC1", "HC2", "HC3"]:
+        result = ols("y ~ x1", data=df, vcov=v)
+        assert np.all(np.isfinite(result.se)), f"Non-finite SEs for vcov={v}"
+    result_cl = ols("y ~ x1", data=df, cluster=["fe1"])
+    assert np.all(np.isfinite(result_cl.se)), "Non-finite SEs for cluster"
+
+
+def test_ols_large_fe_ratio():
+    """Large number of FE levels relative to N should not crash."""
+    rng = np.random.default_rng(42)
+    n = 300
+    fe = np.concatenate([np.arange(200), rng.integers(0, 200, size=n - 200)])
+    x1 = rng.standard_normal(n)
+    y = 1.0 + 2.0 * x1 + rng.standard_normal(n) * 0.5
+    df = pl.DataFrame({"y": y, "x1": x1, "fe": fe})
+    result = ols("y ~ x1 | fe", data=df)
+    assert np.all(np.isfinite(result.coefficients))
+
+
+def test_ols_all_singletons_raises():
+    """All observations in unique FE groups should raise ValueError."""
+    rng = np.random.default_rng(42)
+    n = 50
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    df = pl.DataFrame({
+        "y": rng.standard_normal(n),
+        "x1": x1,
+        "x2": x2,
+        "fe": np.arange(n),
+    })
+    # Use interaction + HC3 vcov to force pure Python path
+    with pytest.raises(ValueError, match="singletons"):
+        ols("y ~ x1 + x1:x2 | fe", data=df, vcov="HC3")
+
+
+def test_ols_collinear_raises():
+    """Perfectly collinear regressors should raise ValueError."""
+    rng = np.random.default_rng(42)
+    n = 100
+    x1 = rng.standard_normal(n)
+    df = pl.DataFrame({
+        "y": rng.standard_normal(n),
+        "x1": x1,
+        "x2": x1,  # identical copy
+    })
+    with pytest.raises(ValueError, match="(?i)singular"):
+        ols("y ~ x1 + x2 - 1", data=df)

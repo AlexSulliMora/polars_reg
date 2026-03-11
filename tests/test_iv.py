@@ -191,3 +191,89 @@ def test_iv2sls_fe_dk(iv_data_panel):
         time="year_id",
     )
     assert result.vcov_type == "DK"
+
+
+# ── Robustness edge cases ──────────────────────────────────────
+
+
+def test_iv2sls_nan_dropped():
+    """Null in an instrument column should be dropped automatically."""
+    rng = np.random.default_rng(42)
+    n = 500
+    z1 = rng.standard_normal(n)
+    z2 = rng.standard_normal(n)
+    u = rng.standard_normal(n)
+    x_endog = 0.5 * z1 + 0.3 * z2 + 0.8 * u
+    x_exog = rng.standard_normal(n)
+    y = 1.0 + 2.0 * x_endog + 0.5 * x_exog + u
+    import polars as pl
+
+    df = pl.DataFrame({
+        "y": y, "x_endog": x_endog, "x_exog": x_exog,
+        "z1": z1, "z2": z2,
+    })
+    # Set first 20 z1 values to null via Polars
+    mask = pl.Series("mask", [True] * 20 + [False] * (n - 20))
+    df = df.with_columns(pl.when(mask).then(None).otherwise(pl.col("z1")).alias("z1"))
+    assert df["z1"].null_count() == 20
+    result = iv2sls("y ~ x_exog || x_endog ~ z1 + z2", data=df)
+    assert result.n_obs == n - 20
+    assert np.all(np.isfinite(result.coefficients))
+
+
+def test_iv2sls_lazyframe(iv_data):
+    """LazyFrame input should produce same results as DataFrame."""
+    result_df = iv2sls("y ~ x_exog || x_endog ~ z1 + z2", data=iv_data)
+    result_lf = iv2sls("y ~ x_exog || x_endog ~ z1 + z2", data=iv_data.lazy())
+    np.testing.assert_allclose(result_lf.coefficients, result_df.coefficients, rtol=1e-10)
+
+
+def test_iv2sls_exact_identification():
+    """Just-identified IV (1 endog, 1 instrument) should work."""
+    rng = np.random.default_rng(42)
+    n = 1000
+    z1 = rng.standard_normal(n)
+    u = rng.standard_normal(n)
+    x_endog = 0.8 * z1 + 0.5 * u
+    x_exog = rng.standard_normal(n)
+    y = 1.0 + 3.0 * x_endog + 0.5 * x_exog + u
+    import polars as pl
+
+    df = pl.DataFrame({
+        "y": y, "x_endog": x_endog, "x_exog": x_exog, "z1": z1,
+    })
+    result = iv2sls("y ~ x_exog || x_endog ~ z1", data=df)
+    assert result.n_obs == n
+    np.testing.assert_allclose(
+        result.coefficients[result.names.index("x_endog")], 3.0, atol=0.5
+    )
+
+
+def test_liml_fe_raises(iv_data_panel):
+    """LIML with absorbed FE should raise NotImplementedError."""
+    from polars_reg._gmm import liml
+
+    with pytest.raises(NotImplementedError, match="LIML does not yet support"):
+        liml(
+            "y ~ x_exog | firm_id | x_endog ~ z1 + z2",
+            data=iv_data_panel,
+        )
+
+
+def test_gmm_multiway_cluster_raises(iv_data):
+    """GMM-IV with multi-way clustering should raise NotImplementedError."""
+    from polars_reg._gmm import gmm_iv
+    import polars as pl
+
+    rng = np.random.default_rng(42)
+    n = iv_data.height
+    df = iv_data.with_columns([
+        pl.Series("cl1", rng.integers(0, 10, size=n)),
+        pl.Series("cl2", rng.integers(0, 5, size=n)),
+    ])
+    with pytest.raises(NotImplementedError, match="Multi-way clustered"):
+        gmm_iv(
+            "y ~ x_exog || x_endog ~ z1 + z2",
+            data=df,
+            cluster=["cl1", "cl2"],
+        )

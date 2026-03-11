@@ -311,3 +311,45 @@ def test_kp_no_iv_arrays():
     r = pr.ols("y ~ x1", data=df)
     with pytest.raises(ValueError, match="first-stage arrays"):
         pr.kleibergen_paap_from_result(r)
+
+
+def test_hausman_test_identical_models():
+    """Two OLS-style results with same data/formula give statistic near 0."""
+    rng = np.random.default_rng(42)
+    n_firms, n_years = 30, 15
+    n = n_firms * n_years
+    firm_id = np.repeat(np.arange(n_firms), n_years)
+    year_id = np.tile(np.arange(n_years), n_firms)
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    y = 1.0 * x1 - 0.5 * x2 + rng.standard_normal(n)
+    df = pl.DataFrame(
+        {"y": y, "x1": x1, "x2": x2, "firm_id": firm_id, "year_id": year_id}
+    )
+    r_fe = pr.panel_fe("y ~ x1 + x2", data=df, entity="firm_id", time="year_id")
+    # Run hausman with same FE result used twice — but hausman_test requires
+    # FE and RE, so use RE with data uncorrelated with FE
+    r_re = pr.panel_re("y ~ x1 + x2", data=df, entity="firm_id")
+    result = pr.hausman_test(r_fe, r_re)
+    # With uncorrelated regressors, statistic should be small, pvalue large
+    assert result["statistic"] >= 0
+    assert result["pvalue"] > 0.01
+
+
+def test_hausman_no_common_coefficients():
+    """Models with disjoint variable sets raises ValueError."""
+    rng = np.random.default_rng(42)
+    n_firms, n_years = 20, 10
+    n = n_firms * n_years
+    firm_id = np.repeat(np.arange(n_firms), n_years)
+    year_id = np.tile(np.arange(n_years), n_firms)
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    y = x1 + x2 + rng.standard_normal(n)
+    df = pl.DataFrame(
+        {"y": y, "x1": x1, "x2": x2, "firm_id": firm_id, "year_id": year_id}
+    )
+    r_fe = pr.panel_fe("y ~ x1", data=df, entity="firm_id", time="year_id")
+    r_re = pr.panel_re("y ~ x2", data=df, entity="firm_id")
+    with pytest.raises(ValueError, match="No common coefficients"):
+        pr.hausman_test(r_fe, r_re)

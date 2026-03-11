@@ -110,3 +110,51 @@ def test_quantreg_coef_table(qreg_data):
     assert ct.shape[0] == 3
     assert "coef" in ct.columns
     assert "se" in ct.columns
+
+
+# ── Additional robustness tests ───────────────────────────────────
+
+
+def test_quantreg_nan_dropped():
+    """NaN in x columns handled by dropping those rows."""
+    rng = np.random.default_rng(42)
+    n = 500
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    y = 2.0 + 1.5 * x1 - 0.5 * x2 + rng.standard_normal(n) * 0.5
+    x1[0] = np.nan
+    x2[3] = np.nan
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+    r = quantreg("y ~ x1 + x2", data=df, tau=0.5, n_boot=49, seed=42)
+    assert r.n_obs == n - 2
+    assert np.all(np.isfinite(r.coefficients))
+
+
+def test_quantreg_lazyframe():
+    """LazyFrame input works for quantreg."""
+    rng = np.random.default_rng(42)
+    n = 300
+    x1 = rng.standard_normal(n)
+    y = 1.0 + 2.0 * x1 + rng.standard_normal(n) * 0.5
+    df = pl.DataFrame({"y": y, "x1": x1}).lazy()
+    r = quantreg("y ~ x1", data=df, tau=0.5, n_boot=49, seed=42)
+    assert r.n_obs == n
+    assert np.all(np.isfinite(r.coefficients))
+
+
+def test_quantreg_extreme_tau():
+    """tau=0.01 and tau=0.99 produce stable results."""
+    rng = np.random.default_rng(42)
+    n = 1000
+    x1 = rng.standard_normal(n)
+    y = 2.0 + 1.5 * x1 + rng.standard_normal(n)
+    df = pl.DataFrame({"y": y, "x1": x1})
+    r_low = quantreg("y ~ x1", data=df, tau=0.01, n_boot=49, seed=42)
+    r_high = quantreg("y ~ x1", data=df, tau=0.99, n_boot=49, seed=42)
+    assert np.all(np.isfinite(r_low.coefficients))
+    assert np.all(np.isfinite(r_high.coefficients))
+    assert np.all(r_low.se > 0)
+    assert np.all(r_high.se > 0)
+    # High-quantile intercept should be larger than low-quantile
+    idx_cons = r_low.names.index("_cons")
+    assert r_high.coefficients[idx_cons] > r_low.coefficients[idx_cons]

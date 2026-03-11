@@ -263,3 +263,22 @@ def test_regtable_str_operations(simple_data):
     assert "Additional notes" in combined
     assert table.startswith("=")
     assert len(table) > 0
+
+
+# ── Additional robustness tests ───────────────────────────────────
+
+
+def test_regtable_mismatched_models(simple_data):
+    """Models with different variable sets display correctly."""
+    r1 = ols("y ~ x1", data=simple_data)
+    r2 = ols("y ~ x2", data=simple_data)
+    table = regtable(r1, r2)
+    # Both variables should appear
+    assert "x1" in table
+    assert "x2" in table
+    # Each model column should have blanks for the other's variable
+    lines = table.split("\n")
+    x1_line = [ln for ln in lines if ln.startswith("x1")][0]
+    x2_line = [ln for ln in lines if ln.startswith("x2")][0]
+    assert "x1" in x1_line
+    assert "x2" in x2_line
