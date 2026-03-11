@@ -82,9 +82,9 @@ jobs:
             target: x86_64
           - os: windows-latest
             target: x64
-          - os: macos-13
+          - os: macos-latest
             target: x86_64
-          - os: macos-14
+          - os: macos-latest
             target: aarch64
     runs-on: ${{ matrix.os }}
 
@@ -106,7 +106,7 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}-${{ matrix.target }}
+          name: wheels-${{ matrix.os }}-${{ matrix.target }}-${{ strategy.job-index }}
           path: dist
 
   build-sdist:
