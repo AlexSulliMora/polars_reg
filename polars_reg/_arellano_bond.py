@@ -56,6 +56,17 @@ def panel_ab(
         maxlags = n_times - 1  # use all available
     maxlags = min(maxlags, n_times - 1)
 
+    # Check for column name collisions with generated names
+    generated_names = {f"L1_{depvar}", f"D_{depvar}", f"DL1_{depvar}"}
+    generated_names |= {f"L{d}_{depvar}" for d in range(lags, maxlags + 1)}
+    generated_names |= {f"D_{col}" for col in exog}
+    collisions = generated_names & set(df.columns)
+    if collisions:
+        raise ValueError(
+            f"Generated column names collide with existing data columns: {collisions}. "
+            "Rename those columns before calling this function."
+        )
+
     # Create lagged dependent variable and differences
     lag_exprs = [
         pl.col(depvar).shift(1).over(entity).alias(f"L1_{depvar}"),
@@ -234,6 +245,17 @@ def panel_sys_gmm(
         maxlags = n_times - 1
     maxlags = min(maxlags, n_times - 1)
 
+    # Check for column name collisions with generated names
+    generated_names = {f"L1_{depvar}", f"D_{depvar}", f"DL1_{depvar}", f"DL1_iv_{depvar}"}
+    generated_names |= {f"L{d}_{depvar}" for d in range(lags, maxlags + 1)}
+    generated_names |= {f"D_{col}" for col in exog}
+    collisions = generated_names & set(df.columns)
+    if collisions:
+        raise ValueError(
+            f"Generated column names collide with existing data columns: {collisions}. "
+            "Rename those columns before calling this function."
+        )
+
     # Create lags, differences, and lagged differences
     lag_exprs = [
         pl.col(depvar).shift(1).over(entity).alias(f"L1_{depvar}"),
@@ -408,6 +430,10 @@ def _ar_test(resid, entity_codes, Z, W, ZtX, A_inv, order=1):
     Under H0 of no serial correlation of order m in levels e_it,
     the first-differenced residuals Δe_it should have no correlation
     of order m+1 (but do have order 1 correlation by construction).
+
+    Note: Assumes observations within each entity are in time-sorted order
+    in the residual array. The caller must ensure df was sorted by [entity, time]
+    before computing residuals.
 
     Returns (z_stat, p_value).
     """

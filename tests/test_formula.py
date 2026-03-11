@@ -1,3 +1,5 @@
+import pytest
+
 from polars_reg._formula import parse_formula
 
 
@@ -234,3 +236,17 @@ def test_no_intercept_variant_spacing():
     spec = parse_formula("y ~ x1 + x2 -1")
     assert spec.add_intercept is False
     assert spec.exog == ["x1", "x2"]
+
+
+# ── Error-path tests ─────────────────────────────────────────────
+
+
+def test_parse_formula_missing_tilde():
+    with pytest.raises((ValueError, IndexError)):
+        parse_formula("y x1 + x2")
+
+
+def test_parse_formula_empty_lhs():
+    """Empty LHS produces an empty depvar string."""
+    spec = parse_formula("~ x1 + x2")
+    assert spec.depvar == ""

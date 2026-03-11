@@ -57,9 +57,13 @@ def ensure_polars(data: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFr
     try:
         import pandas as pd
     except ImportError:
+        if not isinstance(data, (pl.DataFrame, pl.LazyFrame)):
+            raise TypeError(f"Expected Polars DataFrame/LazyFrame or pandas DataFrame, got {type(data).__name__}")
         return data
     if isinstance(data, pd.DataFrame):
         return pl.from_pandas(data)
+    if not isinstance(data, (pl.DataFrame, pl.LazyFrame)):
+        raise TypeError(f"Expected Polars DataFrame/LazyFrame or pandas DataFrame, got {type(data).__name__}")
     return data
 
 
@@ -118,7 +122,18 @@ def extract_arrays(
     ]
     if weights:
         numeric_cols.append(weights)
+    # Include FE, cluster, and time columns in null-drop
+    if spec.fe:
+        numeric_cols.extend(spec.fe)
+    if cluster:
+        numeric_cols.extend(cluster)
+    if time:
+        numeric_cols.append(time)
+    numeric_cols = list(dict.fromkeys(numeric_cols))  # dedupe preserving order
     df_clean = df.drop_nulls(subset=numeric_cols)
+
+    if len(df_clean) == 0:
+        raise ValueError("No observations remain after dropping nulls. Check for missing data in columns: " + ", ".join(numeric_cols))
 
     n_obs = len(df_clean)
 
@@ -129,7 +144,7 @@ def extract_arrays(
     _indicator_cache: dict[str, tuple[list[str], np.ndarray]] = {}
     for ind_col in spec.indicators:
         series = df_clean[ind_col]
-        levels = sorted(series.unique().to_list())
+        levels = sorted(v for v in series.unique().to_list() if v is not None)
         if len(levels) < 2:
             raise ValueError(f"Indicator variable '{ind_col}' has fewer than 2 levels")
         # Drop first level (reference category)

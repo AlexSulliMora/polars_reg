@@ -84,7 +84,6 @@ def test_ols_fe_twoway_clustered(panel_data):
 # ── Interaction terms ────────────────────────────────────────────
 
 
-@pl.StringCache()
 def test_interaction_colon():
     """x1:x2 creates an elementwise product column."""
     rng = np.random.default_rng(42)
@@ -99,7 +98,6 @@ def test_interaction_colon():
     np.testing.assert_allclose(r.coefficients[idx], 0.5, atol=0.15)
 
 
-@pl.StringCache()
 def test_interaction_star():
     """x1*x2 expands to x1 + x2 + x1:x2 and matches explicit form."""
     rng = np.random.default_rng(42)
@@ -114,7 +112,6 @@ def test_interaction_star():
     np.testing.assert_allclose(r_star.se, r_explicit.se)
 
 
-@pl.StringCache()
 def test_interaction_with_fe():
     """Interaction terms work with absorbed fixed effects."""
     rng = np.random.default_rng(42)
@@ -130,7 +127,6 @@ def test_interaction_with_fe():
     np.testing.assert_allclose(r.coefficients[r.names.index("x1:x2")], 0.5, atol=0.15)
 
 
-@pl.StringCache()
 def test_interaction_robust_se():
     """Interaction terms work with robust SEs."""
     rng = np.random.default_rng(42)
@@ -144,7 +140,6 @@ def test_interaction_robust_se():
     assert np.all(r.se > 0)
 
 
-@pl.StringCache()
 def test_three_way_interaction():
     """x1*x2*x3 produces all subset interactions."""
     rng = np.random.default_rng(42)
@@ -162,7 +157,6 @@ def test_three_way_interaction():
 # ── Indicator variables ──────────────────────────────────────────
 
 
-@pl.StringCache()
 def test_indicator_basic():
     """i.group expands to K-1 dummy variables."""
     rng = np.random.default_rng(42)
@@ -183,7 +177,6 @@ def test_indicator_basic():
     np.testing.assert_allclose(r.coefficients[r.names.index("group=4")], 3.0, atol=0.2)
 
 
-@pl.StringCache()
 def test_indicator_string_levels():
     """i. works with string categories."""
     rng = np.random.default_rng(42)
@@ -199,7 +192,6 @@ def test_indicator_string_levels():
     assert "group=A" not in r.names
 
 
-@pl.StringCache()
 def test_indicator_star_interaction():
     """i.group*x gives dummies + continuous + dummy:continuous."""
     rng = np.random.default_rng(42)
@@ -215,7 +207,6 @@ def test_indicator_star_interaction():
     assert "group=3:x" in r.names
 
 
-@pl.StringCache()
 def test_indicator_with_fe():
     """Indicator variables work with absorbed FE."""
     rng = np.random.default_rng(42)

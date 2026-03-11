@@ -72,7 +72,8 @@ def test_nw_larger_than_iid(ts_data):
     r_nw = pr.ols("y ~ x1 + x2", data=ts_data, vcov="NW", time="time")
     # NW SEs should generally be larger with autocorrelation
     # Check for intercept (most affected by persistent errors)
-    assert r_nw.se[2] > r_iid.se[2]
+    idx_cons = r_nw.names.index("_cons")
+    assert r_nw.se[idx_cons] > r_iid.se[idx_cons]
 
 
 def test_nw_coefficients_match_ols(ts_data):

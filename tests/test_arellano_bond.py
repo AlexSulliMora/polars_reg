@@ -232,6 +232,8 @@ def test_sys_gmm_ar_tests(ab_data):
     ar2_stat, ar2_p = r._ar2
     assert not np.isnan(ar1_stat)
     assert 0 <= ar1_p <= 1
+    assert not np.isnan(ar2_stat)
+    assert 0 <= ar2_p <= 1
 
 
 def test_sys_gmm_twostep(ab_data):

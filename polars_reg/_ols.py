@@ -322,9 +322,12 @@ def _ols_rust_path(
     else:
         n_clusters = None
         # Rust computed iid VCV with sigma^2/(n-k), adjust for df_abs
-        sigma2 = (resid @ resid) / (n - k - df_abs)
-        XtX_inv = V / ((resid @ resid) / (n - k)) if (n - k) > 0 else V
-        V = sigma2 * XtX_inv
+        rss = resid @ resid
+        sigma2 = rss / (n - k - df_abs) if (n - k - df_abs) > 0 else 0.0
+        if (n - k) > 0 and rss > 0:
+            XtX_inv = V / (rss / (n - k))
+            V = sigma2 * XtX_inv
+        # else: V stays as the Rust-computed value (or zero for perfect fit)
         df_r = n - k - df_abs
         vcov_type = "iid"
 
@@ -344,8 +347,8 @@ def _ols_rust_path(
         fe_absorbed=list(fe_dict.keys()),
         df_absorbed=df_abs,
     )
-    result._X = np.asarray(resid)  # placeholder (demeaned X not easily recoverable)
-    result._y = np.asarray(resid)  # placeholder
+    result._X = None  # FE model: demeaned design matrix not stored
+    result._y = None  # FE model: original y not stored
     return result
 
 
@@ -454,6 +457,8 @@ def ols(
             fe_dict = {k: v[keep] for k, v in fe_dict.items()}
             if w is not None:
                 w = w[keep]
+            if fw is not None:
+                fw = fw[keep]
             if cluster:
                 arrays.cluster_arrays = {k: v[keep] for k, v in arrays.cluster_arrays.items()}
             if arrays.time_array is not None:

@@ -26,6 +26,8 @@ except ImportError:
 
 def _to_codes_fast(series: pl.Series) -> np.ndarray:
     """Convert Polars Series to int32 codes. Minimal overhead path."""
+    if not _HAS_NATIVE:
+        raise RuntimeError("_to_codes_fast requires native extension")
     from polars_reg._native import rust_recode
 
     dtype = series.dtype
@@ -322,16 +324,7 @@ def iv2sls(
         vcov_type = vcov
         df_r = n - k - df_abs
     elif vcov == "bootstrap":
-
-        def _iv_fit(X_b, y_b):
-            Z_b = np.column_stack([X_b[:, :k_exog], Z_excl_boot[: len(y_b)]])
-            ZtZ_b = Z_b.T @ Z_b
-            X_endog_hat_b = Z_b @ np.linalg.solve(ZtZ_b, Z_b.T @ X_b[:, k_exog:])
-            Xh_b = np.column_stack([X_b[:, :k_exog], X_endog_hat_b])
-            return np.linalg.solve(Xh_b.T @ X_b, Xh_b.T @ y_b)
-
         # For pairs bootstrap, resample all arrays together
-        Z_excl_boot = Z_excl  # captured by closure
         rng = np.random.default_rng(seed)
         betas = np.empty((n_boot, k))
         for b in range(n_boot):
@@ -416,6 +409,15 @@ def _first_stage_f(
     and [X_exog, Z_excl] (unrestricted). Returns the F-stat for the
     first endogenous variable (standard practice for single-endog case).
     """
+    if X_endog.ndim == 2 and X_endog.shape[1] > 1:
+        import warnings
+
+        warnings.warn(
+            f"First-stage F-stat reported for first endogenous variable only "
+            f"({X_endog.shape[1]} endogenous variables present)",
+            stacklevel=2,
+        )
+
     n = X_exog.shape[0]
     k_exog = X_exog.shape[1]
     q = Z_excl.shape[1]  # number of excluded instruments
@@ -466,7 +468,10 @@ def _iv_vcov_robust(
 
     Sandwich: (X_hat'X)^{-1} meat (X_hat'X)^{-1}
     where meat = X_hat' diag(e^2) X_hat.
-    No small-sample correction (asymptotic, matching Stata ivregress).
+
+    Note: Stata ivregress uses HC0 (no small-sample correction) for all
+    robust variants. The ``kind`` parameter is accepted for API consistency
+    but all variants produce HC0.
     """
     e2 = resid**2
     meat = X_hat.T @ (X_hat * e2[:, None])

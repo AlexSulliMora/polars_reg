@@ -68,6 +68,8 @@ def _recode_to_contiguous(arr: NDArray) -> tuple[NDArray, int]:
 
     Uses Rust native extension when available.
     """
+    if len(arr) == 0:
+        return arr.astype(np.int32), 0
     if _HAS_NATIVE:
         codes, n_groups = _rust_recode(arr.astype(np.int64))
         return codes, n_groups
@@ -380,6 +382,12 @@ def vcov_pairs_bootstrap(
             betas[b] = np.nan
 
     valid = ~np.any(np.isnan(betas), axis=1)
+    n_valid = valid.sum()
+    if n_valid < 2:
+        raise ValueError(
+            f"Too few valid bootstrap replicates ({n_valid}/{n_boot}). "
+            "Data may be nearly collinear."
+        )
     V = np.cov(betas[valid].T, ddof=1)
     return np.atleast_2d(V)
 
@@ -421,3 +429,21 @@ def vcov_wild_bootstrap(
 
     V = np.cov(betas_centered.T, ddof=1)
     return np.atleast_2d(V)
+
+
+def _mle_multiway_clustered(X, score_resid, cluster_list, H_inv, n, k):
+    """Multi-way clustered VCV for MLE models (CGM inclusion-exclusion)."""
+    D = len(cluster_list)
+    V = np.zeros((k, k))
+    dims = list(range(D))
+
+    for size in range(1, D + 1):
+        sign = (-1) ** (size + 1)
+        for subset in combinations(dims, size):
+            subset_arrays = [cluster_list[d] for d in subset]
+            interaction, G = _interaction_codes(*subset_arrays)
+            meat = _clustered_meat(X, score_resid, interaction, G)
+            dfc = (G / (G - 1)) * ((n - 1) / (n - k))
+            V += sign * dfc * H_inv @ meat @ H_inv
+
+    return V

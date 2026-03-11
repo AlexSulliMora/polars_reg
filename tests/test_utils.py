@@ -1,5 +1,6 @@
 import numpy as np
 import polars as pl
+import pytest
 
 from polars_reg._formula import FormulaSpec
 from polars_reg._utils import extract_arrays
@@ -53,3 +54,22 @@ def test_extract_cluster_codes():
     spec = FormulaSpec(depvar="y", exog=["x1"])
     arrays = extract_arrays(df, spec, cluster=["cl"])
     assert "cl" in arrays.cluster_arrays
+
+
+def test_ensure_polars_passthrough():
+    """Test that ensure_polars returns Polars DataFrame unchanged."""
+    from polars_reg._utils import ensure_polars
+
+    df = pl.DataFrame({"x": [1.0, 2.0], "y": [3.0, 4.0]})
+    result = ensure_polars(df)
+    assert isinstance(result, pl.DataFrame)
+
+
+def test_ensure_polars_converts_pandas():
+    """Test that ensure_polars converts pandas DataFrame."""
+    pd = pytest.importorskip("pandas")
+    from polars_reg._utils import ensure_polars
+
+    pdf = pd.DataFrame({"x": [1.0, 2.0], "y": [3.0, 4.0]})
+    result = ensure_polars(pdf)
+    assert isinstance(result, pl.DataFrame)

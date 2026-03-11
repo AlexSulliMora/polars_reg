@@ -10,7 +10,7 @@ from scipy import stats
 
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
-from polars_reg._se import _clustered_meat
+from polars_reg._se import _clustered_meat, _mle_multiway_clustered
 from polars_reg._utils import ensure_polars, extract_arrays
 
 
@@ -64,13 +64,13 @@ def _newton_raphson(ll_func, beta0, X, y, max_iter=100, tol=1e-8):
         try:
             step = np.linalg.solve(H, score)
         except np.linalg.LinAlgError:
-            warnings.warn("Singular Hessian in Newton-Raphson; using pseudoinverse")
+            warnings.warn("Singular Hessian in Newton-Raphson; using pseudoinverse", stacklevel=3)
             step = np.linalg.lstsq(H, score, rcond=None)[0]
         beta = beta - step
         if np.max(np.abs(step)) < tol:
             break
     else:
-        warnings.warn(f"Newton-Raphson did not converge after {max_iter} iterations")
+        warnings.warn(f"Newton-Raphson did not converge after {max_iter} iterations", stacklevel=3)
 
     ll, score, H, prob, lam_or_resid = ll_func(beta, X, y)
     return beta, ll, H, prob, lam_or_resid, score
@@ -124,12 +124,6 @@ def _binary_model(
 
     if cluster:
         cluster_arrays_list = [arrays.cluster_arrays[c] for c in cluster]
-        if model_type == "Probit":
-            # Individual scores: lambda_i * x_i
-            scores = X * score_resid[:, None]
-        else:
-            # Individual scores: (y_i - Lambda_i) * x_i
-            scores = X * score_resid[:, None]
 
         if len(cluster_arrays_list) == 1:
             from polars_reg._se import _recode_to_contiguous
@@ -185,27 +179,6 @@ def _binary_model(
     result._ll_null = ll_null
     return result
 
-
-def _mle_multiway_clustered(X, score_resid, cluster_list, H_inv, n, k):
-    """Multi-way clustered VCV for MLE models (CGM inclusion-exclusion)."""
-    from itertools import combinations
-
-    from polars_reg._se import _interaction_codes
-
-    D = len(cluster_list)
-    V = np.zeros((k, k))
-    dims = list(range(D))
-
-    for size in range(1, D + 1):
-        sign = (-1) ** (size + 1)
-        for subset in combinations(dims, size):
-            subset_arrays = [cluster_list[d] for d in subset]
-            interaction, G = _interaction_codes(*subset_arrays)
-            meat = _clustered_meat(X, score_resid, interaction, G)
-            dfc = (G / (G - 1)) * ((n - 1) / (n - k))
-            V += sign * dfc * H_inv @ meat @ H_inv
-
-    return V
 
 
 def probit(
@@ -281,7 +254,7 @@ def marginal_effects(
         if result.model_type == "Probit":
             J = density * (np.eye(k) - xb * np.outer(beta, x_bar))
         else:
-            J = density * (np.eye(k) - (1 - 2 * lam) * np.outer(beta, x_bar))
+            J = density * (np.eye(k) + (1 - 2 * lam) * np.outer(beta, x_bar))
         V_me = J @ result.vcov @ J.T
         se = np.sqrt(np.diag(V_me))
     elif at == "average":

@@ -57,7 +57,7 @@ def test_ols_fe_pandas(pl_df, pd_df):
     np.testing.assert_allclose(r_pd.coefficients, r_pl.coefficients)
 
 
-def test_iv2sls_pandas(pl_df, pd_df):
+def test_iv2sls_pandas(pl_df):
     # Make x_endog from z1/z2 so IV is identified
     pl_iv = pl_df.with_columns((pl.col("z1") * 0.5 + pl.col("z2") * 0.3).alias("x_end"))
     pd_iv = pl_iv.to_pandas()
@@ -66,7 +66,7 @@ def test_iv2sls_pandas(pl_df, pd_df):
     np.testing.assert_allclose(r_pd.coefficients, r_pl.coefficients)
 
 
-def test_liml_pandas(pl_df, pd_df):
+def test_liml_pandas(pl_df):
     pl_iv = pl_df.with_columns((pl.col("z1") * 0.5 + pl.col("z2") * 0.3).alias("x_end"))
     pd_iv = pl_iv.to_pandas()
     r_pl = pr.liml("y ~ x1 || x_end ~ z1 + z2", data=pl_iv)
@@ -74,7 +74,7 @@ def test_liml_pandas(pl_df, pd_df):
     np.testing.assert_allclose(r_pd.coefficients, r_pl.coefficients)
 
 
-def test_gmm_pandas(pl_df, pd_df):
+def test_gmm_pandas(pl_df):
     pl_iv = pl_df.with_columns((pl.col("z1") * 0.5 + pl.col("z2") * 0.3).alias("x_end"))
     pd_iv = pl_iv.to_pandas()
     r_pl = pr.gmm_iv("y ~ x1 || x_end ~ z1 + z2", data=pl_iv)

@@ -90,9 +90,13 @@ def _translate(
         return _to_ivregress(spec, "2sls", vce_opt)
 
     elif estimator == "liml":
+        if spec.fe:
+            return _to_ivreghdfe(spec, "liml", vcov, cluster)
         return _to_ivregress(spec, "liml", vce_opt)
 
     elif estimator == "gmm_iv":
+        if spec.fe:
+            return _to_ivreghdfe(spec, "gmm2s", vcov, cluster)
         return _to_ivregress_gmm(spec, vce_opt)
 
     elif estimator == "panel_fe":
@@ -124,7 +128,7 @@ def _build_vce(vcov: str, cluster: list[str] | None) -> str:
 
     vce_map = {
         "iid": "",
-        "HC0": "vce(robust)",
+        "HC0": "vce(robust)",  # Note: Stata vce(robust) is HC1-equivalent; HC0 has no direct Stata analog
         "HC1": "vce(robust)",
         "HC2": "vce(hc2)",
         "HC3": "vce(hc3)",
@@ -258,6 +262,11 @@ def _to_xtreg_fe(
     parts = ["xtreg", spec.depvar] + _stata_varlist(spec.exog, spec.indicators)
     opts = ["fe"]
     if cluster:
+        if len(cluster) > 1:
+            raise ValueError(
+                "Stata's xtreg does not support multi-way clustering. "
+                "Use reghdfe-based estimators or specify a single cluster variable."
+            )
         opts.append(f"vce(cluster {cluster[0]})")
     elif vcov == "HC1":
         opts.append("vce(robust)")
@@ -287,6 +296,11 @@ def _to_panel_fd(
     parts = ["reg", d_depvar] + d_exog
     opts = []
     if cluster:
+        if len(cluster) > 1:
+            raise ValueError(
+                "Stata's reg (first-difference) does not support multi-way clustering. "
+                "Use reghdfe-based estimators or specify a single cluster variable."
+            )
         opts.append(f"vce(cluster {cluster[0]})")
     elif vcov == "HC1":
         opts.append("vce(robust)")

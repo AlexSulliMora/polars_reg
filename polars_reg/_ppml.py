@@ -16,7 +16,7 @@ import polars as pl
 
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
-from polars_reg._se import _clustered_meat, _recode_to_contiguous
+from polars_reg._se import _clustered_meat, _mle_multiway_clustered, _recode_to_contiguous
 from polars_reg._utils import ensure_polars, extract_arrays
 
 
@@ -34,27 +34,6 @@ def _ppml_null_deviance(y: np.ndarray) -> float:
     mu0 = np.full_like(y, y.mean())
     return _ppml_deviance(y, mu0)
 
-
-def _mle_multiway_clustered(X, score_resid, cluster_list, H_inv, n, k):
-    """Multi-way clustered VCV for MLE models (CGM inclusion-exclusion)."""
-    from itertools import combinations
-
-    from polars_reg._se import _interaction_codes
-
-    D = len(cluster_list)
-    V = np.zeros((k, k))
-    dims = list(range(D))
-
-    for size in range(1, D + 1):
-        sign = (-1) ** (size + 1)
-        for subset in combinations(dims, size):
-            subset_arrays = [cluster_list[d] for d in subset]
-            interaction, G = _interaction_codes(*subset_arrays)
-            meat = _clustered_meat(X, score_resid, interaction, G)
-            dfc = (G / (G - 1)) * ((n - 1) / (n - k))
-            V += sign * dfc * H_inv @ meat @ H_inv
-
-    return V
 
 
 def ppml(
@@ -90,7 +69,8 @@ def ppml(
 
     Returns:
         RegressionResult with model_type="PPML". The predict() method
-        returns exp(X @ beta) (the conditional mean).
+        returns X @ beta (the linear predictor). Apply np.exp() to obtain
+        the conditional mean on the response scale.
     """
     if isinstance(cluster, str):
         cluster = [cluster]
@@ -108,7 +88,7 @@ def ppml(
     if np.any(y < 0):
         raise ValueError("PPML requires a non-negative dependent variable")
 
-    # Initialize with OLS on log(y + 1) for a reasonable starting point
+    # Initialize with OLS on log(y), replacing y=0 with 0.5 to avoid log(0)
     y_safe = np.where(y > 0, y, 0.5)
     beta = np.linalg.lstsq(X, np.log(y_safe), rcond=None)[0]
 

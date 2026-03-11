@@ -33,6 +33,7 @@ def _irls_quantreg(
     # Starting values: OLS
     beta = np.linalg.lstsq(X, y, rcond=None)[0]
 
+    converged = False
     for _ in range(max_iter):
         resid = y - X @ beta
         # Weights for IRLS
@@ -47,9 +48,17 @@ def _irls_quantreg(
 
         if np.max(np.abs(beta_new - beta)) < tol:
             beta = beta_new
+            converged = True
             break
         beta = beta_new
 
+    if not converged:
+        import warnings
+
+        warnings.warn(
+            f"quantreg IRLS did not converge after {max_iter} iterations",
+            stacklevel=3,
+        )
     return beta
 
 
@@ -102,7 +111,7 @@ def quantreg(
         idx = rng.integers(0, n, size=n)
         betas_boot[b] = _irls_quantreg(X[idx], y[idx], tau)
 
-    V = np.cov(betas_boot.T, ddof=1)
+    V = np.atleast_2d(np.cov(betas_boot.T, ddof=1))
 
     # Pseudo R² (Koenker-Machado, 1999)
     obj_full = _check_function(resid, tau)

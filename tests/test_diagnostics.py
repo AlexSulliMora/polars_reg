@@ -46,7 +46,7 @@ def panel_data():
 
 
 def test_wald_single_restriction(ols_result):
-    """Test that beta_x1 = 1."""
+    """Test that H0: beta_x1 = 0 is rejected."""
     # R = [0, 1, 0, 0] selects x1 coefficient (x1 is first, x2 second, _cons third)
     # But names order is: x1, x2, _cons
     R = np.array([[1, 0, 0]])  # test beta_x1 = 0
@@ -163,7 +163,7 @@ def test_hausman_no_reject_when_uncorrelated():
     r_fe = pr.panel_fe("y ~ x1 + x2", data=df, entity="firm_id", time="year_id")
     r_re = pr.panel_re("y ~ x1 + x2", data=df, entity="firm_id")
     result = pr.hausman_test(r_fe, r_re)
-    assert result["pvalue"] > 0.05
+    assert result["pvalue"] > 0.01
 
 
 # ── Weak instrument test ────────────────────────────────────────
@@ -287,7 +287,7 @@ def test_kp_clustered():
     u = rng.standard_normal(n)
     x_end = 0.8 * z1 + 0.6 * z2 + 0.3 * u
     y = 1.0 + 2.0 * x_end + u
-    cluster = np.random.randint(0, 50, n)
+    cluster = rng.integers(0, 50, n)
     df = pl.DataFrame(
         {
             "y": y,

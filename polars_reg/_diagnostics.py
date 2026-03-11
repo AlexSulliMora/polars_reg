@@ -130,7 +130,6 @@ def kleibergen_paap_test(
     X_exog: np.ndarray,
     X_endog: np.ndarray,
     Z_excl: np.ndarray,
-    resid_2sls: np.ndarray,
     vcov_type: str = "robust",
     cluster_arrays: list[np.ndarray] | None = None,
 ) -> dict:
@@ -147,8 +146,6 @@ def kleibergen_paap_test(
         X_exog: Exogenous regressors including intercept (n x k1).
         X_endog: Endogenous regressors (n x k2).
         Z_excl: Excluded instruments (n x l).
-        resid_2sls: Second-stage residuals (n,). Not used in current
-            implementation but kept for API compatibility.
         vcov_type: "robust" for HC-robust, "cluster" for cluster-robust.
         cluster_arrays: List of cluster code arrays (required when vcov_type="cluster").
 
@@ -279,7 +276,6 @@ def kleibergen_paap_from_result(iv_result: RegressionResult) -> dict:
         X_exog=iv_result._iv_X_exog,
         X_endog=iv_result._iv_X_endog,
         Z_excl=iv_result._iv_Z_excl,
-        resid_2sls=iv_result.residuals,
         vcov_type=vcov_type,
         cluster_arrays=iv_result._iv_cluster_arrays,
     )
@@ -290,4 +286,6 @@ def _matrix_power(A: np.ndarray, p: float) -> np.ndarray:
     eigvals, eigvecs = np.linalg.eigh(A)
     # Clamp small negative eigenvalues from numerical noise
     eigvals = np.maximum(eigvals, 0.0)
+    if p < 0 and np.any(eigvals < 1e-14):
+        raise np.linalg.LinAlgError("Matrix is singular; cannot compute negative matrix power")
     return eigvecs @ np.diag(eigvals**p) @ eigvecs.T

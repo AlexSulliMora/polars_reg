@@ -100,8 +100,9 @@ def test_groupby_singular_group():
         }
     )
     result = pr.groupby_reg(pr.ols, "y ~ x1 + x2", df, group_by="group")
-    # Should fail gracefully rather than crash
-    assert len(result) == 0 or len(result.failed) > 0
+    # Should fail gracefully: the singular group should fail, not succeed
+    assert len(result) == 0
+    assert len(result.failed) > 0
 
 
 def test_groupby_regtable_integration(grouped_data):

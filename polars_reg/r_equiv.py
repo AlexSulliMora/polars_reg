@@ -17,6 +17,7 @@ Usage:
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -270,7 +271,8 @@ def _to_plm(
     lines.append(f'model <- plm({r_formula}, data=df, model="{model}", index={index_str})')
 
     if cluster:
-        lines.append('coeftest(model, vcov=vcovHC(model, type="HC1", cluster="group"))')
+        hc_type = "HC1" if vcov in ("iid", "cluster") else vcov
+        lines.append(f'coeftest(model, vcov=vcovHC(model, type="{hc_type}", cluster="group"))')
     else:
         lines.append("summary(model)")
 
@@ -301,7 +303,8 @@ def _feols_vcov(vcov: str, cluster: list[str] | None) -> str:
         return '"HC2"'
     if vcov == "HC3":
         return '"HC3"'
-    return ""
+    warnings.warn(f"vcov={vcov!r} has no direct fixest equivalent; defaulting to iid", stacklevel=2)
+    return '"iid"'
 
 
 # ---------------------------------------------------------------------------
@@ -559,11 +562,12 @@ def _try_rpy2(
         return None, None, None, details
 
     try:
-        pandas2ri.activate()
+        from rpy2.robjects.conversion import localconverter  # type: ignore[import-untyped]
 
         # Load data into R
         pdf = data.to_pandas()
-        ro.globalenv["df"] = pandas2ri.py2rpy(pdf)
+        with localconverter(ro.default_converter + pandas2ri.converter):
+            ro.globalenv["df"] = ro.conversion.py2rpy(pdf)
 
         # Run the R code
         ro.r(r_code)

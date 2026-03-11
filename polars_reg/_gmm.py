@@ -13,7 +13,6 @@ from polars_reg._se import (
     _hac_meat,
     vcov_clustered,
     vcov_multiway_clustered,
-    vcov_pairs_bootstrap,
     vcov_robust,
     vcov_wild_bootstrap,
 )
@@ -48,6 +47,12 @@ def liml(
 
     spec = parse_formula(formula)
     arrays = extract_arrays(data, spec, cluster=cluster, time=time)
+
+    if arrays.fe_arrays:
+        raise NotImplementedError(
+            "LIML does not yet support absorbed fixed effects. "
+            "Use iv2sls() for IV estimation with FE."
+        )
 
     y = arrays.y
     X_exog = arrays.X  # includes intercept if add_intercept
@@ -135,7 +140,42 @@ def liml(
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1
     elif vcov == "bootstrap":
-        V = vcov_pairs_bootstrap(X_w, y, n_boot=n_boot, seed=seed)
+        # Pairs bootstrap: resample and re-estimate LIML for each sample
+        rng = np.random.default_rng(seed)
+        betas_boot = np.empty((n_boot, k))
+        for b in range(n_boot):
+            idx = rng.integers(0, n, size=n)
+            y_b = y[idx]
+            X_full_b = X_full[idx]
+            Z_b = Z[idx]
+            X_exog_b = X_exog[idx]
+            endog_b = endog[idx]
+            instruments_b = instruments[idx]
+            try:
+                # Recompute kappa for bootstrap sample
+                XeXe_inv_b = np.linalg.inv(X_exog_b.T @ X_exog_b)
+                y_tilde_b = y_b - X_exog_b @ (XeXe_inv_b @ (X_exog_b.T @ y_b))
+                endog_tilde_b = endog_b - X_exog_b @ (XeXe_inv_b @ (X_exog_b.T @ endog_b))
+                Z1_tilde_b = instruments_b - X_exog_b @ (XeXe_inv_b @ (X_exog_b.T @ instruments_b))
+                Y_star_b = np.column_stack([y_tilde_b, endog_tilde_b])
+                Z1tZ1_inv_b = np.linalg.inv(Z1_tilde_b.T @ Z1_tilde_b)
+                Pz1_Ystar_b = Z1_tilde_b @ (Z1tZ1_inv_b @ (Z1_tilde_b.T @ Y_star_b))
+                A_b = Y_star_b.T @ Y_star_b
+                B_b = A_b - Y_star_b.T @ Pz1_Ystar_b
+                eigvals_b = linalg.eig(A_b, B_b, right=False)
+                finite_b = np.isfinite(eigvals_b) & np.isreal(eigvals_b)
+                real_eigs_b = eigvals_b[finite_b].real
+                valid_eigs_b = real_eigs_b[real_eigs_b >= 1.0 - 1e-6]
+                kappa_b = float(np.min(valid_eigs_b))
+                # Solve LIML with bootstrap kappa
+                ZtZ_inv_b = np.linalg.inv(Z_b.T @ Z_b)
+                Pz_Xfull_b = Z_b @ (ZtZ_inv_b @ (Z_b.T @ X_full_b))
+                X_w_b = (1.0 - kappa_b) * X_full_b + kappa_b * Pz_Xfull_b
+                betas_boot[b] = np.linalg.solve(X_w_b.T @ X_full_b, X_w_b.T @ y_b)
+            except (np.linalg.LinAlgError, ValueError):
+                betas_boot[b] = np.nan
+        valid = ~np.any(np.isnan(betas_boot), axis=1)
+        V = np.atleast_2d(np.cov(betas_boot[valid].T, ddof=1))
         vcov_type = "bootstrap"
         df_r = n - k
     elif vcov == "wildboot":
@@ -302,7 +342,7 @@ def gmm_iv(
                 b1_b = XtZ_b @ np.linalg.solve(ZtZ_b, Zty_b)
                 beta1_b = np.linalg.solve(A1_b, b1_b)
                 e1_b = y_b - X_b @ beta1_b
-                S_b = (Z_b * (e1_b**2)[:, None]).T @ Z_b / n
+                S_b = (Z_b * (e1_b**2)[:, None]).T @ Z_b / len(y_b)
                 S_inv_b = np.linalg.inv(S_b)
                 A2_b = XtZ_b @ S_inv_b @ XtZ_b.T
                 b2_b = XtZ_b @ S_inv_b @ Zty_b
@@ -325,16 +365,21 @@ def gmm_iv(
         XZ_Sinv = XtZ @ S_final_inv  # k x q
         Xe = (XZ_Sinv @ Z.T).T * resid[:, None]  # n x k score-like
         if len(cluster_arrays_list) == 1:
-            clusters = cluster_arrays_list[0]
-            G = len(np.unique(clusters))
-            unique_clusters = np.unique(clusters)
+            cluster_codes = cluster_arrays_list[0]
+            G = len(np.unique(cluster_codes))
+            unique_clusters = np.unique(cluster_codes)
             meat_mat = np.zeros((k, k))
             for g in unique_clusters:
-                mask = clusters == g
+                mask = cluster_codes == g
                 sg = Xe[mask].sum(axis=0)
                 meat_mat += np.outer(sg, sg)
             dfc = (G / (G - 1)) * ((n - 1) / (n - k))
             V = dfc * bread @ meat_mat @ bread / (n * n)
+        else:
+            raise NotImplementedError(
+                "Multi-way clustered standard errors are not yet implemented for GMM-IV. "
+                "Use single-cluster or robust standard errors."
+            )
         vcov_type = "cluster"
         n_clusters_dict = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters_dict.values()) - 1

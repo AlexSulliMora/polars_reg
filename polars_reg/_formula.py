@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from itertools import combinations
 
 
 @dataclass
@@ -23,8 +25,6 @@ def _expand_star(term: str) -> list[str]:
     result: list[str] = []
     # All non-empty subsets of parts, ordered by size
     for size in range(1, len(parts) + 1):
-        from itertools import combinations
-
         for subset in combinations(parts, size):
             result.append(":".join(subset))
     return result
@@ -88,10 +88,11 @@ def parse_formula(formula: str) -> FormulaSpec:
     add_intercept = True
     rhs = rhs.strip()
 
-    # Check for - 1 or -1 (no intercept)
-    if rhs.endswith("- 1") or rhs.endswith("-1"):
+    # Check for - 1 or -1 as standalone token (no intercept)
+    _NO_INTERCEPT_RE = re.compile(r'(?:^|[\s+])\s*-\s*1\s*$')
+    if _NO_INTERCEPT_RE.search(rhs):
         add_intercept = False
-        rhs = rhs.rsplit("-", 1)[0].strip().rstrip("+").strip()
+        rhs = _NO_INTERCEPT_RE.sub('', rhs).strip().rstrip('+').strip()
 
     # Parse exog variables, expanding * interactions and i. indicators
     indicators: set[str] = set()

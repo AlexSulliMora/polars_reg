@@ -51,19 +51,16 @@ def test_lazyframe_column_pushdown(simple_data):
     np.testing.assert_allclose(r_lazy.se, r_df.se)
 
 
-@pytest.mark.skipif(not hasattr(polars_reg, "iv2sls"), reason="iv2sls not yet available")
 def test_iv2sls_from_package(iv_data):
     result = polars_reg.iv2sls("y ~ x_exog || x_endog ~ z1 + z2", data=iv_data)
     assert result.model_type == "2SLS"
 
 
-@pytest.mark.skipif(not hasattr(polars_reg, "gmm_iv"), reason="gmm_iv not yet available")
 def test_gmm_from_package(iv_data):
     result = polars_reg.gmm_iv("y ~ x_exog || x_endog ~ z1 + z2", data=iv_data)
     assert result.model_type == "GMM"
 
 
-@pytest.mark.skipif(not hasattr(polars_reg, "panel_fe"), reason="panel_fe not yet available")
 def test_panel_fe_from_package(panel_data):
     result = polars_reg.panel_fe("y ~ x1 + x2", data=panel_data, entity="firm_id")
     assert result.model_type == "Panel FE"

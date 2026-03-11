@@ -22,6 +22,9 @@ def test_panel_fe_default_cluster(panel_data):
 
 def test_panel_fe_matches_ols_fe(panel_data):
     """Panel FE should give same coefficients as OLS with absorbed FE."""
+    # Note: only coefficients are compared. SEs differ because panel_fe and ols
+    # use different degrees-of-freedom corrections (panel_fe uses reg-style,
+    # ols with FE uses reghdfe-style dfc).
     panel_result = panel_fe("y ~ x1 + x2", data=panel_data, entity="firm_id", time="year_id")
     ols_result = ols("y ~ x1 + x2 | firm_id + year_id", data=panel_data, cluster=["firm_id"])
     np.testing.assert_allclose(panel_result.coefficients, ols_result.coefficients, rtol=1e-6)

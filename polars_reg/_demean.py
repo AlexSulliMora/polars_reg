@@ -39,7 +39,8 @@ def _subtract_group_means(
             sums = np.bincount(codes, weights=x, minlength=n_groups)
         else:
             sums = np.bincount(codes, weights=w * x, minlength=n_groups)
-        x -= (sums / denom)[codes]
+        means = np.divide(sums, denom, out=np.zeros_like(sums), where=denom != 0)
+        x -= means[codes]
         return x
     k = x.shape[1]
     for j in range(k):
@@ -48,7 +49,8 @@ def _subtract_group_means(
             sums = np.bincount(codes, weights=col, minlength=n_groups)
         else:
             sums = np.bincount(codes, weights=w * col, minlength=n_groups)
-        col -= (sums / denom)[codes]
+        means = np.divide(sums, denom, out=np.zeros_like(sums), where=denom != 0)
+        col -= means[codes]
     return x
 
 
@@ -60,7 +62,7 @@ def _group_means(x: NDArray, codes: NDArray, n_groups: int, w: NDArray | None = 
             sums = np.bincount(codes, weights=x, minlength=n_groups)
         else:
             sums = np.bincount(codes, weights=w * x, minlength=n_groups)
-        return sums / denom
+        return np.divide(sums, denom, out=np.zeros_like(sums), where=denom != 0)
     k = x.shape[1]
     means = np.empty((n_groups, k))
     for j in range(k):
@@ -68,7 +70,7 @@ def _group_means(x: NDArray, codes: NDArray, n_groups: int, w: NDArray | None = 
             sums = np.bincount(codes, weights=x[:, j], minlength=n_groups)
         else:
             sums = np.bincount(codes, weights=w * x[:, j], minlength=n_groups)
-        means[:, j] = sums / denom
+        means[:, j] = np.divide(sums, denom, out=np.zeros_like(sums), where=denom != 0)
     return means
 
 
@@ -95,6 +97,10 @@ def demean(
 
     X = X.copy().astype(np.float64)
     fe_list = list(fe_dict.values())
+
+    if X.shape[0] == 0 or any(len(codes) == 0 for codes in fe_list):
+        return X.squeeze(axis=1) if squeeze else X
+
     n_groups_list = [int(codes.max()) + 1 for codes in fe_list]
 
     # Use Rust native path for unweighted demeaning
@@ -167,9 +173,11 @@ def _demean_cg(
     u = r.copy()
     ssr = np.sum(r * r)
 
+    x0_norm = np.sum(x * x)
+    tol_sq = tol**2 * max(x0_norm, 1e-16)
+
     for _ in range(max_iter):
-        x_norm = np.sum(x * x)
-        if ssr < tol**2 * max(x_norm, 1e-16):
+        if ssr < tol_sq:
             break
 
         # v = u - T(u) = A*u where A = I - T
@@ -215,25 +223,57 @@ def absorbed_dof(fe_dict: dict[str, NDArray]) -> int:
     """Count degrees of freedom absorbed by fixed effects.
 
     Single FE: number of groups.
-    Two+ FE: sum of groups minus connected components (pairwise method).
+    Two+ FE: sum of groups minus connected components of the full
+    multipartite graph (offset each FE dimension into a single node space,
+    build edges between all pairs at each observation, count components once).
     """
     if _HAS_NATIVE:
         fe_codes_list = [np.ascontiguousarray(v, dtype=np.int32) for v in fe_dict.values()]
         return _rust_absorbed_dof(fe_codes_list)
 
     fe_list = list(fe_dict.values())
+
+    if not fe_list or len(fe_list[0]) == 0:
+        return 0
+
     n_groups = [int(codes.max()) + 1 for codes in fe_list]
-    total_dof = n_groups[0]
+    total_groups = sum(n_groups)
 
+    if len(fe_list) == 1:
+        return n_groups[0]
+
+    # Build multipartite graph: offset each FE dimension into a single node space
+    offsets = np.zeros(len(fe_list), dtype=np.int64)
     for i in range(1, len(fe_list)):
-        total_dof += n_groups[i]
-        max_components = 0
-        for j in range(i):
-            c = _connected_components(fe_list[j], n_groups[j], fe_list[i], n_groups[i])
-            max_components = max(max_components, c)
-        total_dof -= max_components
+        offsets[i] = offsets[i - 1] + n_groups[i - 1]
 
-    return total_dof
+    # Collect edges between all pairs of FE dimensions
+    rows_list: list[NDArray] = []
+    cols_list: list[NDArray] = []
+    for i in range(len(fe_list)):
+        for j in range(i + 1, len(fe_list)):
+            # Deduplicate edges for this pair
+            codes_i = fe_list[i].astype(np.int64) + offsets[i]
+            codes_j = fe_list[j].astype(np.int64) + offsets[j]
+            edge_codes = codes_i * total_groups + codes_j
+            unique_edges = np.unique(edge_codes)
+            ui = unique_edges // total_groups
+            uj = unique_edges % total_groups
+            rows_list.append(ui)
+            cols_list.append(uj)
+
+    all_rows = np.concatenate(rows_list)
+    all_cols = np.concatenate(cols_list)
+    data = np.ones(len(all_rows))
+
+    graph = scipy.sparse.coo_matrix(
+        (data, (all_rows, all_cols)),
+        shape=(total_groups, total_groups),
+    )
+    graph = graph + graph.T
+    n_components = scipy.sparse.csgraph.connected_components(graph, directed=False)[0]
+
+    return total_groups - n_components
 
 
 def _connected_components(codes_a: NDArray, n_a: int, codes_b: NDArray, n_b: int) -> int:

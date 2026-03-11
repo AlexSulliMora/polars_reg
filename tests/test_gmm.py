@@ -32,7 +32,7 @@ def test_gmm_j_stat(iv_data):
     result = gmm_iv("y ~ x_exog || x_endog ~ z1 + z2", data=iv_data)
     assert result.j_stat is not None
     assert result.j_pvalue is not None
-    assert result.j_pvalue > 0.0  # should not reject (valid instruments in DGP)
+    assert result.j_pvalue > 0.05  # should not reject at 5% level (valid instruments in DGP)
 
 
 def test_gmm_summary(iv_data):

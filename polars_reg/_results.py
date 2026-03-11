@@ -123,7 +123,7 @@ class RegressionResult:
 
     def fitted(self) -> NDArray:
         """Return fitted values (X @ beta). Only available for in-sample predictions."""
-        if self._X is None or self._y is None:
+        if self._y is None:
             raise ValueError("Fitted values not available (model was not stored).")
         return self._y - self.residuals
 
@@ -248,7 +248,7 @@ class RegressionResult:
 
         # Model info in two columns (left col 40 chars, right col 38 chars)
         lw, rw = 40, 38
-        depvar = self.names[0] if len(self.names) == 1 else "y"
+        depvar = "y"
 
         def _row(l_label: str, l_val: str, r_label: str, r_val: str) -> str:
             left = f"{l_label:<18} {l_val:>6}"

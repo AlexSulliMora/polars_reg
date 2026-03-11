@@ -188,7 +188,7 @@ def panel_re(
     spec = parse_formula(formula)
 
     # Drop rows with nulls in relevant columns to stay aligned with extract_arrays
-    relevant_cols = [spec.depvar] + spec.exog
+    relevant_cols = [spec.depvar] + spec.exog + [entity]
     if time is not None:
         relevant_cols.append(time)
     if cluster:
@@ -245,7 +245,8 @@ def panel_re(
     sigma_u2 = max(0.0, sigma_b2 - sigma_e2 / T_bar)
 
     # Step 3: Compute theta per entity (quasi-demeaning parameter)
-    theta = 1.0 - np.sqrt(sigma_e2 / (T_i * sigma_u2 + sigma_e2))
+    denom = T_i * sigma_u2 + sigma_e2
+    theta = np.where(denom > 0, 1.0 - np.sqrt(np.maximum(sigma_e2, 0.0) / denom), 0.0)
 
     # Step 4: Quasi-demean (full X including intercept)
     entity_means_X_full = _group_means(X, entity_codes, n_entities)
@@ -461,7 +462,7 @@ def panel_fd(
         V = vcov_wild_bootstrap(X_d, resid, cl_arr, n_boot=n_boot, seed=seed)
         vcov_type_str = "wildboot"
         df_r = min(n_clusters_dict.values()) - 1
-    else:
+    elif cluster:
         cluster_list = [cluster_arrays[c] for c in cluster]
         if len(cluster_list) == 1:
             V = vcov_clustered(X_d, resid, cluster_list[0])
@@ -469,6 +470,18 @@ def panel_fd(
             V = vcov_multiway_clustered(X_d, resid, cluster_list)
         vcov_type_str = "cluster"
         df_r = min(n_clusters_dict.values()) - 1
+    elif vcov == "iid":
+        V = vcov_iid(X_d, resid)
+        vcov_type_str = "iid"
+        df_r = n - k
+    elif vcov in ("HC1", "HC0", "HC2", "HC3"):
+        V = vcov_robust(X_d, resid, kind=vcov)
+        vcov_type_str = vcov
+        df_r = n - k
+    else:
+        V = vcov_iid(X_d, resid)
+        vcov_type_str = "iid"
+        df_r = n - k
 
     return RegressionResult(
         coefficients=beta,

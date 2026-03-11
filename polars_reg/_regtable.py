@@ -373,7 +373,8 @@ def regtable(
     labels: list[str] | None = None,
     precision: int = 4,
     stars: bool = True,
-    format: str = "text",
+    output_format: str = "text",
+    **kwargs: str,
 ) -> str:
     """Display multiple regressions side-by-side in a compact table.
 
@@ -386,11 +387,16 @@ def regtable(
         precision: Significant figures for coefficients/SEs (default 4).
         stars: Show significance stars (default True).
             * p<0.10, ** p<0.05, *** p<0.01
-        format: Output format — "text" (default), "latex", or "html".
+        output_format: Output format — "text" (default), "latex", or "html".
 
     Returns:
         Formatted string table.
     """
+    # Support deprecated 'format' keyword for backwards compatibility
+    if "format" in kwargs:
+        output_format = kwargs.pop("format")
+    if kwargs:
+        raise TypeError(f"Unexpected keyword arguments: {', '.join(kwargs)}")
     if not results:
         raise ValueError("At least one RegressionResult is required.")
 
@@ -415,9 +421,9 @@ def regtable(
 
     td = _build_table_data(results, labels, precision, stars)
 
-    if format == "latex":
+    if output_format == "latex":
         return RegTable(_render_latex(td))
-    elif format == "html":
+    elif output_format == "html":
         html = _render_html(td)
         return RegTable(html, html=html)
     else:
