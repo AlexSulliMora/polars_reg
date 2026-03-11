@@ -89,10 +89,10 @@ def parse_formula(formula: str) -> FormulaSpec:
     rhs = rhs.strip()
 
     # Check for - 1 or -1 as standalone token (no intercept)
-    _NO_INTERCEPT_RE = re.compile(r'(?:^|[\s+])\s*-\s*1\s*$')
+    _NO_INTERCEPT_RE = re.compile(r"(?:^|[\s+])\s*-\s*1\s*$")
     if _NO_INTERCEPT_RE.search(rhs):
         add_intercept = False
-        rhs = _NO_INTERCEPT_RE.sub('', rhs).strip().rstrip('+').strip()
+        rhs = _NO_INTERCEPT_RE.sub("", rhs).strip().rstrip("+").strip()
 
     # Parse exog variables, expanding * interactions and i. indicators
     indicators: set[str] = set()

@@ -180,7 +180,6 @@ def _binary_model(
     return result
 
 
-
 def probit(
     formula: str,
     data: pl.DataFrame | pl.LazyFrame,

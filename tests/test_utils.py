@@ -112,11 +112,13 @@ def test_extract_arrays_nan_in_fe():
     fe = rng.integers(0, 5, size=n).astype(float)
     fe[0] = np.nan
     fe[1] = np.nan
-    df = pl.DataFrame({
-        "y": rng.standard_normal(n),
-        "x1": rng.standard_normal(n),
-        "fe1": fe,
-    })
+    df = pl.DataFrame(
+        {
+            "y": rng.standard_normal(n),
+            "x1": rng.standard_normal(n),
+            "fe1": fe,
+        }
+    )
     spec = FormulaSpec(depvar="y", exog=["x1"], fe=["fe1"])
     arrays = extract_arrays(df, spec)
     assert arrays.n_obs == 48
@@ -163,10 +165,12 @@ def test_extract_arrays_single_row():
 
 def test_extract_arrays_all_null_column():
     """Column with all nulls raises ValueError (no observations remain)."""
-    df = pl.DataFrame({
-        "y": [1.0, 2.0, 3.0],
-        "x1": [None, None, None],
-    })
+    df = pl.DataFrame(
+        {
+            "y": [1.0, 2.0, 3.0],
+            "x1": [None, None, None],
+        }
+    )
     spec = FormulaSpec(depvar="y", exog=["x1"], add_intercept=True)
     with pytest.raises(ValueError, match="No observations remain"):
         extract_arrays(df, spec)
@@ -177,10 +181,12 @@ def test_extract_arrays_all_null_column():
 
 def test_extract_arrays_int_columns():
     """Integer-typed x columns auto-cast to float64."""
-    df = pl.DataFrame({
-        "y": [1.0, 2.0, 3.0],
-        "x1": [10, 20, 30],
-    })
+    df = pl.DataFrame(
+        {
+            "y": [1.0, 2.0, 3.0],
+            "x1": [10, 20, 30],
+        }
+    )
     spec = FormulaSpec(depvar="y", exog=["x1"], add_intercept=True)
     arrays = extract_arrays(df, spec)
     assert arrays.X.dtype == np.float64

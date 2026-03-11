@@ -67,8 +67,7 @@ def ensure_polars(data: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFr
         return pl.from_pandas(data)
     if not isinstance(data, (pl.DataFrame, pl.LazyFrame)):
         raise TypeError(
-            "Expected Polars DataFrame/LazyFrame or pandas DataFrame, "
-                f"got {type(data).__name__}"
+            f"Expected Polars DataFrame/LazyFrame or pandas DataFrame, got {type(data).__name__}"
         )
     return data
 
@@ -148,10 +147,12 @@ def extract_arrays(
     # Convert IEEE NaN to Polars null (NaN passes through drop_nulls silently)
     float_cols = [c for c in numeric_cols if df[c].dtype.is_float()]
     if float_cols:
-        df = df.with_columns([
-            pl.when(pl.col(c).is_nan()).then(None).otherwise(pl.col(c)).alias(c)
-            for c in float_cols
-        ])
+        df = df.with_columns(
+            [
+                pl.when(pl.col(c).is_nan()).then(None).otherwise(pl.col(c)).alias(c)
+                for c in float_cols
+            ]
+        )
 
     df_clean = df.drop_nulls(subset=numeric_cols)
 

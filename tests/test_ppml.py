@@ -241,8 +241,7 @@ class TestPPMLSeparation:
             res = ppml("y ~ x1 + x2", data=sep_data, max_iter=50)
         # Either got a warning or coefficients are very large (separation detected)
         warned = any(
-            "separation" in str(wi.message).lower()
-            or "converge" in str(wi.message).lower()
+            "separation" in str(wi.message).lower() or "converge" in str(wi.message).lower()
             for wi in w
         )
         has_large_coef = np.any(np.abs(res.coefficients) > 10)

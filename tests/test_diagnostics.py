@@ -323,9 +323,7 @@ def test_hausman_test_identical_models():
     x1 = rng.standard_normal(n)
     x2 = rng.standard_normal(n)
     y = 1.0 * x1 - 0.5 * x2 + rng.standard_normal(n)
-    df = pl.DataFrame(
-        {"y": y, "x1": x1, "x2": x2, "firm_id": firm_id, "year_id": year_id}
-    )
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2, "firm_id": firm_id, "year_id": year_id})
     r_fe = pr.panel_fe("y ~ x1 + x2", data=df, entity="firm_id", time="year_id")
     # Run hausman with same FE result used twice — but hausman_test requires
     # FE and RE, so use RE with data uncorrelated with FE
@@ -346,9 +344,7 @@ def test_hausman_no_common_coefficients():
     x1 = rng.standard_normal(n)
     x2 = rng.standard_normal(n)
     y = x1 + x2 + rng.standard_normal(n)
-    df = pl.DataFrame(
-        {"y": y, "x1": x1, "x2": x2, "firm_id": firm_id, "year_id": year_id}
-    )
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2, "firm_id": firm_id, "year_id": year_id})
     r_fe = pr.panel_fe("y ~ x1", data=df, entity="firm_id", time="year_id")
     r_re = pr.panel_re("y ~ x2", data=df, entity="firm_id")
     with pytest.raises(ValueError, match="No common coefficients"):

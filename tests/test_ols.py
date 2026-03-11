@@ -235,12 +235,14 @@ def test_ols_with_singletons_no_warnings():
     # Force singletons in first 3 observations
     fe1[:3] = [997, 998, 999]
 
-    df = pl.DataFrame({
-        "y": rng.standard_normal(n),
-        "x1": rng.standard_normal(n),
-        "fe1": fe1,
-        "fe2": fe2,
-    })
+    df = pl.DataFrame(
+        {
+            "y": rng.standard_normal(n),
+            "x1": rng.standard_normal(n),
+            "fe1": fe1,
+            "fe2": fe2,
+        }
+    )
 
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
@@ -322,12 +324,14 @@ def test_ols_all_singletons_raises():
     n = 50
     x1 = rng.standard_normal(n)
     x2 = rng.standard_normal(n)
-    df = pl.DataFrame({
-        "y": rng.standard_normal(n),
-        "x1": x1,
-        "x2": x2,
-        "fe": np.arange(n),
-    })
+    df = pl.DataFrame(
+        {
+            "y": rng.standard_normal(n),
+            "x1": x1,
+            "x2": x2,
+            "fe": np.arange(n),
+        }
+    )
     # Use interaction + HC3 vcov to force pure Python path
     with pytest.raises(ValueError, match="singletons"):
         ols("y ~ x1 + x1:x2 | fe", data=df, vcov="HC3")
@@ -338,10 +342,12 @@ def test_ols_collinear_raises():
     rng = np.random.default_rng(42)
     n = 100
     x1 = rng.standard_normal(n)
-    df = pl.DataFrame({
-        "y": rng.standard_normal(n),
-        "x1": x1,
-        "x2": x1,  # identical copy
-    })
+    df = pl.DataFrame(
+        {
+            "y": rng.standard_normal(n),
+            "x1": x1,
+            "x2": x1,  # identical copy
+        }
+    )
     with pytest.raises(ValueError, match="(?i)singular"):
         ols("y ~ x1 + x2 - 1", data=df)

@@ -35,7 +35,6 @@ def _ppml_null_deviance(y: np.ndarray) -> float:
     return _ppml_deviance(y, mu0)
 
 
-
 def ppml(
     formula: str,
     data: pl.DataFrame | pl.LazyFrame,

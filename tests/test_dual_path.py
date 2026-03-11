@@ -13,14 +13,16 @@ def _make_fe_data(seed=42):
     """Shared data for dual-path tests."""
     rng = np.random.default_rng(seed)
     n = 500
-    return pl.DataFrame({
-        "y": rng.standard_normal(n),
-        "x1": rng.standard_normal(n),
-        "x2": rng.standard_normal(n),
-        "fe1": rng.integers(0, 20, size=n),
-        "fe2": rng.integers(0, 10, size=n),
-        "cl": rng.integers(0, 15, size=n),
-    })
+    return pl.DataFrame(
+        {
+            "y": rng.standard_normal(n),
+            "x1": rng.standard_normal(n),
+            "x2": rng.standard_normal(n),
+            "fe1": rng.integers(0, 20, size=n),
+            "fe2": rng.integers(0, 10, size=n),
+            "cl": rng.integers(0, 15, size=n),
+        }
+    )
 
 
 def test_ols_fe_python_vs_rust():
@@ -31,8 +33,7 @@ def test_ols_fe_python_vs_rust():
     r_rust = pr.ols("y ~ x1 + x2 | fe1 + fe2", data=df)
 
     # Python path
-    with patch("polars_reg._demean._HAS_NATIVE", False), \
-         patch("polars_reg._se._HAS_NATIVE", False):
+    with patch("polars_reg._demean._HAS_NATIVE", False), patch("polars_reg._se._HAS_NATIVE", False):
         r_python = pr.ols("y ~ x1 + x2 | fe1 + fe2", data=df)
 
     np.testing.assert_allclose(r_rust.coefficients, r_python.coefficients, atol=1e-10)
@@ -64,8 +65,7 @@ def test_ols_fe_predict_python_vs_rust():
 
     r_rust = pr.ols("y ~ x1 + x2 | fe1", data=df)
 
-    with patch("polars_reg._demean._HAS_NATIVE", False), \
-         patch("polars_reg._se._HAS_NATIVE", False):
+    with patch("polars_reg._demean._HAS_NATIVE", False), patch("polars_reg._se._HAS_NATIVE", False):
         r_python = pr.ols("y ~ x1 + x2 | fe1", data=df)
 
     # Both should have same coefficients
@@ -78,8 +78,7 @@ def test_clustered_se_python_vs_rust():
 
     r_rust = pr.ols("y ~ x1 + x2 | fe1", data=df, cluster=["cl"])
 
-    with patch("polars_reg._demean._HAS_NATIVE", False), \
-         patch("polars_reg._se._HAS_NATIVE", False):
+    with patch("polars_reg._demean._HAS_NATIVE", False), patch("polars_reg._se._HAS_NATIVE", False):
         r_python = pr.ols("y ~ x1 + x2 | fe1", data=df, cluster=["cl"])
 
     np.testing.assert_allclose(r_rust.coefficients, r_python.coefficients, atol=1e-10)

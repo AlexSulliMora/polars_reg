@@ -291,9 +291,7 @@ def test_panel_ab_pandas_compat():
         y[:, t] = rho * y[:, t - 1] + 1.0 * x[:, t] + alpha + e[:, t]
     entity = np.repeat(np.arange(n_e), n_t)
     time_id = np.tile(np.arange(n_t), n_e)
-    df_pd = pd.DataFrame(
-        {"y": y.ravel(), "x": x.ravel(), "entity": entity, "time": time_id}
-    )
+    df_pd = pd.DataFrame({"y": y.ravel(), "x": x.ravel(), "entity": entity, "time": time_id})
     r = panel_ab("y ~ x", data=df_pd, entity="entity", time="time")
     assert r.model_type == "Arellano-Bond"
     assert r.n_obs > 0
@@ -316,9 +314,7 @@ def test_panel_sys_gmm_pandas_compat():
         y[:, t] = rho * y[:, t - 1] + 1.0 * x[:, t] + alpha + e[:, t]
     entity = np.repeat(np.arange(n_e), n_t)
     time_id = np.tile(np.arange(n_t), n_e)
-    df_pd = pd.DataFrame(
-        {"y": y.ravel(), "x": x.ravel(), "entity": entity, "time": time_id}
-    )
+    df_pd = pd.DataFrame({"y": y.ravel(), "x": x.ravel(), "entity": entity, "time": time_id})
     r = panel_sys_gmm("y ~ x", data=df_pd, entity="entity", time="time")
     assert r.model_type == "System GMM"
     assert r.n_obs > 0
