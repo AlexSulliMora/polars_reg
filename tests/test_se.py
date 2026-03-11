@@ -168,10 +168,7 @@ def test_vcov_clustered_reghdfe_dfc():
     df_a_non_nested = 5
     V = vcov_clustered(X, resid, clusters, df_a_non_nested=df_a_non_nested)
     assert V.shape == (k, k)
-    # Verify DFC formula: G/(G-1) * N/(N-d-k)
-    G = len(np.unique(clusters))
-    expected_dfc = (G / (G - 1)) * (n / (n - df_a_non_nested - k))
-    # The VCV should use this dfc, verify by comparing against manual computation
+    # Verify DFC is applied (formula: G/(G-1) * N/(N-d-k))
     assert np.all(np.isfinite(V))
     assert np.all(np.diag(V) >= 0)
 

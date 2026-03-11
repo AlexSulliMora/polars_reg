@@ -262,8 +262,9 @@ def test_liml_fe_raises(iv_data_panel):
 
 def test_gmm_multiway_cluster_raises(iv_data):
     """GMM-IV with multi-way clustering should raise NotImplementedError."""
-    from polars_reg._gmm import gmm_iv
     import polars as pl
+
+    from polars_reg._gmm import gmm_iv
 
     rng = np.random.default_rng(42)
     n = iv_data.height

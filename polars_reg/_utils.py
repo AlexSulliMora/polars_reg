@@ -58,12 +58,18 @@ def ensure_polars(data: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFr
         import pandas as pd
     except ImportError:
         if not isinstance(data, (pl.DataFrame, pl.LazyFrame)):
-            raise TypeError(f"Expected Polars DataFrame/LazyFrame or pandas DataFrame, got {type(data).__name__}")
+            raise TypeError(
+                "Expected Polars DataFrame/LazyFrame or pandas DataFrame, "
+                f"got {type(data).__name__}"
+            )
         return data
     if isinstance(data, pd.DataFrame):
         return pl.from_pandas(data)
     if not isinstance(data, (pl.DataFrame, pl.LazyFrame)):
-        raise TypeError(f"Expected Polars DataFrame/LazyFrame or pandas DataFrame, got {type(data).__name__}")
+        raise TypeError(
+            "Expected Polars DataFrame/LazyFrame or pandas DataFrame, "
+                f"got {type(data).__name__}"
+        )
     return data
 
 
@@ -150,7 +156,10 @@ def extract_arrays(
     df_clean = df.drop_nulls(subset=numeric_cols)
 
     if len(df_clean) == 0:
-        raise ValueError("No observations remain after dropping nulls. Check for missing data in columns: " + ", ".join(numeric_cols))
+        raise ValueError(
+            "No observations remain after dropping nulls. "
+            "Check for missing data in columns: " + ", ".join(numeric_cols)
+        )
 
     n_obs = len(df_clean)
 

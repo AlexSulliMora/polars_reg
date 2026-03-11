@@ -128,7 +128,7 @@ def _build_vce(vcov: str, cluster: list[str] | None) -> str:
 
     vce_map = {
         "iid": "",
-        "HC0": "vce(robust)",  # Note: Stata vce(robust) is HC1-equivalent; HC0 has no direct Stata analog
+        "HC0": "vce(robust)",  # Stata vce(robust) is HC1; HC0 has no direct analog
         "HC1": "vce(robust)",
         "HC2": "vce(hc2)",
         "HC3": "vce(hc3)",

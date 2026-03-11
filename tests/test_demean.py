@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 from polars_reg._demean import absorbed_dof, demean, drop_singletons, reindex_fe_codes
 
@@ -206,8 +205,6 @@ def test_demean_weighted_singletons():
 
 def test_absorbed_dof_three_way():
     """3 FE dimensions, verify against brute-force LSDV DoF."""
-    rng = np.random.default_rng(42)
-    n = 60
     a = np.repeat(np.arange(3), 20)
     b = np.tile(np.repeat(np.arange(4), 5), 3)
     c = np.tile(np.arange(5), 12)

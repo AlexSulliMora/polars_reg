@@ -1,8 +1,9 @@
 """Tests that Python fallback and Rust native paths produce identical results."""
 
+from unittest.mock import patch
+
 import numpy as np
 import polars as pl
-from unittest.mock import patch
 
 import polars_reg as pr
 from polars_reg._demean import demean

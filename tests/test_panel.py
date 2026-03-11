@@ -1,6 +1,5 @@
 import numpy as np
 import polars as pl
-import pytest
 
 from polars_reg._ols import ols
 from polars_reg._panel import panel_fd, panel_fe, panel_re
@@ -297,7 +296,6 @@ def test_panel_fe_iid_se_explicit(panel_data):
 def test_panel_unbalanced_extreme():
     """Unbalanced panel: some entities 2 obs, others 50."""
     rng = np.random.default_rng(42)
-    rows = []
     entity_id = []
     time_id = []
     idx = 0
