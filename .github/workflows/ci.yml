@@ -72,12 +72,21 @@ jobs:
       - name: Run R parity tests
         run: pytest tests/test_cross_parity.py -v --tb=short
 
-  publish:
-    runs-on: ubuntu-latest
+  build-wheels:
     needs: test
     if: startsWith(github.ref, 'refs/tags/v')
-    permissions:
-      id-token: write
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64
+          - os: windows-latest
+            target: x64
+          - os: macos-13
+            target: x86_64
+          - os: macos-14
+            target: aarch64
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
@@ -87,16 +96,54 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist
+          manylinux: auto
 
-      - name: Install maturin
-        run: pip install maturin
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}-${{ matrix.target }}
+          path: dist
 
-      - name: Build wheel
-        run: maturin build --release
+  build-sdist:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-sdist
+          path: dist
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: [build-wheels, build-sdist]
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist/
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: target/wheels/
+          packages-dir: dist/
