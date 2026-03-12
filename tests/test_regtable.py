@@ -5,7 +5,7 @@ import polars as pl
 import pytest
 
 from polars_reg import groupby_reg, ols, regtable
-from polars_reg._regtable import RegTable
+from polars_reg._regtable import RegTable, _normalize_stat
 
 
 def test_regtable_basic(simple_data):
@@ -53,22 +53,150 @@ def test_regtable_no_stars(simple_data):
     assert "p<0.10" not in table
 
 
-def test_regtable_se_in_parens(simple_data):
-    """SEs should be wrapped in parentheses without internal padding."""
+# ── stat parameter tests ──────────────────────────────────────────
+
+
+def test_regtable_default_shows_tstat(simple_data):
+    """Default stat='t' shows t-statistics in parentheses."""
     r1 = ols("y ~ x1", data=simple_data)
     table = regtable(r1)
-    # Find a line with parentheses (SE line)
-    se_lines = [
-        line for line in table.split("\n") if "(" in line and ")" in line and "p<" not in line
+    assert "T-statistics in parentheses" in table
+    # t-stats should be in parens — find a line with parens (not the footnote)
+    stat_lines = [
+        line
+        for line in table.split("\n")
+        if "(" in line and ")" in line and "p<" not in line and "T-stat" not in line
     ]
-    assert len(se_lines) > 0
-    for line in se_lines:
-        # Extract the parenthesized part
-        start = line.index("(")
-        end = line.index(")", start)
-        inner = line[start + 1 : end]
-        # Should not start with space
-        assert not inner.startswith(" "), f"SE has internal padding: '{line.strip()}'"
+    assert len(stat_lines) > 0
+
+
+def test_regtable_stat_se(simple_data):
+    """stat='se' shows standard errors in parentheses."""
+    r1 = ols("y ~ x1", data=simple_data)
+    table = regtable(r1, stat="se")
+    assert "Standard errors in parentheses" in table
+
+
+def test_regtable_stat_none(simple_data):
+    """stat=None shows coefficients only, no sub-stats."""
+    r1 = ols("y ~ x1", data=simple_data)
+    table_none = regtable(r1, stat=None)
+    table_t = regtable(r1, stat="t")
+    # stat=None should have fewer lines than stat="t" (no stat rows)
+    assert table_none.count("\n") < table_t.count("\n")
+    # No stat footnote
+    assert "parentheses" not in table_none
+    assert "brackets" not in table_none
+
+
+def test_regtable_stat_both(simple_data):
+    """stat=('t', 'se') shows both t-stats and SEs."""
+    r1 = ols("y ~ x1", data=simple_data)
+    table = regtable(r1, stat=("t", "se"))
+    assert "T-statistics in parentheses" in table
+    assert "standard errors in brackets" in table
+    # Should have both () and [] stat lines
+    lines = table.split("\n")
+    paren_lines = [
+        ln for ln in lines if ln.strip().startswith("(") and "p<" not in ln and "T-stat" not in ln
+    ]
+    bracket_lines = [ln for ln in lines if ln.strip().startswith("[")]
+    assert len(paren_lines) > 0
+    assert len(bracket_lines) > 0
+
+
+def test_regtable_stat_both_reversed(simple_data):
+    """stat=('se', 't') shows SE first in parens, t in brackets."""
+    r1 = ols("y ~ x1", data=simple_data)
+    table = regtable(r1, stat=("se", "t"))
+    assert "Standard errors in parentheses" in table
+    assert "t-statistics in brackets" in table
+
+
+def test_regtable_stat_values_correct(simple_data):
+    """Verify actual t-stat and SE values appear in output."""
+    r1 = ols("y ~ x1", data=simple_data)
+    t_val = r1.tstat[0]  # intercept t-stat
+    se_val = r1.se[0]  # intercept SE
+
+    # t-stat table
+    t_table = regtable(r1, stat="t")
+    t_str = f"{t_val:.4g}"
+    assert t_str in t_table
+
+    # SE table
+    se_table = regtable(r1, stat="se")
+    se_str = f"{se_val:.4g}"
+    assert se_str in se_table
+
+
+# ── brackets parameter tests ──────────────────────────────────────
+
+
+def test_regtable_brackets_square(simple_data):
+    """brackets='square' uses [] as primary brackets."""
+    r1 = ols("y ~ x1", data=simple_data)
+    table = regtable(r1, brackets="square")
+    assert "T-statistics in brackets" in table
+    lines = table.split("\n")
+    bracket_lines = [ln for ln in lines if ln.strip().startswith("[")]
+    assert len(bracket_lines) > 0
+
+
+def test_regtable_brackets_square_both(simple_data):
+    """brackets='square' with both stats: primary in [], secondary in ()."""
+    r1 = ols("y ~ x1", data=simple_data)
+    table = regtable(r1, stat=("t", "se"), brackets="square")
+    assert "T-statistics in brackets" in table
+    assert "standard errors in parentheses" in table
+
+
+def test_regtable_brackets_invalid(simple_data):
+    """Invalid brackets value raises ValueError."""
+    r1 = ols("y ~ x1", data=simple_data)
+    with pytest.raises(ValueError, match="brackets must be"):
+        regtable(r1, brackets="curly")
+
+
+# ── wide parameter tests ──────────────────────────────────────────
+
+
+def test_regtable_wide(simple_data):
+    """wide=True puts stats in columns beside coefficients."""
+    r1 = ols("y ~ x1", data=simple_data)
+    r2 = ols("y ~ x1 + x2", data=simple_data)
+    table_normal = regtable(r1, r2, stat="t")
+    table_wide = regtable(r1, r2, stat="t", wide=True)
+    # Wide should have fewer lines (no separate stat rows)
+    assert table_wide.count("\n") < table_normal.count("\n")
+
+
+def test_regtable_wide_both(simple_data):
+    """wide=True with both stats produces wider rows."""
+    r1 = ols("y ~ x1", data=simple_data)
+    table = regtable(r1, stat=("t", "se"), wide=True)
+    # Should have t-stats and SEs on the same row as coefficients
+    lines = table.split("\n")
+    x1_line = [ln for ln in lines if ln.startswith("x1")][0]
+    # Should contain both () and [] on same line
+    assert "(" in x1_line and ")" in x1_line
+    assert "[" in x1_line and "]" in x1_line
+
+
+def test_regtable_wide_stat_none(simple_data):
+    """wide=True with stat=None just shows coefficients."""
+    r1 = ols("y ~ x1", data=simple_data)
+    table = regtable(r1, stat=None, wide=True)
+    assert "x1" in table
+    # No stat lines
+    lines = table.split("\n")
+    paren_lines = [
+        ln for ln in lines if "(" in ln and ")" in ln and "p<" not in ln and "(1)" not in ln
+    ]
+    assert len(paren_lines) == 0
+
+
+# ── Existing feature tests ────────────────────────────────────────
 
 
 def test_regtable_missing_vars(simple_data):
@@ -79,7 +207,6 @@ def test_regtable_missing_vars(simple_data):
     # x2 row should have blank in column 1
     lines = table.split("\n")
     x2_line = [ln for ln in lines if ln.startswith("x2")][0]
-    # The first model column should be mostly spaces
     assert "x2" in x2_line
 
 
@@ -93,10 +220,8 @@ def test_regtable_fe_indicator_rows(panel_data):
     lines = table.split("\n")
     firm_line = [ln for ln in lines if "firm_id" in ln and ln.strip().startswith("firm_id")][0]
     year_line = [ln for ln in lines if "year_id" in ln and ln.strip().startswith("year_id")][0]
-    # r1=N, r2=Y, r3=Y for firm_id
     assert firm_line.count("Y") == 2
     assert firm_line.count("N") == 1
-    # r1=N, r2=N, r3=Y for year_id
     assert year_line.count("Y") == 1
     assert year_line.count("N") == 2
 
@@ -125,8 +250,6 @@ def test_regtable_precision(simple_data):
     r1 = ols("y ~ x1 + x2", data=simple_data)
     t2 = regtable(r1, precision=2)
     t6 = regtable(r1, precision=6)
-    # Lower precision should generally produce shorter numbers
-    # Just check both run without error
     assert len(t2) > 0
     assert len(t6) > 0
 
@@ -141,11 +264,9 @@ def test_regtable_groupby_expansion():
     df = pl.DataFrame({"y": y, "x1": x1, "group": group})
     grp = groupby_reg(ols, "y ~ x1", df, group_by="group")
     table = regtable(grp)
-    # Should have 3 columns labeled by group keys
     assert "A" in table
     assert "B" in table
     assert "C" in table
-    # Should have coefficient rows
     assert "x1" in table
 
 
@@ -160,9 +281,11 @@ def test_regtable_groupby_mixed(simple_data):
     grp = groupby_reg(ols, "y ~ x1", df, group_by="group")
     r_all = ols("y ~ x1", data=df)
     table = regtable(r_all, grp)
-    # First column auto-labeled (1), then group keys
     assert "(1)" in table
     assert "X" in table
+
+
+# ── Format-specific tests ─────────────────────────────────────────
 
 
 def test_regtable_latex(simple_data):
@@ -183,14 +306,28 @@ def test_regtable_latex_escapes(panel_data):
     r1 = ols("y ~ x1 + x2 | firm_id", data=panel_data, cluster=["firm_id"])
     table = regtable(r1, format="latex")
     assert r"firm\_id" in table
-    assert "firm_id" not in table.split(r"\_")[-1]  # no unescaped underscores
+    assert "firm_id" not in table.split(r"\_")[-1]
 
 
 def test_regtable_latex_stars(simple_data):
     """LaTeX stars are rendered as superscripts."""
     r1 = ols("y ~ x1 + x2", data=simple_data)
     table = regtable(r1, format="latex", stars=True)
-    assert "$^{" in table  # star superscript
+    assert "$^{" in table
+
+
+def test_regtable_latex_footnote(simple_data):
+    """LaTeX footnote includes stat description."""
+    r1 = ols("y ~ x1", data=simple_data)
+    table = regtable(r1, format="latex")
+    assert "T-statistics in parentheses" in table
+
+
+def test_regtable_latex_wide(simple_data):
+    """LaTeX wide mode uses multicolumn for spanning headers."""
+    r1 = ols("y ~ x1", data=simple_data)
+    table = regtable(r1, format="latex", wide=True)
+    assert r"\multicolumn" in table
 
 
 def test_regtable_html(simple_data):
@@ -219,6 +356,23 @@ def test_regtable_html_stars(simple_data):
     r1 = ols("y ~ x1 + x2", data=simple_data)
     table = regtable(r1, format="html", stars=True)
     assert "<sup>" in table
+
+
+def test_regtable_html_footnote(simple_data):
+    """HTML footnote includes stat description."""
+    r1 = ols("y ~ x1", data=simple_data)
+    table = regtable(r1, format="html")
+    assert "T-statistics in parentheses" in table
+
+
+def test_regtable_html_wide(simple_data):
+    """HTML wide mode uses colspan."""
+    r1 = ols("y ~ x1", data=simple_data)
+    table = regtable(r1, format="html", wide=True)
+    assert "colspan" in table
+
+
+# ── RegTable class tests ──────────────────────────────────────────
 
 
 def test_regtable_returns_regtable_type(simple_data):
@@ -273,12 +427,58 @@ def test_regtable_mismatched_models(simple_data):
     r1 = ols("y ~ x1", data=simple_data)
     r2 = ols("y ~ x2", data=simple_data)
     table = regtable(r1, r2)
-    # Both variables should appear
     assert "x1" in table
     assert "x2" in table
-    # Each model column should have blanks for the other's variable
     lines = table.split("\n")
     x1_line = [ln for ln in lines if ln.startswith("x1")][0]
     x2_line = [ln for ln in lines if ln.startswith("x2")][0]
     assert "x1" in x1_line
     assert "x2" in x2_line
+
+
+# ── _normalize_stat unit tests ────────────────────────────────────
+
+
+def test_normalize_stat_string():
+    specs = _normalize_stat("t", "round")
+    assert specs == [("t", "(", ")")]
+
+
+def test_normalize_stat_se_square():
+    specs = _normalize_stat("se", "square")
+    assert specs == [("se", "[", "]")]
+
+
+def test_normalize_stat_tuple():
+    specs = _normalize_stat(("t", "se"), "round")
+    assert specs == [("t", "(", ")"), ("se", "[", "]")]
+
+
+def test_normalize_stat_tuple_reversed():
+    specs = _normalize_stat(("se", "t"), "round")
+    assert specs == [("se", "(", ")"), ("t", "[", "]")]
+
+
+def test_normalize_stat_tuple_square():
+    specs = _normalize_stat(("t", "se"), "square")
+    assert specs == [("t", "[", "]"), ("se", "(", ")")]
+
+
+def test_normalize_stat_none():
+    specs = _normalize_stat(None, "round")
+    assert specs == []
+
+
+def test_normalize_stat_invalid():
+    with pytest.raises(ValueError, match="stat must be"):
+        _normalize_stat("p", "round")
+
+
+def test_normalize_stat_invalid_tuple():
+    with pytest.raises(ValueError, match="stat must be"):
+        _normalize_stat(("t", "p"), "round")
+
+
+def test_normalize_stat_too_many():
+    with pytest.raises(ValueError, match="1 or 2 elements"):
+        _normalize_stat(("t", "se", "p"), "round")
