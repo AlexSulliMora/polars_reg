@@ -1,4 +1,10 @@
-"""Arellano-Bond dynamic panel GMM estimator."""
+"""Arellano-Bond and Blundell-Bond dynamic panel GMM estimators.
+
+Arellano & Bond (1991), "Some Tests of Specification for Panel Data",
+Review of Economic Studies 58(2).
+Blundell & Bond (1998), "Initial Conditions and Moment Restrictions in
+Dynamic Panel Data Models", Journal of Econometrics 87(1).
+"""
 
 from __future__ import annotations
 

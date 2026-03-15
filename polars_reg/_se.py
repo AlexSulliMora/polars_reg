@@ -109,6 +109,9 @@ def vcov_clustered(
 ) -> NDArray:
     """One-way cluster-robust VCV (CRV1).
 
+    Cameron, Gelbach & Miller (2011), "Robust Inference with Multiway
+    Clustering", JBES 29(2). See eq. 2 for the one-way case.
+
     V = dfc * (X'X)^{-1} * meat * (X'X)^{-1}
 
     Without absorbed FE: dfc = G/(G-1) * (n-1)/(n-k)      (matches Stata reg)
@@ -145,6 +148,10 @@ def _hac_meat(
     bandwidth: int | None = None,
 ) -> NDArray:
     """Compute Newey-West HAC meat matrix from score vectors.
+
+    Newey & West (1987), "A Simple, Positive Semi-Definite,
+    Heteroskedasticity and Autocorrelation Consistent Covariance Matrix",
+    Econometrica 55(3). Uses Bartlett kernel: w(j) = 1 - j/(L+1).
 
     Args:
         score: n x k score matrix (typically X * resid[:, None]).
@@ -190,6 +197,8 @@ def _dk_meat(
 ) -> NDArray:
     """Compute Driscoll-Kraay meat matrix from score vectors.
 
+    Driscoll & Kraay (1998), "Consistent Covariance Matrix Estimation with
+    Spatially Dependent Panel Data", Review of Economics and Statistics 80(4).
     Aggregates scores by time period, then applies Newey-West kernel.
 
     Args:
@@ -302,7 +311,7 @@ def vcov_multiway_clustered(
     cluster_list: list[NDArray],
     df_a_non_nested: int = -1,
 ) -> NDArray:
-    """Multi-way clustered VCV via Cameron-Gelbach-Miller inclusion-exclusion.
+    """Multi-way clustered VCV via Cameron, Gelbach & Miller (2011) inclusion-exclusion.
 
     V = sum over non-empty subsets S of (-1)^(|S|+1) * V_S
     where V_S is one-way clustered VCV using intersection of dimensions in S.

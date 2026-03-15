@@ -178,7 +178,7 @@ def panel_re(
 ) -> RegressionResult:
     """Panel random effects (GLS) estimator.
 
-    Uses Swamy-Arora method to estimate variance components, then
+    Uses Swamy & Arora (1972) method to estimate variance components, then
     performs quasi-demeaning with theta = 1 - sqrt(sigma_e^2 / (T*sigma_u^2 + sigma_e^2)).
 
     Args:

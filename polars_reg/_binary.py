@@ -1,4 +1,8 @@
-"""Probit and Logit (binary choice) models via MLE."""
+"""Probit and Logit (binary choice) models via MLE.
+
+Maximum likelihood estimation following Cameron & Trivedi (2005),
+Microeconometrics: Methods and Applications, ch. 14.
+"""
 
 from __future__ import annotations
 
