@@ -99,9 +99,28 @@ class RegressionResult:
     j_stat: float | None = None
     j_pvalue: float | None = None
 
-    # Store design matrix and y for predict/fitted (set by estimator)
+    # Estimator-specific private fields (set after construction)
     _X: NDArray | None = None
     _y: NDArray | None = None
+    # Probit/Logit
+    _prob: NDArray | None = None
+    _ll: float | None = None
+    _ll_null: float | None = None
+    # PPML
+    _mu: NDArray | None = None
+    _deviance: float | None = None
+    _null_deviance: float | None = None
+    # IV (for Kleibergen-Paap diagnostic)
+    _iv_X_exog: NDArray | None = None
+    _iv_X_endog: NDArray | None = None
+    _iv_Z_excl: NDArray | None = None
+    _iv_cluster_arrays: list[NDArray] | None = None
+    # Arellano-Bond / System GMM
+    _ar1: tuple[float, float] | None = None
+    _ar2: tuple[float, float] | None = None
+    _n_instruments: int | None = None
+    # Quantile regression
+    _tau: float | None = None
 
     @property
     def se(self) -> NDArray:

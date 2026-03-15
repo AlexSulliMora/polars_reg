@@ -272,7 +272,7 @@ def kleibergen_paap_from_result(iv_result: RegressionResult) -> dict:
     Returns:
         dict with 'rk_stat' and 'rk_raw'.
     """
-    if not hasattr(iv_result, "_iv_X_exog"):
+    if iv_result._iv_X_exog is None:
         raise ValueError(
             "Result does not contain first-stage arrays. "
             "Use iv2sls() (not liml or gmm_iv) to get these."

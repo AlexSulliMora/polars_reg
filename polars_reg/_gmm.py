@@ -266,7 +266,9 @@ def gmm_iv(
     Args:
         formula: IV formula, e.g. "y ~ x_exog || x_endog ~ z1 + z2"
         data: Polars DataFrame or LazyFrame.
-        vcov: "iid", "HC0", "HC1", "HC2", "HC3", "NW", or "DK".
+        vcov: "iid", "HC1", "NW", or "DK". The two-step efficient GMM
+            VCV is inherently heteroskedasticity-robust; HC0-HC3
+            distinctions do not apply and default to the natural GMM VCV.
         cluster: Column name(s) for clustered SEs. Overrides vcov.
         time: Column name for time dimension (required for NW/DK).
         bandwidth: Kernel bandwidth for NW/DK (default: auto).
