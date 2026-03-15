@@ -16,7 +16,7 @@ from polars_reg._se import (
     vcov_robust,
     vcov_wild_bootstrap,
 )
-from polars_reg._utils import ensure_polars, extract_arrays, sanitize_inf
+from polars_reg._utils import ensure_polars, extract_arrays, sanitize_inf, validate_vcov
 
 try:
     from polars_reg._native import (
@@ -398,6 +398,8 @@ def ols(
         cluster = [cluster]
     if weights and fweights:
         raise ValueError("Cannot specify both weights and fweights")
+    _ols_vcov = {"iid", "HC0", "HC1", "HC2", "HC3", "NW", "DK", "bootstrap", "wildboot"}
+    validate_vcov(vcov, _ols_vcov, "OLS")
     data = ensure_polars(data)
 
     spec = parse_formula(formula)

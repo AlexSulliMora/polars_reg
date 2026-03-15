@@ -16,7 +16,7 @@ from polars_reg._se import (
     vcov_robust,
     vcov_wild_bootstrap,
 )
-from polars_reg._utils import ensure_polars, extract_arrays
+from polars_reg._utils import ensure_polars, extract_arrays, validate_vcov
 
 
 def liml(
@@ -43,6 +43,8 @@ def liml(
     """
     if isinstance(cluster, str):
         cluster = [cluster]
+    _liml_vcov = {"iid", "HC0", "HC1", "HC2", "HC3", "NW", "DK", "bootstrap", "wildboot"}
+    validate_vcov(vcov, _liml_vcov, "LIML")
     data = ensure_polars(data)
 
     spec = parse_formula(formula)
@@ -277,6 +279,8 @@ def gmm_iv(
     """
     if isinstance(cluster, str):
         cluster = [cluster]
+    _gmm_vcov = {"iid", "HC1", "NW", "DK", "bootstrap", "wildboot"}
+    validate_vcov(vcov, _gmm_vcov, "GMM")
     data = ensure_polars(data)
 
     spec = parse_formula(formula)

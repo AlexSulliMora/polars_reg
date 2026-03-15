@@ -17,7 +17,7 @@ import polars as pl
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
 from polars_reg._se import _clustered_meat, _mle_multiway_clustered, _recode_to_contiguous
-from polars_reg._utils import ensure_polars, extract_arrays
+from polars_reg._utils import ensure_polars, extract_arrays, validate_vcov
 
 
 def _ppml_deviance(y: np.ndarray, mu: np.ndarray) -> float:
@@ -73,6 +73,8 @@ def ppml(
     """
     if isinstance(cluster, str):
         cluster = [cluster]
+    _ppml_vcov = {"iid", "HC1"}
+    validate_vcov(vcov, _ppml_vcov, "PPML")
     data = ensure_polars(data)
 
     spec = parse_formula(formula)

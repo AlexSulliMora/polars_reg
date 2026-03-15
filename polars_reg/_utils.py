@@ -72,6 +72,15 @@ def ensure_polars(data: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFr
     return data
 
 
+def validate_vcov(vcov: str, supported: set[str], model_type: str) -> None:
+    """Raise ValueError if vcov is not in the supported set."""
+    if vcov not in supported:
+        raise ValueError(
+            f"vcov={vcov!r} is not supported for {model_type}. "
+            f"Available: {', '.join(sorted(supported))}"
+        )
+
+
 def sanitize_inf(df: pl.DataFrame, cols: list[str]) -> pl.DataFrame:
     """Convert inf/-inf and NaN to null in float columns for uniform null-drop."""
     float_cols = [c for c in cols if df[c].dtype.is_float()]

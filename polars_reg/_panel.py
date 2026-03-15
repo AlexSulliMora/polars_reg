@@ -18,7 +18,7 @@ from polars_reg._se import (
     vcov_robust,
     vcov_wild_bootstrap,
 )
-from polars_reg._utils import ensure_polars, extract_arrays, sanitize_inf
+from polars_reg._utils import ensure_polars, extract_arrays, sanitize_inf, validate_vcov
 
 
 def panel_fe(
@@ -50,6 +50,8 @@ def panel_fe(
         pass
     elif cluster is None:
         cluster = [entity]
+    _fe_vcov = {"iid", "NW", "DK", "bootstrap", "wildboot"}
+    validate_vcov(vcov, _fe_vcov, "Panel FE")
     data = ensure_polars(data)
 
     spec = parse_formula(formula)
@@ -184,7 +186,7 @@ def panel_re(
         data: Polars DataFrame or LazyFrame
         entity: Column name for entity (panel) identifier
         time: Column name for time identifier (required for NW/DK)
-        vcov: "iid", "HC0", "HC1", "NW", "DK", "bootstrap", or "wildboot"
+        vcov: "iid", "HC1", "NW", "DK", "bootstrap", or "wildboot"
         cluster: Column name(s) for clustered SEs
         bandwidth: Number of lags for NW/DK. Default: Newey-West rule of thumb.
         n_boot: Bootstrap replications (default 999).
@@ -193,6 +195,8 @@ def panel_re(
     data = ensure_polars(data)
     if isinstance(cluster, str):
         cluster = [cluster]
+    _re_vcov = {"iid", "HC1", "NW", "DK", "bootstrap", "wildboot"}
+    validate_vcov(vcov, _re_vcov, "Panel RE")
     spec = parse_formula(formula)
 
     # Drop rows with nulls in relevant columns to stay aligned with extract_arrays
@@ -408,6 +412,8 @@ def panel_fd(
         cluster = [cluster]
     if cluster is None:
         cluster = [entity]
+    _fd_vcov = {"iid", "HC1", "bootstrap", "wildboot"}
+    validate_vcov(vcov, _fd_vcov, "Panel FD")
     data = ensure_polars(data)
 
     spec = parse_formula(formula)

@@ -11,7 +11,7 @@ from scipy import stats
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
 from polars_reg._se import _clustered_meat, _mle_multiway_clustered
-from polars_reg._utils import ensure_polars, extract_arrays
+from polars_reg._utils import ensure_polars, extract_arrays, validate_vcov
 
 
 def _probit_ll_score_hess(beta, X, y):
@@ -86,6 +86,8 @@ def _binary_model(
     """Common implementation for probit and logit."""
     if isinstance(cluster, str):
         cluster = [cluster]
+    _binary_vcov = {"iid", "HC1"}
+    validate_vcov(vcov, _binary_vcov, model_type)
     data = ensure_polars(data)
 
     spec = parse_formula(formula)

@@ -14,7 +14,7 @@ from polars_reg._se import (
     _recode_to_contiguous,
     vcov_wild_bootstrap,
 )
-from polars_reg._utils import ensure_polars, extract_arrays, sanitize_inf
+from polars_reg._utils import ensure_polars, extract_arrays, sanitize_inf, validate_vcov
 
 try:
     from polars_reg._native import rust_iv2sls as _rust_iv2sls
@@ -202,6 +202,8 @@ def iv2sls(
     """
     if isinstance(cluster, str):
         cluster = [cluster]
+    _iv_vcov = {"iid", "HC0", "HC1", "NW", "DK", "bootstrap", "wildboot"}
+    validate_vcov(vcov, _iv_vcov, "2SLS")
     data = ensure_polars(data)
 
     spec = parse_formula(formula)
