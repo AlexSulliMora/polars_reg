@@ -5,6 +5,9 @@ import polars as pl
 
 from polars_reg._demean import absorbed_dof, demean, drop_singletons, reindex_fe_codes
 from polars_reg._formula import parse_formula
+from polars_reg._native import rust_ols_core as _rust_ols_core
+from polars_reg._native import rust_ols_from_arrays as _rust_ols_from_arrays
+from polars_reg._native import rust_ols_nofe as _rust_ols_nofe
 from polars_reg._results import RegressionResult
 from polars_reg._se import (
     vcov_clustered,
@@ -16,22 +19,7 @@ from polars_reg._se import (
     vcov_robust,
     vcov_wild_bootstrap,
 )
-from polars_reg._utils import ensure_polars, extract_arrays, sanitize_inf, validate_vcov
-
-try:
-    from polars_reg._native import (
-        rust_ols_core as _rust_ols_core,
-    )
-    from polars_reg._native import (
-        rust_ols_from_arrays as _rust_ols_from_arrays,
-    )
-    from polars_reg._native import (
-        rust_ols_nofe as _rust_ols_nofe,
-    )
-
-    _HAS_NATIVE = True
-except ImportError:
-    _HAS_NATIVE = False
+from polars_reg._utils import _to_codes, ensure_polars, extract_arrays, sanitize_inf, validate_vcov
 
 
 def _is_nested(fe_codes: np.ndarray, cluster_codes: np.ndarray) -> bool:
@@ -73,29 +61,6 @@ def _non_nested_fe_dof(
     return non_nested_dof
 
 
-def _to_codes_fast(series: pl.Series) -> np.ndarray:
-    """Convert Polars Series to int32 codes via Rust recode. Minimal overhead path."""
-    from polars_reg._native import rust_recode
-
-    dtype = series.dtype
-    if dtype in (
-        pl.Int8,
-        pl.Int16,
-        pl.Int32,
-        pl.Int64,
-        pl.UInt8,
-        pl.UInt16,
-        pl.UInt32,
-        pl.UInt64,
-    ):
-        arr = series.to_numpy().astype(np.int64)
-        codes, _ = rust_recode(arr)
-        return np.asarray(codes)
-    # String/other types: use Polars categorical encoding
-    codes = series.cast(pl.Utf8).cast(pl.Categorical).to_physical().to_numpy()
-    return codes.astype(np.int32)
-
-
 def _ols_nofe_rust(
     data: pl.DataFrame | pl.LazyFrame,
     spec,
@@ -129,7 +94,7 @@ def _ols_nofe_rust(
     cl_names = []
     if cluster:
         for c in cluster:
-            cl_arrays.append(_to_codes_fast(df[c]).astype(np.int32))
+            cl_arrays.append(_to_codes(df[c]).astype(np.int32))
             cl_names.append(c)
 
     (
@@ -218,7 +183,7 @@ def _ols_direct_rust(
     x_names = list(spec.exog)
 
     # Extract FE as int32 codes
-    fe_arrays = [_to_codes_fast(df[c]).astype(np.int32) for c in spec.fe]
+    fe_arrays = [_to_codes(df[c]).astype(np.int32) for c in spec.fe]
     fe_names = list(spec.fe)
 
     # Extract cluster as int32 codes
@@ -231,7 +196,7 @@ def _ols_direct_rust(
                 idx = spec.fe.index(c)
                 cl_arrays.append(fe_arrays[idx])
             else:
-                cl_arrays.append(_to_codes_fast(df[c]).astype(np.int32))
+                cl_arrays.append(_to_codes(df[c]).astype(np.int32))
             cl_names.append(c)
 
     (
@@ -405,10 +370,9 @@ def ols(
     spec = parse_formula(formula)
 
     # --- Rust fast paths: skip extract_arrays entirely ---
-    # Common eligibility: native available, no weights, no interactions/indicators, no endog
+    # Common eligibility: no weights, no interactions/indicators, no endog
     _rust_eligible = (
-        _HAS_NATIVE
-        and not weights
+        not weights
         and not fweights
         and not spec.endog
         and not spec.indicators
@@ -434,8 +398,7 @@ def ols(
 
     # --- Rust fast path via extract_arrays (for weighted/complex cases with FE) ---
     use_rust = (
-        _HAS_NATIVE
-        and has_fe
+        has_fe
         and w is None
         and vcov not in ("bootstrap", "wildboot", "NW", "DK", "HC2", "HC3")
         and (cluster or vcov == "iid")

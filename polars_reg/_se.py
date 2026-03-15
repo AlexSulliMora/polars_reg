@@ -5,13 +5,10 @@ from itertools import combinations
 import numpy as np
 from numpy.typing import NDArray
 
-try:
-    from polars_reg._native import rust_clustered_meat as _rust_clustered_meat
-    from polars_reg._native import rust_recode as _rust_recode
-
-    _HAS_NATIVE = True
-except ImportError:
-    _HAS_NATIVE = False
+from polars_reg._native import rust_clustered_meat as _rust_clustered_meat
+from polars_reg._native import rust_dk_meat as _rust_dk_meat
+from polars_reg._native import rust_hac_meat as _rust_hac_meat
+from polars_reg._native import rust_recode as _rust_recode
 
 # Webb 6-point distribution for wild bootstrap
 _WEBB6 = np.array([-np.sqrt(3 / 2), -1.0, -np.sqrt(1 / 2), np.sqrt(1 / 2), 1.0, np.sqrt(3 / 2)])
@@ -64,40 +61,27 @@ def vcov_robust(X: NDArray, resid: NDArray, kind: str = "HC1", df_abs: int = 0) 
 
 
 def _recode_to_contiguous(arr: NDArray) -> tuple[NDArray, int]:
-    """Remap arbitrary integer codes to contiguous 0..G-1.
-
-    Uses Rust native extension when available.
-    """
+    """Remap arbitrary integer codes to contiguous 0..G-1."""
     if len(arr) == 0:
         return arr.astype(np.int32), 0
-    if _HAS_NATIVE:
-        codes, n_groups = _rust_recode(arr.astype(np.int64))
-        return codes, n_groups
-    _, codes = np.unique(arr, return_inverse=True)
-    return codes, int(codes.max()) + 1
+    codes, n_groups = _rust_recode(arr.astype(np.int64))
+    return codes, n_groups
 
 
 def _clustered_meat(X: NDArray, resid: NDArray, codes: NDArray, n_groups: int) -> NDArray:
     """Compute the clustered sandwich meat: sum_g (s_g s_g').
 
-    Uses Rust native extension when available for O(n*k) aggregation.
+    Uses Rust native extension for O(n*k) aggregation.
     Expects pre-computed contiguous codes and group count.
     """
-    if _HAS_NATIVE:
-        return np.asarray(
-            _rust_clustered_meat(
-                np.ascontiguousarray(X, dtype=np.float64),
-                np.ascontiguousarray(resid, dtype=np.float64),
-                np.ascontiguousarray(codes, dtype=np.int32),
-                n_groups,
-            )
+    return np.asarray(
+        _rust_clustered_meat(
+            np.ascontiguousarray(X, dtype=np.float64),
+            np.ascontiguousarray(resid, dtype=np.float64),
+            np.ascontiguousarray(codes, dtype=np.int32),
+            n_groups,
         )
-    k = X.shape[1]
-    score = X * resid[:, None]
-    S = np.empty((n_groups, k))
-    for j in range(k):
-        S[:, j] = np.bincount(codes, weights=score[:, j], minlength=n_groups)
-    return S.T @ S
+    )
 
 
 def vcov_clustered(
@@ -161,33 +145,13 @@ def _hac_meat(
     Returns:
         k x k meat matrix.
     """
-    if _HAS_NATIVE:
-        try:
-            from polars_reg._native import rust_hac_meat as _rust_hac_meat
-
-            return np.asarray(
-                _rust_hac_meat(
-                    np.ascontiguousarray(score, dtype=np.float64),
-                    np.ascontiguousarray(time_ids, dtype=np.float64),
-                    bandwidth if bandwidth is not None else -1,
-                )
-            )
-        except ImportError:
-            pass
-
-    n = score.shape[0]
-    order = np.argsort(time_ids)
-    score = score[order]
-
-    if bandwidth is None:
-        bandwidth = max(1, int(np.floor(4 * (n / 100) ** (2 / 9))))
-
-    S = score.T @ score
-    for j in range(1, bandwidth + 1):
-        w = 1.0 - j / (bandwidth + 1)
-        Gamma_j = score[j:].T @ score[:-j]
-        S += w * (Gamma_j + Gamma_j.T)
-    return S
+    return np.asarray(
+        _rust_hac_meat(
+            np.ascontiguousarray(score, dtype=np.float64),
+            np.ascontiguousarray(time_ids, dtype=np.float64),
+            bandwidth if bandwidth is not None else -1,
+        )
+    )
 
 
 def _dk_meat(
@@ -209,37 +173,13 @@ def _dk_meat(
     Returns:
         k x k meat matrix.
     """
-    if _HAS_NATIVE:
-        try:
-            from polars_reg._native import rust_dk_meat as _rust_dk_meat
-
-            return np.asarray(
-                _rust_dk_meat(
-                    np.ascontiguousarray(score, dtype=np.float64),
-                    np.ascontiguousarray(time_ids, dtype=np.float64),
-                    bandwidth if bandwidth is not None else -1,
-                )
-            )
-        except ImportError:
-            pass
-
-    k = score.shape[1]
-    unique_times, time_idx = np.unique(time_ids, return_inverse=True)
-    T = len(unique_times)
-
-    h = np.zeros((T, k))
-    for j in range(k):
-        h[:, j] = np.bincount(time_idx, weights=score[:, j], minlength=T)
-
-    if bandwidth is None:
-        bandwidth = max(1, int(np.floor(4 * (T / 100) ** (2 / 9))))
-
-    S = h.T @ h
-    for j in range(1, bandwidth + 1):
-        w = 1.0 - j / (bandwidth + 1)
-        Gamma_j = h[j:].T @ h[:-j]
-        S += w * (Gamma_j + Gamma_j.T)
-    return S
+    return np.asarray(
+        _rust_dk_meat(
+            np.ascontiguousarray(score, dtype=np.float64),
+            np.ascontiguousarray(time_ids, dtype=np.float64),
+            bandwidth if bandwidth is not None else -1,
+        )
+    )
 
 
 def vcov_hac(

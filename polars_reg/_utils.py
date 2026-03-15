@@ -6,20 +6,14 @@ import numpy as np
 import polars as pl
 
 from polars_reg._formula import FormulaSpec
-
-try:
-    from polars_reg._native import rust_recode as _rust_recode
-
-    _HAS_NATIVE = True
-except ImportError:
-    _HAS_NATIVE = False
+from polars_reg._native import rust_recode as _rust_recode
 
 
 def _to_codes(series: pl.Series) -> np.ndarray:
     """Convert a Polars Series to contiguous integer group codes (0..G-1).
 
-    Uses Rust native extension when available for integer types.
-    Falls back to Polars categorical for strings and other types.
+    Uses Rust native extension for integer types.
+    Uses Polars categorical encoding for strings and other types.
     """
     dtype = series.dtype
     if dtype in (
@@ -33,20 +27,8 @@ def _to_codes(series: pl.Series) -> np.ndarray:
         pl.UInt64,
     ):
         arr = series.to_numpy().astype(np.int64)
-        if _HAS_NATIVE:
-            codes, _ = _rust_recode(arr)
-            return codes
-        # Pure Python fallback
-        mn = arr.min()
-        mx = arr.max()
-        rng = mx - mn
-        if rng < 2 * len(arr):
-            lut = np.full(rng + 1, -1, dtype=np.int32)
-            uniq_shifted = np.unique(arr - mn)
-            lut[uniq_shifted] = np.arange(len(uniq_shifted), dtype=np.int32)
-            return lut[arr - mn]
-        _, codes = np.unique(arr, return_inverse=True)
-        return codes.astype(np.int32)
+        codes, _ = _rust_recode(arr)
+        return codes
     # String/other types: use Polars categorical encoding
     codes = series.cast(pl.Utf8).cast(pl.Categorical).to_physical().to_numpy()
     return codes.astype(np.int32)
