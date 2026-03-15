@@ -65,14 +65,14 @@ def test_ensure_polars_passthrough():
     assert isinstance(result, pl.DataFrame)
 
 
-def test_ensure_polars_converts_pandas():
-    """Test that ensure_polars converts pandas DataFrame."""
+def test_ensure_polars_rejects_pandas():
+    """ensure_polars rejects pandas DataFrame with helpful message."""
     pd = pytest.importorskip("pandas")
     from polars_reg._utils import ensure_polars
 
     pdf = pd.DataFrame({"x": [1.0, 2.0], "y": [3.0, 4.0]})
-    result = ensure_polars(pdf)
-    assert isinstance(result, pl.DataFrame)
+    with pytest.raises(TypeError, match="pl.from_pandas"):
+        ensure_polars(pdf)
 
 
 # ── NaN / Inf handling ──────────────────────────────────────────
@@ -214,15 +214,14 @@ def test_ensure_polars_lazyframe():
     assert isinstance(result, pl.LazyFrame)
 
 
-def test_ensure_polars_pandas():
-    """pandas DataFrame converts to Polars DataFrame."""
+def test_ensure_polars_rejects_pandas_detailed():
+    """pandas DataFrame raises TypeError mentioning pl.from_pandas."""
     pd = pytest.importorskip("pandas")
     from polars_reg._utils import ensure_polars
 
     pdf = pd.DataFrame({"a": [1, 2, 3], "b": [4.0, 5.0, 6.0]})
-    result = ensure_polars(pdf)
-    assert isinstance(result, pl.DataFrame)
-    assert result.shape == (3, 2)
+    with pytest.raises(TypeError, match="pl.from_pandas"):
+        ensure_polars(pdf)
 
 
 def test_ensure_polars_invalid():

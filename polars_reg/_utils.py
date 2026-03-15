@@ -53,21 +53,15 @@ def _to_codes(series: pl.Series) -> np.ndarray:
 
 
 def ensure_polars(data: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFrame:
-    """Convert pandas DataFrame to Polars if needed. Passes through Polars data unchanged."""
-    try:
-        import pandas as pd
-    except ImportError:
-        if not isinstance(data, (pl.DataFrame, pl.LazyFrame)):
-            raise TypeError(
-                "Expected Polars DataFrame/LazyFrame or pandas DataFrame, "
-                f"got {type(data).__name__}"
-            )
-        return data
-    if isinstance(data, pd.DataFrame):
-        return pl.from_pandas(data)
+    """Validate that data is a Polars DataFrame or LazyFrame.
+
+    This is a Polars-native package. Pandas DataFrames are not accepted —
+    use ``pl.from_pandas(df)`` before calling any estimator.
+    """
     if not isinstance(data, (pl.DataFrame, pl.LazyFrame)):
         raise TypeError(
-            f"Expected Polars DataFrame/LazyFrame or pandas DataFrame, got {type(data).__name__}"
+            f"Expected Polars DataFrame or LazyFrame, got {type(data).__name__}. "
+            "Use pl.from_pandas(df) to convert pandas DataFrames."
         )
     return data
 

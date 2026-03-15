@@ -245,13 +245,13 @@ def test_grs_lazyframe_input(grs_panel_nonzero):
     assert result.n_assets == 5
 
 
-def test_grs_pandas_input(grs_panel_nonzero):
-    """pandas DataFrame should be auto-converted."""
+def test_grs_rejects_pandas(grs_panel_nonzero):
+    """pandas DataFrame should be rejected with helpful message."""
+    pytest.importorskip("pandas")
     df, _ = grs_panel_nonzero
     pdf = df.to_pandas()
-    result = pr.grs_test("ret ~ f1 + f2 + f3", data=pdf, assets="portfolio", time="date")
-    assert result.statistic > 0
-    assert result.n_assets == 5
+    with pytest.raises(TypeError, match="pl.from_pandas"):
+        pr.grs_test("ret ~ f1 + f2 + f3", data=pdf, assets="portfolio", time="date")
 
 
 def test_grs_failed_groups_error(grs_panel_nonzero):
