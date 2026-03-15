@@ -7,17 +7,8 @@ import scipy.sparse
 import scipy.sparse.csgraph
 from numpy.typing import NDArray
 
-try:
-    from polars_reg._native import (
-        rust_absorbed_dof as _rust_absorbed_dof,
-    )
-    from polars_reg._native import (
-        rust_demean as _rust_demean,
-    )
-
-    _HAS_NATIVE = True
-except ImportError:
-    _HAS_NATIVE = False
+from polars_reg._native import rust_absorbed_dof as _rust_absorbed_dof
+from polars_reg._native import rust_demean as _rust_demean
 
 
 def _group_counts(codes: NDArray, n_groups: int, w: NDArray | None = None) -> NDArray:
@@ -104,7 +95,7 @@ def demean(
     n_groups_list = [int(codes.max()) + 1 for codes in fe_list]
 
     # Use Rust native path for unweighted demeaning
-    if _HAS_NATIVE and weights is None:
+    if weights is None:
         fe_codes_list = [np.ascontiguousarray(c, dtype=np.int32) for c in fe_list]
         result = np.asarray(
             _rust_demean(
@@ -117,6 +108,7 @@ def demean(
         )
         return result.squeeze(axis=1) if squeeze else result
 
+    # Weighted demeaning: Python path (Rust does not support weights)
     if len(fe_list) == 1:
         codes = fe_list[0]
         n_g = n_groups_list[0]
@@ -173,6 +165,9 @@ def _demean_cg(
     u = r.copy()
     ssr = np.sum(r * r)
 
+    # Convergence: relative SSR < tol^2, i.e. ||r||^2 < tol^2 * ||x0||^2
+    # where r = T(x) - x is the residual from symmetric Kaczmarz.
+    # Correia (2016), §3.2: CG acceleration of the alternating projections.
     x0_norm = np.sum(x * x)
     tol_sq = tol**2 * max(x0_norm, 1e-16)
 
@@ -185,6 +180,10 @@ def _demean_cg(
         _symmetric_kaczmarz(tmp, fe_list, n_groups_list, denoms, w=weights)
         v = u - tmp
         uv = np.sum(u * v)
+        # CG coefficient denominator too small: can happen if non-contiguous
+        # FE codes create phantom zero-count groups making uv near-zero,
+        # which causes alpha = ssr/uv to overflow. See docs/solutions/
+        # runtime-errors/fe-singleton-contiguity-and-edge-case-guards.md.
         if abs(uv) < 1e-30:
             break
         alpha = ssr / uv
@@ -252,48 +251,8 @@ def absorbed_dof(fe_dict: dict[str, NDArray]) -> int:
     if not fe_list or len(fe_list[0]) == 0:
         return 0
 
-    if _HAS_NATIVE:
-        fe_codes_list = [np.ascontiguousarray(v, dtype=np.int32) for v in fe_list]
-        return _rust_absorbed_dof(fe_codes_list)
-
-    n_groups = [int(codes.max()) + 1 for codes in fe_list]
-    total_groups = sum(n_groups)
-
-    if len(fe_list) == 1:
-        return n_groups[0]
-
-    # Build multipartite graph: offset each FE dimension into a single node space
-    offsets = np.zeros(len(fe_list), dtype=np.int64)
-    for i in range(1, len(fe_list)):
-        offsets[i] = offsets[i - 1] + n_groups[i - 1]
-
-    # Collect edges between all pairs of FE dimensions
-    rows_list: list[NDArray] = []
-    cols_list: list[NDArray] = []
-    for i in range(len(fe_list)):
-        for j in range(i + 1, len(fe_list)):
-            # Deduplicate edges for this pair
-            codes_i = fe_list[i].astype(np.int64) + offsets[i]
-            codes_j = fe_list[j].astype(np.int64) + offsets[j]
-            edge_codes = codes_i * total_groups + codes_j
-            unique_edges = np.unique(edge_codes)
-            ui = unique_edges // total_groups
-            uj = unique_edges % total_groups
-            rows_list.append(ui)
-            cols_list.append(uj)
-
-    all_rows = np.concatenate(rows_list)
-    all_cols = np.concatenate(cols_list)
-    data = np.ones(len(all_rows))
-
-    graph = scipy.sparse.coo_matrix(
-        (data, (all_rows, all_cols)),
-        shape=(total_groups, total_groups),
-    )
-    graph = graph + graph.T
-    n_components = scipy.sparse.csgraph.connected_components(graph, directed=False)[0]
-
-    return total_groups - n_components
+    fe_codes_list = [np.ascontiguousarray(v, dtype=np.int32) for v in fe_list]
+    return _rust_absorbed_dof(fe_codes_list)
 
 
 def _connected_components(codes_a: NDArray, n_a: int, codes_b: NDArray, n_b: int) -> int:

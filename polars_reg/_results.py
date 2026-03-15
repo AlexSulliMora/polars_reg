@@ -1,11 +1,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TypedDict
 
 import numpy as np
 import polars as pl
 from numpy.typing import NDArray
 from scipy import stats
+
+
+class WaldTestResult(TypedDict):
+    statistic: float
+    pvalue: float
+    df: tuple[int, int]
+    chi2: float
+
+
+class PredictIntervalResult(TypedDict):
+    fit: NDArray
+    se: NDArray
+    lower: NDArray
+    upper: NDArray
 
 
 def _fmt_col(values: list[float], width: int, sig: int) -> list[str]:
@@ -99,9 +114,28 @@ class RegressionResult:
     j_stat: float | None = None
     j_pvalue: float | None = None
 
-    # Store design matrix and y for predict/fitted (set by estimator)
+    # Estimator-specific private fields (set after construction)
     _X: NDArray | None = None
     _y: NDArray | None = None
+    # Probit/Logit
+    _prob: NDArray | None = None
+    _ll: float | None = None
+    _ll_null: float | None = None
+    # PPML
+    _mu: NDArray | None = None
+    _deviance: float | None = None
+    _null_deviance: float | None = None
+    # IV (for Kleibergen-Paap diagnostic)
+    _iv_X_exog: NDArray | None = None
+    _iv_X_endog: NDArray | None = None
+    _iv_Z_excl: NDArray | None = None
+    _iv_cluster_arrays: list[NDArray] | None = None
+    # Arellano-Bond / System GMM
+    _ar1: tuple[float, float] | None = None
+    _ar2: tuple[float, float] | None = None
+    _n_instruments: int | None = None
+    # Quantile regression
+    _tau: float | None = None
 
     @property
     def se(self) -> NDArray:
@@ -185,7 +219,7 @@ class RegressionResult:
             return X_new @ self.coefficients
         return self.fitted()
 
-    def predict_interval(self, newdata: pl.DataFrame, alpha: float = 0.05) -> dict[str, NDArray]:
+    def predict_interval(self, newdata: pl.DataFrame, alpha: float = 0.05) -> PredictIntervalResult:
         """Return point predictions with prediction intervals.
 
         Uses ``Var(pred_i) = x_i' V x_i`` where *V* is the estimated VCV of
@@ -297,7 +331,7 @@ class RegressionResult:
         lines.append(f"{'=' * w}")
         return "\n".join(lines)
 
-    def wald_test(self, R: NDArray, q: NDArray | None = None) -> dict:
+    def wald_test(self, R: NDArray, q: NDArray | None = None) -> WaldTestResult:
         """Wald test for linear restrictions R @ beta = q.
 
         Args:

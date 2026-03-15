@@ -150,7 +150,7 @@ class TestPPMLRobustSE:
         """Default vcov should be HC1 (robust)."""
         df = _make_poisson_data()
         res = ppml("y ~ x1 + x2", data=df)
-        assert res.vcov_type == "robust"
+        assert res.vcov_type == "HC1"
 
     def test_robust_se_larger_than_hessian(self):
         """Robust SEs should generally differ from Hessian-based SEs."""
@@ -341,21 +341,14 @@ class TestPPMLEdgeCases:
         assert abs(coef["x"] - 0.5) < 0.15
         assert abs(coef["_cons"] - 1.0) < 0.15
 
-    def test_pandas_input(self):
-        """Should accept pandas DataFrame via ensure_polars."""
+    def test_rejects_pandas(self):
+        """Should reject pandas DataFrame with helpful message."""
         pytest.importorskip("pandas")
         import pandas as pd
 
-        rng = np.random.default_rng(42)
-        n = 200
-        x = rng.standard_normal(n)
-        mu = np.exp(0.5 + 0.8 * x)
-        y = rng.poisson(mu)
-        df_pd = pd.DataFrame({"y": y, "x": x})
-
-        res = ppml("y ~ x", data=df_pd)
-        assert res.n_obs == n
-        assert res.model_type == "PPML"
+        df_pd = pd.DataFrame({"y": [1, 2], "x": [3, 4]})
+        with pytest.raises(TypeError, match="pl.from_pandas"):
+            ppml("y ~ x", data=df_pd)
 
     def test_coef_table(self):
         """coef_table() should return a Polars DataFrame."""

@@ -53,6 +53,7 @@ class _TableData:
     # Display options
     stat_specs: list[StatSpec] = field(default_factory=list)
     wide: bool = False
+    transpose: bool = False
 
 
 def _build_table_data(
@@ -62,6 +63,8 @@ def _build_table_data(
     stars: bool,
     stat_specs: list[StatSpec],
     wide: bool,
+    transpose: bool = False,
+    rename: dict[str, str] | None = None,
 ) -> _TableData:
     """Extract structured table data from regression results."""
 
@@ -69,16 +72,24 @@ def _build_table_data(
     all_vars: list[str] = []
     for r in results:
         for name in r.names:
-            if name not in all_vars:
-                all_vars.append(name)
+            display_name = rename.get(name, name) if rename else name
+            if display_name not in all_vars:
+                all_vars.append(display_name)
 
     # Build cells — now stores (coef_str, se_str, t_str, star_str)
+    # Reverse rename map: display_name -> original_name
+    _rev = {}
+    if rename:
+        for orig, disp in rename.items():
+            _rev[disp] = orig
+
     cells: dict[str, list[tuple[str, str, str, str]]] = {}
     for var in all_vars:
         row_cells = []
+        orig_var = _rev.get(var, var)
         for r in results:
-            if var in r.names:
-                idx = r.names.index(var)
+            if orig_var in r.names:
+                idx = r.names.index(orig_var)
                 coef = r.coefficients[idx]
                 se = r.se[idx]
                 t = r.tstat[idx]
@@ -124,6 +135,7 @@ def _build_table_data(
         stars=stars,
         stat_specs=stat_specs,
         wide=wide,
+        transpose=transpose,
     )
 
 
@@ -188,14 +200,15 @@ def _render_text(td: _TableData, precision: int) -> str:
             hdr += f" {lb:>{col_w}}"
     lines.append(hdr)
 
-    type_row = f"{'':>{name_w}}"
-    for mt in td.model_types:
-        if td.wide:
-            span_w = cols_per_model * (col_w + 1) - 1
-            type_row += f" {mt:^{span_w}}"
-        else:
-            type_row += f" {mt:>{col_w}}"
-    lines.append(type_row)
+    if any(td.model_types):
+        type_row = f"{'':>{name_w}}"
+        for mt in td.model_types:
+            if td.wide:
+                span_w = cols_per_model * (col_w + 1) - 1
+                type_row += f" {mt:^{span_w}}"
+            else:
+                type_row += f" {mt:>{col_w}}"
+        lines.append(type_row)
     lines.append("-" * total_w)
 
     # Coefficients
@@ -329,15 +342,17 @@ def _render_latex(td: _TableData) -> str:
         for lb in td.labels:
             hdr_parts.append(rf"\multicolumn{{{cols_per_model}}}{{c}}{{{_latex_escape(lb)}}}")
         lines.append(" & ".join(hdr_parts) + r" \\")
-        type_parts = [""]
-        for mt in td.model_types:
-            type_parts.append(rf"\multicolumn{{{cols_per_model}}}{{c}}{{{mt}}}")
-        lines.append(" & ".join(type_parts) + r" \\")
+        if any(td.model_types):
+            type_parts = [""]
+            for mt in td.model_types:
+                type_parts.append(rf"\multicolumn{{{cols_per_model}}}{{c}}{{{mt}}}")
+            lines.append(" & ".join(type_parts) + r" \\")
     else:
         hdr = " & ".join([""] + [_latex_escape(lb) for lb in td.labels]) + r" \\"
         lines.append(hdr)
-        type_row = " & ".join([""] + td.model_types) + r" \\"
-        lines.append(type_row)
+        if any(td.model_types):
+            type_row = " & ".join([""] + td.model_types) + r" \\"
+            lines.append(type_row)
     lines.append(r"\midrule")
 
     # Coefficients
@@ -461,11 +476,12 @@ def _render_html(td: _TableData) -> str:
         for lb in td.labels:
             lines.append(f'  <th colspan="{cols_per_model}">{_html_escape(lb)}</th>')
         lines.append("</tr>")
-        lines.append("<tr>")
-        lines.append("  <th></th>")
-        for mt in td.model_types:
-            lines.append(f'  <th colspan="{cols_per_model}">{mt}</th>')
-        lines.append("</tr>")
+        if any(td.model_types):
+            lines.append("<tr>")
+            lines.append("  <th></th>")
+            for mt in td.model_types:
+                lines.append(f'  <th colspan="{cols_per_model}">{mt}</th>')
+            lines.append("</tr>")
     else:
         # Header
         lines.append("<tr>")
@@ -473,10 +489,11 @@ def _render_html(td: _TableData) -> str:
         for lb in td.labels:
             lines.append(f"  <th>{_html_escape(lb)}</th>")
         lines.append("</tr>")
-        lines.append("<tr>")
-        lines.append("  <th></th>")
-        for mt in td.model_types:
-            lines.append(f"  <th>{mt}</th>")
+        if any(td.model_types):
+            lines.append("<tr>")
+            lines.append("  <th></th>")
+            for mt in td.model_types:
+                lines.append(f"  <th>{mt}</th>")
         lines.append("</tr>")
 
     lines.append("</thead>")
@@ -595,6 +612,251 @@ def _render_html(td: _TableData) -> str:
     return "\n".join(lines)
 
 
+def _transposed_columns(td: _TableData) -> list[tuple[str, list[str]]]:
+    """Build summary columns for transposed layout: FE, cluster, N, R², Adj. R²."""
+    cols: list[tuple[str, list[str]]] = []
+    for fe in td.all_fe:
+        cols.append((f"FE:{fe}", ["Y" if f else "N" for f in td.fe_flags[fe]]))
+    for cl in td.all_cl:
+        cols.append((f"Cl:{cl}", ["Y" if f else "N" for f in td.cl_flags[cl]]))
+    cols.append(("N", [str(n) for n in td.n_obs]))
+    cols.append(("R\u00b2", [f"{r:.4f}" for r in td.r_squared]))
+    cols.append(("Adj. R\u00b2", [f"{r:.4f}" for r in td.r_squared_adj]))
+    return cols
+
+
+def _render_text_transposed(td: _TableData, precision: int) -> str:
+    """Render table data as plain text with models as rows."""
+    n_models = len(td.labels)
+    n_stats = len(td.stat_specs)
+
+    # Model label column
+    model_labels = [f"{lb} {mt}".rstrip() for lb, mt in zip(td.labels, td.model_types)]
+    label_w = max(14, max(len(ml) for ml in model_labels) + 2)
+
+    # Variable column widths
+    var_widths: dict[str, int] = {}
+    for var in td.all_vars:
+        w = len(var)
+        for cell in td.cells[var]:
+            c_str, se_str, t_str, star = cell
+            if c_str:
+                w = max(w, len(c_str) + len(star))
+                for spec in td.stat_specs:
+                    val = _get_stat_value(cell, spec[0])
+                    wrapped = f"{spec[1]}{val}{spec[2]}"
+                    w = max(w, len(wrapped))
+        var_widths[var] = max(w + 2, 10)
+
+    # Summary columns
+    summary = _transposed_columns(td)
+    sum_widths: dict[str, int] = {}
+    for name, vals in summary:
+        w = max(len(name), max(len(v) for v in vals))
+        sum_widths[name] = max(w + 2, 6)
+
+    total_w = (
+        label_w
+        + sum(var_widths[v] + 1 for v in td.all_vars)
+        + sum(sum_widths[n] + 1 for n, _ in summary)
+    )
+    sep = "=" * total_w
+
+    lines: list[str] = []
+    lines.append(sep)
+
+    # Header
+    hdr = f"{'':>{label_w}}"
+    for var in td.all_vars:
+        hdr += f" {var:>{var_widths[var]}}"
+    for name, _ in summary:
+        hdr += f" {name:>{sum_widths[name]}}"
+    lines.append(hdr)
+    lines.append("-" * total_w)
+
+    # Model rows
+    for i in range(n_models):
+        coef_line = f"{model_labels[i]:<{label_w}}"
+        stat_lines = [f"{'':>{label_w}}" for _ in td.stat_specs]
+
+        for var in td.all_vars:
+            c_str, se_str, t_str, star = td.cells[var][i]
+            w = var_widths[var]
+            if c_str:
+                formatted = _fmt_g_pad(float(c_str), w - len(star), precision) + star
+                coef_line += f" {formatted:>{w}}"
+                for j, spec in enumerate(td.stat_specs):
+                    val = _get_stat_value((c_str, se_str, t_str, star), spec[0])
+                    wrapped = f"{spec[1]}{val}{spec[2]}"
+                    stat_lines[j] += f" {wrapped:>{w}}"
+            else:
+                coef_line += f" {'':>{w}}"
+                for j in range(n_stats):
+                    stat_lines[j] += f" {'':>{w}}"
+
+        for name, vals in summary:
+            coef_line += f" {vals[i]:>{sum_widths[name]}}"
+            for j in range(n_stats):
+                stat_lines[j] += f" {'':>{sum_widths[name]}}"
+
+        lines.append(coef_line)
+        for sl in stat_lines:
+            lines.append(sl)
+
+    lines.append(sep)
+
+    # Footnotes
+    notes: list[str] = []
+    if td.stat_specs:
+        notes.append(_stat_footnote(td.stat_specs))
+    if td.stars:
+        notes.append("* p<0.10, ** p<0.05, *** p<0.01")
+    if notes:
+        lines.append(". ".join(notes))
+
+    return "\n".join(lines)
+
+
+def _render_latex_transposed(td: _TableData) -> str:
+    """Render transposed table data as a LaTeX tabular."""
+    n_models = len(td.labels)
+    n_stats = len(td.stat_specs)
+
+    summary = _transposed_columns(td)
+    n_cols = len(td.all_vars) + len(summary)
+    col_spec = "l" + "c" * n_cols
+
+    lines: list[str] = []
+    lines.append(r"\begin{table}[htbp]")
+    lines.append(r"\centering")
+    lines.append(rf"\begin{{tabular}}{{{col_spec}}}")
+    lines.append(r"\toprule")
+
+    # Header
+    hdr_parts = [""]
+    for var in td.all_vars:
+        hdr_parts.append(_latex_escape(var))
+    for name, _ in summary:
+        hdr_parts.append(_latex_escape(name))
+    lines.append(" & ".join(hdr_parts) + r" \\")
+    lines.append(r"\midrule")
+
+    # Model rows
+    for i in range(n_models):
+        label = _latex_escape(f"{td.labels[i]} {td.model_types[i]}".rstrip())
+        coef_parts = [label]
+        stat_rows: list[list[str]] = [[""] for _ in td.stat_specs]
+
+        for var in td.all_vars:
+            c_str, se_str, t_str, star = td.cells[var][i]
+            if c_str:
+                star_tex = _latex_stars(star)
+                coef_parts.append(f"{c_str}{star_tex}")
+                for j, spec in enumerate(td.stat_specs):
+                    val = _get_stat_value((c_str, se_str, t_str, star), spec[0])
+                    stat_rows[j].append(f"{spec[1]}{val}{spec[2]}")
+            else:
+                coef_parts.append("")
+                for j in range(n_stats):
+                    stat_rows[j].append("")
+
+        for name, vals in summary:
+            coef_parts.append(vals[i])
+            for j in range(n_stats):
+                stat_rows[j].append("")
+
+        lines.append(" & ".join(coef_parts) + r" \\")
+        for sr in stat_rows:
+            lines.append(" & ".join(sr) + r" \\")
+
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+
+    # Footnotes
+    note_parts: list[str] = []
+    if td.stat_specs:
+        note_parts.append(_stat_footnote(td.stat_specs))
+    if td.stars:
+        note_parts.append(r"$^{*}$\,p$<$0.10, $^{**}$\,p$<$0.05, $^{***}$\,p$<$0.01")
+    if note_parts:
+        note_text = ". ".join(note_parts)
+        lines.append(r"\begin{tablenotes}\small\item " + note_text + r"\end{tablenotes}")
+    lines.append(r"\end{table}")
+
+    return "\n".join(lines)
+
+
+def _render_html_transposed(td: _TableData) -> str:
+    """Render transposed table data as an HTML table."""
+    n_models = len(td.labels)
+    len(td.stat_specs)
+
+    summary = _transposed_columns(td)
+
+    lines: list[str] = []
+    lines.append('<table class="regtable">')
+    lines.append("<thead>")
+
+    # Header
+    lines.append("<tr>")
+    lines.append("  <th></th>")
+    for var in td.all_vars:
+        lines.append(f"  <th>{_html_escape(var)}</th>")
+    for name, _ in summary:
+        lines.append(f"  <th>{_html_escape(name)}</th>")
+    lines.append("</tr>")
+
+    lines.append("</thead>")
+    lines.append("<tbody>")
+
+    # Model rows
+    for i in range(n_models):
+        label = _html_escape(f"{td.labels[i]} {td.model_types[i]}".rstrip())
+        # Coef row
+        lines.append("<tr>")
+        lines.append(f'  <td class="model-label">{label}</td>')
+        for var in td.all_vars:
+            c_str, se_str, t_str, star = td.cells[var][i]
+            if c_str:
+                star_html = _html_stars(star)
+                lines.append(f'  <td class="coef">{c_str}{star_html}</td>')
+            else:
+                lines.append("  <td></td>")
+        for name, vals in summary:
+            lines.append(f"  <td>{vals[i]}</td>")
+        lines.append("</tr>")
+
+        # Stat rows
+        for spec in td.stat_specs:
+            lines.append("<tr>")
+            lines.append("  <td></td>")
+            for var in td.all_vars:
+                c_str, se_str, t_str, star = td.cells[var][i]
+                val = _get_stat_value((c_str, se_str, t_str, star), spec[0])
+                if val:
+                    lines.append(f'  <td class="stat">{spec[1]}{val}{spec[2]}</td>')
+                else:
+                    lines.append("  <td></td>")
+            for _ in summary:
+                lines.append("  <td></td>")
+            lines.append("</tr>")
+
+    lines.append("</tbody>")
+    lines.append("</table>")
+
+    # Footnotes
+    note_parts: list[str] = []
+    if td.stat_specs:
+        note_parts.append(_stat_footnote(td.stat_specs))
+    if td.stars:
+        note_parts.append("* p&lt;0.10, ** p&lt;0.05, *** p&lt;0.01")
+    if note_parts:
+        note_text = ". ".join(note_parts)
+        lines.append(f'<p class="regtable-note">{note_text}</p>')
+
+    return "\n".join(lines)
+
+
 # ── Public API ────────────────────────────────────────────────────
 
 
@@ -643,6 +905,9 @@ def regtable(
     stat: str | tuple[str, ...] | None = "t",
     brackets: str = "round",
     wide: bool = False,
+    transpose: bool = False,
+    rename: dict[str, str] | None = None,
+    model_type: bool = True,
     output_format: str = "text",
     **kwargs: str,
 ) -> str:
@@ -667,6 +932,13 @@ def regtable(
             When showing two stats, the secondary stat uses the other style.
         wide: If True, stats appear as columns to the right of coefficients
             instead of rows below.
+        transpose: If True, models are presented as rows and coefficients as
+            columns (inverted from the default layout). N, R², and FE/cluster
+            indicators appear as additional columns.
+        rename: Dict mapping original variable names to display names.
+            E.g. ``{"_cons": "Constant"}``
+        model_type: If False, suppress the model type row (e.g. "OLS")
+            in the default layout, or the type suffix in transposed layout.
         output_format: Output format — "text" (default), "latex", or "html".
 
     Returns:
@@ -701,7 +973,21 @@ def regtable(
     if len(labels) != n_models:
         raise ValueError(f"Expected {n_models} labels, got {len(labels)}.")
 
-    td = _build_table_data(results, labels, precision, stars, stat_specs, wide)
+    td = _build_table_data(results, labels, precision, stars, stat_specs, wide, transpose, rename)
+
+    if not model_type:
+        td.model_types = [""] * len(td.model_types)
+
+    if transpose:
+        if output_format == "latex":
+            return RegTable(_render_latex_transposed(td))
+        elif output_format == "html":
+            html = _render_html_transposed(td)
+            return RegTable(html, html=html)
+        else:
+            text = _render_text_transposed(td, precision)
+            html = _render_html_transposed(td)
+            return RegTable(text, html=html)
 
     if output_format == "latex":
         return RegTable(_render_latex(td))

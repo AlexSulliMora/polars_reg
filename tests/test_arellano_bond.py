@@ -274,47 +274,21 @@ def test_sys_gmm_no_exog():
 # ── Additional robustness tests ───────────────────────────────────
 
 
-def test_panel_ab_pandas_compat():
-    """pandas DataFrame input works for panel_ab."""
+def test_panel_ab_rejects_pandas():
+    """pandas DataFrame input raises TypeError with helpful message."""
     pytest.importorskip("pandas")
     import pandas as pd
 
-    rng = np.random.default_rng(42)
-    n_e, n_t = 50, 8
-    rho = 0.5
-    y = np.zeros((n_e, n_t))
-    x = rng.standard_normal((n_e, n_t))
-    alpha = rng.standard_normal(n_e) * 0.3
-    e = rng.standard_normal((n_e, n_t)) * 0.2
-    y[:, 0] = alpha + e[:, 0]
-    for t in range(1, n_t):
-        y[:, t] = rho * y[:, t - 1] + 1.0 * x[:, t] + alpha + e[:, t]
-    entity = np.repeat(np.arange(n_e), n_t)
-    time_id = np.tile(np.arange(n_t), n_e)
-    df_pd = pd.DataFrame({"y": y.ravel(), "x": x.ravel(), "entity": entity, "time": time_id})
-    r = panel_ab("y ~ x", data=df_pd, entity="entity", time="time")
-    assert r.model_type == "Arellano-Bond"
-    assert r.n_obs > 0
+    df_pd = pd.DataFrame({"y": [1, 2], "x": [3, 4], "entity": [0, 0], "time": [0, 1]})
+    with pytest.raises(TypeError, match="pl.from_pandas"):
+        panel_ab("y ~ x", data=df_pd, entity="entity", time="time")
 
 
-def test_panel_sys_gmm_pandas_compat():
-    """pandas DataFrame input works for panel_sys_gmm."""
+def test_panel_sys_gmm_rejects_pandas():
+    """pandas DataFrame input raises TypeError with helpful message."""
     pytest.importorskip("pandas")
     import pandas as pd
 
-    rng = np.random.default_rng(42)
-    n_e, n_t = 50, 8
-    rho = 0.5
-    y = np.zeros((n_e, n_t))
-    x = rng.standard_normal((n_e, n_t))
-    alpha = rng.standard_normal(n_e) * 0.3
-    e = rng.standard_normal((n_e, n_t)) * 0.2
-    y[:, 0] = alpha + e[:, 0]
-    for t in range(1, n_t):
-        y[:, t] = rho * y[:, t - 1] + 1.0 * x[:, t] + alpha + e[:, t]
-    entity = np.repeat(np.arange(n_e), n_t)
-    time_id = np.tile(np.arange(n_t), n_e)
-    df_pd = pd.DataFrame({"y": y.ravel(), "x": x.ravel(), "entity": entity, "time": time_id})
-    r = panel_sys_gmm("y ~ x", data=df_pd, entity="entity", time="time")
-    assert r.model_type == "System GMM"
-    assert r.n_obs > 0
+    df_pd = pd.DataFrame({"y": [1, 2], "x": [3, 4], "entity": [0, 0], "time": [0, 1]})
+    with pytest.raises(TypeError, match="pl.from_pandas"):
+        panel_sys_gmm("y ~ x", data=df_pd, entity="entity", time="time")

@@ -16,7 +16,7 @@ from polars_reg._se import (
     vcov_robust,
     vcov_wild_bootstrap,
 )
-from polars_reg._utils import ensure_polars, extract_arrays
+from polars_reg._utils import ensure_polars, extract_arrays, validate_vcov
 
 
 def liml(
@@ -43,6 +43,8 @@ def liml(
     """
     if isinstance(cluster, str):
         cluster = [cluster]
+    _liml_vcov = {"iid", "HC0", "HC1", "HC2", "HC3", "NW", "DK", "bootstrap", "wildboot"}
+    validate_vcov(vcov, _liml_vcov, "LIML")
     data = ensure_polars(data)
 
     spec = parse_formula(formula)
@@ -80,15 +82,22 @@ def liml(
     names = arrays.names + (arrays.endog_names or [])
 
     # Compute kappa via the partialed-out formulation to avoid n x n matrices.
+    # Anderson & Rubin (1949) eigenvalue approach for LIML
     # 1. Partial out X_exog from y, endog, and excluded instruments.
-    XeXe_inv = np.linalg.inv(X_exog.T @ X_exog)
+    try:
+        XeXe_inv = np.linalg.inv(X_exog.T @ X_exog)
+    except np.linalg.LinAlgError:
+        raise ValueError("Exogenous regressor matrix is singular (perfect collinearity).")
     y_tilde = y - X_exog @ (XeXe_inv @ (X_exog.T @ y))
     endog_tilde = endog - X_exog @ (XeXe_inv @ (X_exog.T @ endog))
     Z1_tilde = instruments - X_exog @ (XeXe_inv @ (X_exog.T @ instruments))
 
     # 2. Form Y* = [y_tilde, endog_tilde] and project onto partialed instruments.
     Y_star = np.column_stack([y_tilde, endog_tilde])
-    Z1tZ1_inv = np.linalg.inv(Z1_tilde.T @ Z1_tilde)
+    try:
+        Z1tZ1_inv = np.linalg.inv(Z1_tilde.T @ Z1_tilde)
+    except np.linalg.LinAlgError:
+        raise ValueError("Instrument matrix is singular after partialing out exogenous regressors.")
     # Pz1 Y* = Z1_tilde (Z1_tilde'Z1_tilde)^{-1} Z1_tilde' Y*
     Pz1_Ystar = Z1_tilde @ (Z1tZ1_inv @ (Z1_tilde.T @ Y_star))
 
@@ -97,9 +106,12 @@ def liml(
     B = A - Y_star.T @ Pz1_Ystar
 
     # 4. Solve generalised eigenvalue problem A v = kappa B v.
-    #    Use scipy.linalg.eig which handles near-singular B.
+    #    Use scipy.linalg.eig (not eigvalsh) which handles near-singular B.
+    #    Anderson & Rubin (1949): kappa = min eigenvalue of A relative to B.
     eigvals_gen = linalg.eig(A, B, right=False)
     # Keep finite real eigenvalues >= 1 (all valid kappas satisfy kappa >= 1).
+    # Tolerance 1e-6: eigenvalues slightly below 1.0 can arise from
+    # floating-point roundoff in the generalized eigenvalue decomposition.
     finite_mask = np.isfinite(eigvals_gen) & np.isreal(eigvals_gen)
     real_eigs = eigvals_gen[finite_mask].real
     valid_eigs = real_eigs[real_eigs >= 1.0 - 1e-6]
@@ -108,7 +120,10 @@ def liml(
     # LIML weight matrix: W = I - kappa * Mz = (1 - kappa) * I + kappa * Pz
     # Compute X_w = W @ X_full without forming the n x n matrix W.
     # Pz X_full = Z (Z'Z)^{-1} Z' X_full
-    ZtZ_inv = np.linalg.inv(Z.T @ Z)
+    try:
+        ZtZ_inv = np.linalg.inv(Z.T @ Z)
+    except np.linalg.LinAlgError:
+        raise ValueError("Full instrument matrix Z is singular.")
     Pz_Xfull = Z @ (ZtZ_inv @ (Z.T @ X_full))
     X_w = (1.0 - kappa) * X_full + kappa * Pz_Xfull
 
@@ -128,7 +143,10 @@ def liml(
     r2_adj = 1.0 - (1.0 - r2) * (n - 1) / (n - k)
 
     # Variance-covariance
-    XwX_inv = np.linalg.inv(XwX)
+    try:
+        XwX_inv = np.linalg.inv(XwX)
+    except np.linalg.LinAlgError:
+        raise ValueError("LIML weighted design matrix X_w'X is singular.")
     n_clusters = None
     if cluster and vcov != "wildboot":
         cluster_arrays = [arrays.cluster_arrays[c] for c in cluster]
@@ -209,6 +227,10 @@ def liml(
         vcov_type = vcov
         df_r = n - k
     elif vcov == "iid":
+        # LIML iid VCV: sigma^2 = e'e/(n-k) (finite-sample correction)
+        # Note: iv2sls uses e'e/n (asymptotic, matching Stata ivregress).
+        # LIML uses the finite-sample version following standard textbook
+        # treatment — Cameron & Trivedi (2005), ch. 4.
         sigma2 = resid @ resid / (n - k)
         V = sigma2 * XwX_inv
         vcov_type = "iid"
@@ -249,7 +271,9 @@ def gmm_iv(
     Args:
         formula: IV formula, e.g. "y ~ x_exog || x_endog ~ z1 + z2"
         data: Polars DataFrame or LazyFrame.
-        vcov: "iid", "HC0", "HC1", "HC2", "HC3", "NW", or "DK".
+        vcov: "iid", "HC1", "NW", or "DK". The two-step efficient GMM
+            VCV is inherently heteroskedasticity-robust; HC0-HC3
+            distinctions do not apply and default to the natural GMM VCV.
         cluster: Column name(s) for clustered SEs. Overrides vcov.
         time: Column name for time dimension (required for NW/DK).
         bandwidth: Kernel bandwidth for NW/DK (default: auto).
@@ -258,6 +282,8 @@ def gmm_iv(
     """
     if isinstance(cluster, str):
         cluster = [cluster]
+    _gmm_vcov = {"iid", "HC1", "NW", "DK", "bootstrap", "wildboot"}
+    validate_vcov(vcov, _gmm_vcov, "GMM")
     data = ensure_polars(data)
 
     spec = parse_formula(formula)
@@ -289,9 +315,13 @@ def gmm_iv(
 
     names = arrays.names + (arrays.endog_names or [])
 
+    # Hansen (1982) two-step efficient GMM
     # Step 1: 2SLS with W = (Z'Z)^{-1}
     ZtZ = Z.T @ Z
-    ZtZ_inv = np.linalg.inv(ZtZ)
+    try:
+        ZtZ_inv = np.linalg.inv(ZtZ)
+    except np.linalg.LinAlgError:
+        raise ValueError("Instrument matrix Z'Z is singular (collinear instruments).")
     XtZ = X_full.T @ Z
     Zty = Z.T @ y
 
@@ -307,7 +337,10 @@ def gmm_iv(
     # S = Z' diag(e1^2) Z / n
     S = (Z * (e1**2)[:, None]).T @ Z / n
 
-    S_inv = np.linalg.inv(S)
+    try:
+        S_inv = np.linalg.inv(S)
+    except np.linalg.LinAlgError:
+        raise ValueError("Step-1 weight matrix S is singular.")
 
     # beta_2 = (X'Z S^{-1} Z'X)^{-1} X'Z S^{-1} Z'y
     A2 = XtZ @ S_inv @ XtZ.T
@@ -321,10 +354,17 @@ def gmm_iv(
     # where S = (1/n) Z' diag(e^2) Z, so V = n * (X'Z S_inv Z'X)^{-1}
     # Recompute S with step-2 residuals for final VCV and J test
     S_final = (Z * (resid**2)[:, None]).T @ Z / n
-    S_final_inv = np.linalg.inv(S_final)
+    try:
+        S_final_inv = np.linalg.inv(S_final)
+    except np.linalg.LinAlgError:
+        raise ValueError("Step-2 weight matrix S is singular.")
 
+    # GMM VCV: V = n * (X'Z S^{-1} Z'X)^{-1} — Hansen (1982)
     A_final = XtZ @ S_final_inv @ XtZ.T
-    V = np.linalg.inv(A_final) * n
+    try:
+        V = np.linalg.inv(A_final) * n
+    except np.linalg.LinAlgError:
+        raise ValueError("GMM design matrix X'Z S^{-1} Z'X is singular.")
 
     # Override VCV if requested
     if vcov == "bootstrap":
@@ -358,7 +398,10 @@ def gmm_iv(
         cluster_arrays_list = [arrays.cluster_arrays[c] for c in cluster]
         # For GMM with clustering, use sandwich form with Z-projected X
         # bread = (X'Z S^{-1} Z'X)^{-1}
-        bread = np.linalg.inv(A_final)
+        try:
+            bread = np.linalg.inv(A_final)
+        except np.linalg.LinAlgError:
+            raise ValueError("GMM design matrix is singular for clustered VCV.")
         # Compute meat using cluster-robust formulation
         # score_i = Z_i' * e_i, effective X = Z S^{-1} Z' X
         # Use (X'Z S^{-1}) as the effective left-projection
@@ -401,7 +444,7 @@ def gmm_iv(
         n_clusters_dict = None
         df_r = n - k
     else:
-        vcov_type = "robust"  # GMM naturally uses heteroskedasticity-robust VCV
+        vcov_type = "HC1"  # GMM naturally uses heteroskedasticity-robust VCV
         n_clusters_dict = None
         df_r = n - k
 

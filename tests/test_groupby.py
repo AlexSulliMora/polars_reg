@@ -129,11 +129,12 @@ def test_groupby_multikey():
     assert len(result) == 4  # 2 sectors * 2 regions
 
 
-def test_groupby_pandas_compat(grouped_data):
-    """GroupBy should work with pandas DataFrames."""
+def test_groupby_rejects_pandas(grouped_data):
+    """GroupBy should reject pandas DataFrames with helpful error."""
+    pytest.importorskip("pandas")
     pd_df = grouped_data.to_pandas()
-    result = pr.groupby_reg(pr.ols, "y ~ x1 + x2", pd_df, group_by="group")
-    assert len(result) == 3
+    with pytest.raises(TypeError, match="pl.from_pandas"):
+        pr.groupby_reg(pr.ols, "y ~ x1 + x2", pd_df, group_by="group")
 
 
 def test_groupby_iv(grouped_data):

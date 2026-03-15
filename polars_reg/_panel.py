@@ -18,7 +18,7 @@ from polars_reg._se import (
     vcov_robust,
     vcov_wild_bootstrap,
 )
-from polars_reg._utils import ensure_polars, extract_arrays
+from polars_reg._utils import ensure_polars, extract_arrays, sanitize_inf, validate_vcov
 
 
 def panel_fe(
@@ -50,6 +50,8 @@ def panel_fe(
         pass
     elif cluster is None:
         cluster = [entity]
+    _fe_vcov = {"iid", "NW", "DK", "bootstrap", "wildboot"}
+    validate_vcov(vcov, _fe_vcov, "Panel FE")
     data = ensure_polars(data)
 
     spec = parse_formula(formula)
@@ -83,7 +85,12 @@ def panel_fe(
     n, k = X_dm.shape
     df_abs = absorbed_dof(fe_dict)
 
-    beta = np.linalg.solve(X_dm.T @ X_dm, X_dm.T @ y_dm)
+    try:
+        beta = np.linalg.solve(X_dm.T @ X_dm, X_dm.T @ y_dm)
+    except np.linalg.LinAlgError:
+        raise ValueError(
+            "Design matrix is singular after within-transformation (perfect collinearity)."
+        )
     resid = y_dm - X_dm @ beta
 
     ss_res = resid @ resid
@@ -171,7 +178,7 @@ def panel_re(
 ) -> RegressionResult:
     """Panel random effects (GLS) estimator.
 
-    Uses Swamy-Arora method to estimate variance components, then
+    Uses Swamy & Arora (1972) method to estimate variance components, then
     performs quasi-demeaning with theta = 1 - sqrt(sigma_e^2 / (T*sigma_u^2 + sigma_e^2)).
 
     Args:
@@ -179,7 +186,7 @@ def panel_re(
         data: Polars DataFrame or LazyFrame
         entity: Column name for entity (panel) identifier
         time: Column name for time identifier (required for NW/DK)
-        vcov: "iid", "HC0", "HC1", "NW", "DK", "bootstrap", or "wildboot"
+        vcov: "iid", "HC1", "NW", "DK", "bootstrap", or "wildboot"
         cluster: Column name(s) for clustered SEs
         bandwidth: Number of lags for NW/DK. Default: Newey-West rule of thumb.
         n_boot: Bootstrap replications (default 999).
@@ -188,6 +195,8 @@ def panel_re(
     data = ensure_polars(data)
     if isinstance(cluster, str):
         cluster = [cluster]
+    _re_vcov = {"iid", "HC1", "NW", "DK", "bootstrap", "wildboot"}
+    validate_vcov(vcov, _re_vcov, "Panel RE")
     spec = parse_formula(formula)
 
     # Drop rows with nulls in relevant columns to stay aligned with extract_arrays
@@ -231,7 +240,10 @@ def panel_re(
     y_within = y - entity_means_y[entity_codes]
     X_within = X_nocons - entity_means_X[entity_codes]
 
-    beta_within = np.linalg.solve(X_within.T @ X_within, X_within.T @ y_within)
+    try:
+        beta_within = np.linalg.solve(X_within.T @ X_within, X_within.T @ y_within)
+    except np.linalg.LinAlgError:
+        raise ValueError("Within-transformation design matrix is singular (perfect collinearity).")
     resid_within = y_within - X_within @ beta_within
     sigma_e2 = (resid_within @ resid_within) / (n - n_entities - k_nocons)
 
@@ -256,8 +268,11 @@ def panel_re(
     y_re = y - theta[entity_codes] * entity_means_y[entity_codes]
     X_re = X - theta[entity_codes, None] * entity_means_X_full[entity_codes]
 
-    # Step 5: GLS (OLS on quasi-demeaned data)
-    beta = np.linalg.solve(X_re.T @ X_re, X_re.T @ y_re)
+    # Swamy & Arora (1972) GLS on quasi-demeaned data
+    try:
+        beta = np.linalg.solve(X_re.T @ X_re, X_re.T @ y_re)
+    except np.linalg.LinAlgError:
+        raise ValueError("GLS design matrix is singular after quasi-demeaning.")
 
     ss_res = (y - X @ beta) @ (y - X @ beta)
     y_dm = y - y.mean()
@@ -297,7 +312,10 @@ def panel_re(
     elif vcov in ("NW", "DK"):
         if arrays.time_array is None:
             raise ValueError(f"vcov='{vcov}' requires time= parameter")
-        XtX_inv = np.linalg.inv(X_re.T @ X_re)
+        try:
+            XtX_inv = np.linalg.inv(X_re.T @ X_re)
+        except np.linalg.LinAlgError:
+            raise ValueError("GLS design matrix is singular for HAC VCV.")
         score = X_re * resid_re[:, None]
         if vcov == "NW":
             S = _hac_meat(score, arrays.time_array, bandwidth)
@@ -394,6 +412,8 @@ def panel_fd(
         cluster = [cluster]
     if cluster is None:
         cluster = [entity]
+    _fd_vcov = {"iid", "HC1", "bootstrap", "wildboot"}
+    validate_vcov(vcov, _fd_vcov, "Panel FD")
     data = ensure_polars(data)
 
     spec = parse_formula(formula)
@@ -405,6 +425,9 @@ def panel_fd(
 
     if isinstance(data, pl.LazyFrame):
         data = data.select(all_needed).collect()
+
+    # Sanitize inf/NaN before any computation
+    data = sanitize_inf(data, all_needed)
 
     # Sort by entity then time, compute first differences
     df_sorted = data.select(all_needed).sort([entity, time])

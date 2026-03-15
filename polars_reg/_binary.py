@@ -1,4 +1,8 @@
-"""Probit and Logit (binary choice) models via MLE."""
+"""Probit and Logit (binary choice) models via MLE.
+
+Maximum likelihood estimation following Cameron & Trivedi (2005),
+Microeconometrics: Methods and Applications, ch. 14.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +15,7 @@ from scipy import stats
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
 from polars_reg._se import _clustered_meat, _mle_multiway_clustered
-from polars_reg._utils import ensure_polars, extract_arrays
+from polars_reg._utils import ensure_polars, extract_arrays, validate_vcov
 
 
 def _probit_ll_score_hess(beta, X, y):
@@ -20,7 +24,8 @@ def _probit_ll_score_hess(beta, X, y):
     Phi = stats.norm.cdf(xb)
     phi = stats.norm.pdf(xb)
 
-    # Clip to avoid log(0)
+    # Clip to (1e-15, 1-1e-15): prevents log(0) and log(1) in
+    # log-likelihood y*log(Phi) + (1-y)*log(1-Phi)
     Phi = np.clip(Phi, 1e-15, 1 - 1e-15)
 
     ll = np.sum(y * np.log(Phi) + (1 - y) * np.log(1 - Phi))
@@ -39,7 +44,8 @@ def _probit_ll_score_hess(beta, X, y):
 def _logit_ll_score_hess(beta, X, y):
     """Logit log-likelihood, score, and Hessian."""
     xb = X @ beta
-    # Numerically stable sigmoid
+    # Numerically stable sigmoid, clipped to (1e-15, 1-1e-15) to
+    # prevent log(0) in log-likelihood computation
     Lambda = 1.0 / (1.0 + np.exp(-xb))
     Lambda = np.clip(Lambda, 1e-15, 1 - 1e-15)
 
@@ -57,7 +63,10 @@ def _logit_ll_score_hess(beta, X, y):
 
 
 def _newton_raphson(ll_func, beta0, X, y, max_iter=100, tol=1e-8):
-    """Newton-Raphson optimization for MLE."""
+    """Newton-Raphson optimization for MLE.
+
+    Convergence: max absolute Newton step < tol (default 1e-8).
+    """
     beta = beta0.copy()
     for i in range(max_iter):
         ll, score, H, prob, _ = ll_func(beta, X, y)
@@ -86,6 +95,8 @@ def _binary_model(
     """Common implementation for probit and logit."""
     if isinstance(cluster, str):
         cluster = [cluster]
+    _binary_vcov = {"iid", "HC1"}
+    validate_vcov(vcov, _binary_vcov, model_type)
     data = ensure_polars(data)
 
     spec = parse_formula(formula)
@@ -112,6 +123,7 @@ def _binary_model(
     beta, ll, H, prob, score_resid, score_vec = _newton_raphson(ll_func, beta0, X, y)
 
     # Null model log-likelihood (intercept only)
+    # Clip mean to prevent log(0) if all y=0 or all y=1
     p_bar = y.mean()
     p_bar = np.clip(p_bar, 1e-15, 1 - 1e-15)
     ll_null = np.sum(y * np.log(p_bar) + (1 - y) * np.log(1 - p_bar))
@@ -139,13 +151,13 @@ def _binary_model(
         vcov_type_out = "cluster"
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1
-    elif vcov in ("HC1", "robust"):
+    elif vcov == "HC1":
         # Robust (sandwich): H^{-1} (sum s_i s_i') H^{-1}
         scores = X * score_resid[:, None]
         meat = scores.T @ scores
         dfc = n / (n - k)
         V = dfc * H_inv @ meat @ H_inv
-        vcov_type_out = "robust"
+        vcov_type_out = "HC1"
         n_clusters = None
         df_r = n - k
     else:
@@ -191,7 +203,7 @@ def probit(
     Args:
         formula: Formula string, e.g. "y ~ x1 + x2"
         data: Polars DataFrame or LazyFrame
-        vcov: "iid" (information matrix) or "HC1"/"robust" (sandwich)
+        vcov: "iid" (information matrix) or "HC1" (sandwich)
         cluster: Column name(s) for clustered SEs.
     """
     return _binary_model("Probit", formula, data, vcov=vcov, cluster=cluster)
@@ -208,7 +220,7 @@ def logit(
     Args:
         formula: Formula string, e.g. "y ~ x1 + x2"
         data: Polars DataFrame or LazyFrame
-        vcov: "iid" (information matrix) or "HC1"/"robust" (sandwich)
+        vcov: "iid" (information matrix) or "HC1" (sandwich)
         cluster: Column name(s) for clustered SEs.
     """
     return _binary_model("Logit", formula, data, vcov=vcov, cluster=cluster)

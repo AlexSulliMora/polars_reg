@@ -17,7 +17,7 @@ import polars as pl
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
 from polars_reg._se import _clustered_meat, _mle_multiway_clustered, _recode_to_contiguous
-from polars_reg._utils import ensure_polars, extract_arrays
+from polars_reg._utils import ensure_polars, extract_arrays, validate_vcov
 
 
 def _ppml_deviance(y: np.ndarray, mu: np.ndarray) -> float:
@@ -58,8 +58,8 @@ def ppml(
             (absorbed FE) are not supported.
         data: Polars DataFrame or LazyFrame (pandas DataFrames are
             auto-converted).
-        vcov: Variance-covariance type. "HC1" or "robust" (default) for
-            sandwich VCV with n/(n-k) small-sample correction.
+        vcov: Variance-covariance type. "HC1" (default) for sandwich VCV
+            with n/(n-k) small-sample correction.
         cluster: Column name(s) for cluster-robust standard errors.
             Overrides vcov when provided.
         max_iter: Maximum number of IRLS iterations (default 250).
@@ -73,6 +73,8 @@ def ppml(
     """
     if isinstance(cluster, str):
         cluster = [cluster]
+    _ppml_vcov = {"iid", "HC1"}
+    validate_vcov(vcov, _ppml_vcov, "PPML")
     data = ensure_polars(data)
 
     spec = parse_formula(formula)
@@ -94,6 +96,8 @@ def ppml(
     converged = False
     for iteration in range(max_iter):
         mu = np.exp(X @ beta)
+        # Clip conditional mean to (1e-10, 1e10): prevents underflow/overflow
+        # in the Hessian X'diag(mu)X and deviance computation
         mu = np.clip(mu, 1e-10, 1e10)
 
         # Newton-Raphson step
@@ -126,7 +130,8 @@ def ppml(
     mu = np.clip(mu, 1e-10, 1e10)
     score_resid = y - mu
 
-    # Separation detection
+    # Separation detection: |beta| > 10 suggests quasi-complete separation
+    # (coefficient diverging because a regressor perfectly predicts y=0)
     if np.any(np.abs(beta) > 10):
         large_idx = np.where(np.abs(beta) > 10)[0]
         large_names = [arrays.names[i] for i in large_idx]
@@ -164,12 +169,12 @@ def ppml(
         vcov_type_out = "cluster"
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1
-    elif vcov in ("HC1", "robust"):
+    elif vcov == "HC1":
         # Robust sandwich: H^{-1} M H^{-1} with n/(n-k) scaling
         meat = X.T @ (X * (score_resid**2)[:, None])
         dfc = n / (n - k)
         V = dfc * H_inv @ meat @ H_inv
-        vcov_type_out = "robust"
+        vcov_type_out = "HC1"
         n_clusters = None
         df_r = n - k
     else:

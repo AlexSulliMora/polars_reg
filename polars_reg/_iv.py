@@ -5,6 +5,7 @@ import polars as pl
 
 from polars_reg._demean import absorbed_dof, demean, drop_singletons, reindex_fe_codes
 from polars_reg._formula import parse_formula
+from polars_reg._native import rust_iv2sls as _rust_iv2sls
 from polars_reg._results import RegressionResult
 from polars_reg._se import (
     _clustered_meat,
@@ -14,38 +15,7 @@ from polars_reg._se import (
     _recode_to_contiguous,
     vcov_wild_bootstrap,
 )
-from polars_reg._utils import ensure_polars, extract_arrays, sanitize_inf
-
-try:
-    from polars_reg._native import rust_iv2sls as _rust_iv2sls
-
-    _HAS_NATIVE = True
-except ImportError:
-    _HAS_NATIVE = False
-
-
-def _to_codes_fast(series: pl.Series) -> np.ndarray:
-    """Convert Polars Series to int32 codes. Minimal overhead path."""
-    if not _HAS_NATIVE:
-        raise RuntimeError("_to_codes_fast requires native extension")
-    from polars_reg._native import rust_recode
-
-    dtype = series.dtype
-    if dtype in (
-        pl.Int8,
-        pl.Int16,
-        pl.Int32,
-        pl.Int64,
-        pl.UInt8,
-        pl.UInt16,
-        pl.UInt32,
-        pl.UInt64,
-    ):
-        arr = series.to_numpy().astype(np.int64)
-        codes, _ = rust_recode(arr)
-        return np.asarray(codes).astype(np.int32)
-    codes = series.cast(pl.Utf8).cast(pl.Categorical).to_physical().to_numpy()
-    return codes.astype(np.int32)
+from polars_reg._utils import _to_codes, ensure_polars, extract_arrays, sanitize_inf, validate_vcov
 
 
 def _iv2sls_rust(
@@ -84,7 +54,7 @@ def _iv2sls_rust(
     x_endog = [df[c].cast(pl.Float64).to_numpy() for c in spec.endog]
     z_excl = [df[c].cast(pl.Float64).to_numpy() for c in spec.instruments]
 
-    fe_arrays = [_to_codes_fast(df[c]) for c in spec.fe]
+    fe_arrays = [_to_codes(df[c]) for c in spec.fe]
     cl_arrays = []
     cl_names = []
     if cluster:
@@ -92,7 +62,7 @@ def _iv2sls_rust(
             if c in spec.fe:
                 cl_arrays.append(fe_arrays[spec.fe.index(c)])
             else:
-                cl_arrays.append(_to_codes_fast(df[c]))
+                cl_arrays.append(_to_codes(df[c]))
             cl_names.append(c)
 
     (
@@ -202,6 +172,8 @@ def iv2sls(
     """
     if isinstance(cluster, str):
         cluster = [cluster]
+    _iv_vcov = {"iid", "HC0", "HC1", "NW", "DK", "bootstrap", "wildboot"}
+    validate_vcov(vcov, _iv_vcov, "2SLS")
     data = ensure_polars(data)
 
     spec = parse_formula(formula)
@@ -214,8 +186,7 @@ def iv2sls(
 
     # --- Rust fast path ---
     _rust_eligible = (
-        _HAS_NATIVE
-        and not spec.indicators
+        not spec.indicators
         and not any(":" in c for c in spec.exog)
         and vcov not in ("bootstrap", "wildboot", "NW", "DK")
         and (cluster or vcov in ("iid", "HC0", "HC1"))
@@ -468,8 +439,11 @@ def _iv_vcov_iid(
     """Homoskedastic VCV for 2SLS: sigma^2 * (X_hat'X)^{-1}.
 
     Uses sigma^2 = e'e/n (asymptotic, matching Stata ivregress).
+    Note: LIML in _gmm.py uses e'e/(n-k) (finite-sample correction).
+    Both are valid; we match Stata's convention per estimator.
     """
     n = X.shape[0]
+    # 2SLS iid VCV: e'e/n (asymptotic), matches Stata ivregress
     sigma2 = (resid @ resid) / n
     return sigma2 * XhX_inv
 

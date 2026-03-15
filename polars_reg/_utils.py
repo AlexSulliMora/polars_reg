@@ -6,20 +6,14 @@ import numpy as np
 import polars as pl
 
 from polars_reg._formula import FormulaSpec
-
-try:
-    from polars_reg._native import rust_recode as _rust_recode
-
-    _HAS_NATIVE = True
-except ImportError:
-    _HAS_NATIVE = False
+from polars_reg._native import rust_recode as _rust_recode
 
 
 def _to_codes(series: pl.Series) -> np.ndarray:
     """Convert a Polars Series to contiguous integer group codes (0..G-1).
 
-    Uses Rust native extension when available for integer types.
-    Falls back to Polars categorical for strings and other types.
+    Uses Rust native extension for integer types.
+    Uses Polars categorical encoding for strings and other types.
     """
     dtype = series.dtype
     if dtype in (
@@ -33,47 +27,43 @@ def _to_codes(series: pl.Series) -> np.ndarray:
         pl.UInt64,
     ):
         arr = series.to_numpy().astype(np.int64)
-        if _HAS_NATIVE:
-            codes, _ = _rust_recode(arr)
-            return codes
-        # Pure Python fallback
-        mn = arr.min()
-        mx = arr.max()
-        rng = mx - mn
-        if rng < 2 * len(arr):
-            lut = np.full(rng + 1, -1, dtype=np.int32)
-            uniq_shifted = np.unique(arr - mn)
-            lut[uniq_shifted] = np.arange(len(uniq_shifted), dtype=np.int32)
-            return lut[arr - mn]
-        _, codes = np.unique(arr, return_inverse=True)
-        return codes.astype(np.int32)
+        codes, _ = _rust_recode(arr)
+        return codes
     # String/other types: use Polars categorical encoding
     codes = series.cast(pl.Utf8).cast(pl.Categorical).to_physical().to_numpy()
     return codes.astype(np.int32)
 
 
 def ensure_polars(data: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFrame:
-    """Convert pandas DataFrame to Polars if needed. Passes through Polars data unchanged."""
-    try:
-        import pandas as pd
-    except ImportError:
-        if not isinstance(data, (pl.DataFrame, pl.LazyFrame)):
-            raise TypeError(
-                "Expected Polars DataFrame/LazyFrame or pandas DataFrame, "
-                f"got {type(data).__name__}"
-            )
-        return data
-    if isinstance(data, pd.DataFrame):
-        return pl.from_pandas(data)
+    """Validate that data is a Polars DataFrame or LazyFrame.
+
+    This is a Polars-native package. Pandas DataFrames are not accepted —
+    use ``pl.from_pandas(df)`` before calling any estimator.
+    """
     if not isinstance(data, (pl.DataFrame, pl.LazyFrame)):
         raise TypeError(
-            f"Expected Polars DataFrame/LazyFrame or pandas DataFrame, got {type(data).__name__}"
+            f"Expected Polars DataFrame or LazyFrame, got {type(data).__name__}. "
+            "Use pl.from_pandas(df) to convert pandas DataFrames."
         )
     return data
 
 
+def validate_vcov(vcov: str, supported: set[str], model_type: str) -> None:
+    """Raise ValueError if vcov is not in the supported set."""
+    if vcov not in supported:
+        raise ValueError(
+            f"vcov={vcov!r} is not supported for {model_type}. "
+            f"Available: {', '.join(sorted(supported))}"
+        )
+
+
 def sanitize_inf(df: pl.DataFrame, cols: list[str]) -> pl.DataFrame:
-    """Convert inf/-inf and NaN to null in float columns for uniform null-drop."""
+    """Convert inf/-inf and NaN to null in float columns for uniform null-drop.
+
+    IEEE NaN passes through Polars drop_nulls() unchanged (NaN != null),
+    so must be converted to null first. Without this, NaN propagates
+    silently through all downstream computation.
+    """
     float_cols = [c for c in cols if df[c].dtype.is_float()]
     if float_cols:
         df = df.with_columns(
