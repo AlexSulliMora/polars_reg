@@ -468,8 +468,11 @@ def _iv_vcov_iid(
     """Homoskedastic VCV for 2SLS: sigma^2 * (X_hat'X)^{-1}.
 
     Uses sigma^2 = e'e/n (asymptotic, matching Stata ivregress).
+    Note: LIML in _gmm.py uses e'e/(n-k) (finite-sample correction).
+    Both are valid; we match Stata's convention per estimator.
     """
     n = X.shape[0]
+    # 2SLS iid VCV: e'e/n (asymptotic), matches Stata ivregress
     sigma2 = (resid @ resid) / n
     return sigma2 * XhX_inv
 

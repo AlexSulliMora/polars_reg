@@ -8,7 +8,7 @@ from scipy import stats
 
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
-from polars_reg._utils import ensure_polars
+from polars_reg._utils import ensure_polars, sanitize_inf
 
 
 def panel_ab(
@@ -49,6 +49,12 @@ def panel_ab(
     if isinstance(data, pl.LazyFrame):
         data = data.select(cols_needed).collect()
     df = data.select(cols_needed).sort([entity, time])
+
+    # Sanitize inf/NaN before any computation
+    df = sanitize_inf(df, cols_needed)
+    df = df.drop_nulls()
+    if len(df) == 0:
+        raise ValueError("No observations remaining after dropping nulls/inf.")
 
     # Determine max available lag for instruments
     n_times = df[time].n_unique()
@@ -239,6 +245,12 @@ def panel_sys_gmm(
     if isinstance(data, pl.LazyFrame):
         data = data.select(cols_needed).collect()
     df = data.select(cols_needed).sort([entity, time])
+
+    # Sanitize inf/NaN before any computation
+    df = sanitize_inf(df, cols_needed)
+    df = df.drop_nulls()
+    if len(df) == 0:
+        raise ValueError("No observations remaining after dropping nulls/inf.")
 
     n_times = df[time].n_unique()
     if maxlags is None:

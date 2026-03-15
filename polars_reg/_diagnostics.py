@@ -719,5 +719,5 @@ def _matrix_power(A: np.ndarray, p: float) -> np.ndarray:
     # Clamp small negative eigenvalues from numerical noise
     eigvals = np.maximum(eigvals, 0.0)
     if p < 0 and np.any(eigvals < 1e-14):
-        raise np.linalg.LinAlgError("Matrix is singular; cannot compute negative matrix power")
+        raise ValueError("Matrix is singular; cannot compute negative matrix power.")
     return eigvecs @ np.diag(eigvals**p) @ eigvecs.T

@@ -18,7 +18,7 @@ from polars_reg._se import (
     vcov_robust,
     vcov_wild_bootstrap,
 )
-from polars_reg._utils import ensure_polars, extract_arrays
+from polars_reg._utils import ensure_polars, extract_arrays, sanitize_inf
 
 
 def panel_fe(
@@ -83,7 +83,12 @@ def panel_fe(
     n, k = X_dm.shape
     df_abs = absorbed_dof(fe_dict)
 
-    beta = np.linalg.solve(X_dm.T @ X_dm, X_dm.T @ y_dm)
+    try:
+        beta = np.linalg.solve(X_dm.T @ X_dm, X_dm.T @ y_dm)
+    except np.linalg.LinAlgError:
+        raise ValueError(
+            "Design matrix is singular after within-transformation (perfect collinearity)."
+        )
     resid = y_dm - X_dm @ beta
 
     ss_res = resid @ resid
@@ -231,7 +236,10 @@ def panel_re(
     y_within = y - entity_means_y[entity_codes]
     X_within = X_nocons - entity_means_X[entity_codes]
 
-    beta_within = np.linalg.solve(X_within.T @ X_within, X_within.T @ y_within)
+    try:
+        beta_within = np.linalg.solve(X_within.T @ X_within, X_within.T @ y_within)
+    except np.linalg.LinAlgError:
+        raise ValueError("Within-transformation design matrix is singular (perfect collinearity).")
     resid_within = y_within - X_within @ beta_within
     sigma_e2 = (resid_within @ resid_within) / (n - n_entities - k_nocons)
 
@@ -256,8 +264,11 @@ def panel_re(
     y_re = y - theta[entity_codes] * entity_means_y[entity_codes]
     X_re = X - theta[entity_codes, None] * entity_means_X_full[entity_codes]
 
-    # Step 5: GLS (OLS on quasi-demeaned data)
-    beta = np.linalg.solve(X_re.T @ X_re, X_re.T @ y_re)
+    # Swamy & Arora (1972) GLS on quasi-demeaned data
+    try:
+        beta = np.linalg.solve(X_re.T @ X_re, X_re.T @ y_re)
+    except np.linalg.LinAlgError:
+        raise ValueError("GLS design matrix is singular after quasi-demeaning.")
 
     ss_res = (y - X @ beta) @ (y - X @ beta)
     y_dm = y - y.mean()
@@ -297,7 +308,10 @@ def panel_re(
     elif vcov in ("NW", "DK"):
         if arrays.time_array is None:
             raise ValueError(f"vcov='{vcov}' requires time= parameter")
-        XtX_inv = np.linalg.inv(X_re.T @ X_re)
+        try:
+            XtX_inv = np.linalg.inv(X_re.T @ X_re)
+        except np.linalg.LinAlgError:
+            raise ValueError("GLS design matrix is singular for HAC VCV.")
         score = X_re * resid_re[:, None]
         if vcov == "NW":
             S = _hac_meat(score, arrays.time_array, bandwidth)
@@ -405,6 +419,9 @@ def panel_fd(
 
     if isinstance(data, pl.LazyFrame):
         data = data.select(all_needed).collect()
+
+    # Sanitize inf/NaN before any computation
+    data = sanitize_inf(data, all_needed)
 
     # Sort by entity then time, compute first differences
     df_sorted = data.select(all_needed).sort([entity, time])
