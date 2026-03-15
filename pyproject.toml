@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "polars_reg"
-version = "0.1.4"
+version = "0.2.0"
 description = "Fast econometric regressions for Python — OLS, IV, panel, probit/logit with robust and clustered SEs, built on Polars and Rust"
 readme = "README.md"
 license = "MIT"
@@ -23,6 +23,7 @@ dependencies = [
     "polars>=1.0",
     "numpy>=1.24",
     "scipy>=1.10",
+    "great-tables>=0.15",
 ]
 
 [project.optional-dependencies]
