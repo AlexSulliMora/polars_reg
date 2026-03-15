@@ -82,7 +82,12 @@ def validate_vcov(vcov: str, supported: set[str], model_type: str) -> None:
 
 
 def sanitize_inf(df: pl.DataFrame, cols: list[str]) -> pl.DataFrame:
-    """Convert inf/-inf and NaN to null in float columns for uniform null-drop."""
+    """Convert inf/-inf and NaN to null in float columns for uniform null-drop.
+
+    IEEE NaN passes through Polars drop_nulls() unchanged (NaN != null),
+    so must be converted to null first. Without this, NaN propagates
+    silently through all downstream computation.
+    """
     float_cols = [c for c in cols if df[c].dtype.is_float()]
     if float_cols:
         df = df.with_columns(

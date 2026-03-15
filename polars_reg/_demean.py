@@ -173,6 +173,9 @@ def _demean_cg(
     u = r.copy()
     ssr = np.sum(r * r)
 
+    # Convergence: relative SSR < tol^2, i.e. ||r||^2 < tol^2 * ||x0||^2
+    # where r = T(x) - x is the residual from symmetric Kaczmarz.
+    # Correia (2016), §3.2: CG acceleration of the alternating projections.
     x0_norm = np.sum(x * x)
     tol_sq = tol**2 * max(x0_norm, 1e-16)
 
@@ -185,6 +188,10 @@ def _demean_cg(
         _symmetric_kaczmarz(tmp, fe_list, n_groups_list, denoms, w=weights)
         v = u - tmp
         uv = np.sum(u * v)
+        # CG coefficient denominator too small: can happen if non-contiguous
+        # FE codes create phantom zero-count groups making uv near-zero,
+        # which causes alpha = ssr/uv to overflow. See docs/solutions/
+        # runtime-errors/fe-singleton-contiguity-and-edge-case-guards.md.
         if abs(uv) < 1e-30:
             break
         alpha = ssr / uv

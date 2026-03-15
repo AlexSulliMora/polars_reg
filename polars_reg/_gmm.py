@@ -106,9 +106,12 @@ def liml(
     B = A - Y_star.T @ Pz1_Ystar
 
     # 4. Solve generalised eigenvalue problem A v = kappa B v.
-    #    Use scipy.linalg.eig which handles near-singular B.
+    #    Use scipy.linalg.eig (not eigvalsh) which handles near-singular B.
+    #    Anderson & Rubin (1949): kappa = min eigenvalue of A relative to B.
     eigvals_gen = linalg.eig(A, B, right=False)
     # Keep finite real eigenvalues >= 1 (all valid kappas satisfy kappa >= 1).
+    # Tolerance 1e-6: eigenvalues slightly below 1.0 can arise from
+    # floating-point roundoff in the generalized eigenvalue decomposition.
     finite_mask = np.isfinite(eigvals_gen) & np.isreal(eigvals_gen)
     real_eigs = eigvals_gen[finite_mask].real
     valid_eigs = real_eigs[real_eigs >= 1.0 - 1e-6]

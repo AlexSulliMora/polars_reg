@@ -69,10 +69,12 @@ def hausman_test(
     diff = b_fe - b_re
     V_diff = V_fe - V_re
 
-    # Ensure V_diff is positive semi-definite (numerical issues can make it not)
+    # Ensure V_diff is positive semi-definite: V_FE - V_RE can have small
+    # negative eigenvalues from roundoff. Threshold -1e-10 distinguishes
+    # numerical noise from genuinely non-PSD differences.
     eigvals = np.linalg.eigvalsh(V_diff)
     if np.any(eigvals < -1e-10):
-        # Use pseudo-inverse for numerical stability
+        # Use pseudo-inverse when V_diff is not PSD
         chi2_stat = float(diff @ np.linalg.pinv(V_diff) @ diff)
     else:
         chi2_stat = float(diff @ np.linalg.solve(V_diff, diff))
@@ -249,6 +251,8 @@ def kleibergen_paap_test(
         M = Sigma_vv_inv_half @ C @ Sigma_vv_inv_half
 
         eigvals = np.linalg.eigvalsh(M)
+        # Clamp to non-negative: M is theoretically PSD but roundoff
+        # can produce small negative eigenvalues
         rk_chi2 = float(np.min(np.maximum(eigvals, 0.0)))
         df_num = n_excl - k2 + 1
         rk_f = rk_chi2 / max(df_num, 1)

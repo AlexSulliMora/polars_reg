@@ -96,6 +96,8 @@ def ppml(
     converged = False
     for iteration in range(max_iter):
         mu = np.exp(X @ beta)
+        # Clip conditional mean to (1e-10, 1e10): prevents underflow/overflow
+        # in the Hessian X'diag(mu)X and deviance computation
         mu = np.clip(mu, 1e-10, 1e10)
 
         # Newton-Raphson step
@@ -128,7 +130,8 @@ def ppml(
     mu = np.clip(mu, 1e-10, 1e10)
     score_resid = y - mu
 
-    # Separation detection
+    # Separation detection: |beta| > 10 suggests quasi-complete separation
+    # (coefficient diverging because a regressor perfectly predicts y=0)
     if np.any(np.abs(beta) > 10):
         large_idx = np.where(np.abs(beta) > 10)[0]
         large_names = [arrays.names[i] for i in large_idx]

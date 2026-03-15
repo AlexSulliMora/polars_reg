@@ -24,7 +24,8 @@ def _probit_ll_score_hess(beta, X, y):
     Phi = stats.norm.cdf(xb)
     phi = stats.norm.pdf(xb)
 
-    # Clip to avoid log(0)
+    # Clip to (1e-15, 1-1e-15): prevents log(0) and log(1) in
+    # log-likelihood y*log(Phi) + (1-y)*log(1-Phi)
     Phi = np.clip(Phi, 1e-15, 1 - 1e-15)
 
     ll = np.sum(y * np.log(Phi) + (1 - y) * np.log(1 - Phi))
@@ -43,7 +44,8 @@ def _probit_ll_score_hess(beta, X, y):
 def _logit_ll_score_hess(beta, X, y):
     """Logit log-likelihood, score, and Hessian."""
     xb = X @ beta
-    # Numerically stable sigmoid
+    # Numerically stable sigmoid, clipped to (1e-15, 1-1e-15) to
+    # prevent log(0) in log-likelihood computation
     Lambda = 1.0 / (1.0 + np.exp(-xb))
     Lambda = np.clip(Lambda, 1e-15, 1 - 1e-15)
 
@@ -61,7 +63,10 @@ def _logit_ll_score_hess(beta, X, y):
 
 
 def _newton_raphson(ll_func, beta0, X, y, max_iter=100, tol=1e-8):
-    """Newton-Raphson optimization for MLE."""
+    """Newton-Raphson optimization for MLE.
+
+    Convergence: max absolute Newton step < tol (default 1e-8).
+    """
     beta = beta0.copy()
     for i in range(max_iter):
         ll, score, H, prob, _ = ll_func(beta, X, y)
@@ -118,6 +123,7 @@ def _binary_model(
     beta, ll, H, prob, score_resid, score_vec = _newton_raphson(ll_func, beta0, X, y)
 
     # Null model log-likelihood (intercept only)
+    # Clip mean to prevent log(0) if all y=0 or all y=1
     p_bar = y.mean()
     p_bar = np.clip(p_bar, 1e-15, 1 - 1e-15)
     ll_null = np.sum(y * np.log(p_bar) + (1 - y) * np.log(1 - p_bar))

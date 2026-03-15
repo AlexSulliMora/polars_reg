@@ -26,6 +26,10 @@ def _irls_quantreg(
 
     Uses the smoothed IRLS approach: iteratively solve weighted least squares
     with weights w_i = 1/max(|u_i|, epsilon).
+
+    Convergence: max absolute change in beta < tol (default 1e-6).
+    Uses 1e-6 rather than 1e-8 because IRLS for quantile regression
+    converges more slowly than Newton-Raphson for smooth likelihoods.
     """
     n, k = X.shape
     eps = 1e-6
