@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 import numpy as np
 import polars as pl
@@ -14,6 +14,33 @@ from polars_reg._results import RegressionResult
 
 if TYPE_CHECKING:
     from polars_reg._groupby import GroupRegressionResult
+
+
+class HausmanResult(TypedDict):
+    statistic: float
+    pvalue: float
+    df: int
+    coefficients_compared: list[str]
+
+
+class WeakInstrumentResult(TypedDict, total=False):
+    f_stat: float
+    staiger_stock: bool
+    assessment: str
+    stock_yogo: dict | None
+
+
+class KleibergenPaapResult(TypedDict):
+    rk_stat: float | None
+    rk_raw: float | None
+
+
+class WaldTestResult(TypedDict):
+    statistic: float
+    pvalue: float
+    df: tuple[int, int]
+    chi2: float
+
 
 # Stock & Yogo (2005) Table 5.2: Critical values for Cragg-Donald Wald F test
 # k2=1 (single endogenous regressor), maximal IV relative bias
@@ -36,7 +63,7 @@ _STOCK_YOGO_K2_1 = {
 def hausman_test(
     fe_result: RegressionResult,
     re_result: RegressionResult,
-) -> dict:
+) -> HausmanResult:
     """Hausman specification test: FE vs RE.
 
     Tests H0: RE is consistent and efficient (no correlation between
@@ -94,7 +121,7 @@ def hausman_test(
 def weak_instrument_test(
     iv_result: RegressionResult,
     n_instruments: int | None = None,
-) -> dict:
+) -> WeakInstrumentResult:
     """Assess instrument strength for IV regression.
 
     Reports the first-stage F-statistic and applies the Staiger-Stock (1997)
@@ -142,7 +169,7 @@ def kleibergen_paap_test(
     Z_excl: np.ndarray,
     vcov_type: str = "HC",
     cluster_arrays: list[np.ndarray] | None = None,
-) -> dict:
+) -> KleibergenPaapResult:
     """Kleibergen-Paap (2006) rk Wald F-statistic for weak instruments.
 
     Generalizes the Cragg-Donald F-statistic to be robust to
@@ -263,7 +290,7 @@ def kleibergen_paap_test(
     }
 
 
-def kleibergen_paap_from_result(iv_result: RegressionResult) -> dict:
+def kleibergen_paap_from_result(iv_result: RegressionResult) -> KleibergenPaapResult:
     """Compute Kleibergen-Paap rk F-stat directly from an iv2sls() result.
 
     The iv2sls() result must have been computed with vcov="HC1" or cluster=

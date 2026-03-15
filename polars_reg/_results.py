@@ -1,11 +1,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TypedDict
 
 import numpy as np
 import polars as pl
 from numpy.typing import NDArray
 from scipy import stats
+
+
+class WaldTestResult(TypedDict):
+    statistic: float
+    pvalue: float
+    df: tuple[int, int]
+    chi2: float
+
+
+class PredictIntervalResult(TypedDict):
+    fit: NDArray
+    se: NDArray
+    lower: NDArray
+    upper: NDArray
 
 
 def _fmt_col(values: list[float], width: int, sig: int) -> list[str]:
@@ -204,7 +219,7 @@ class RegressionResult:
             return X_new @ self.coefficients
         return self.fitted()
 
-    def predict_interval(self, newdata: pl.DataFrame, alpha: float = 0.05) -> dict[str, NDArray]:
+    def predict_interval(self, newdata: pl.DataFrame, alpha: float = 0.05) -> PredictIntervalResult:
         """Return point predictions with prediction intervals.
 
         Uses ``Var(pred_i) = x_i' V x_i`` where *V* is the estimated VCV of
@@ -316,7 +331,7 @@ class RegressionResult:
         lines.append(f"{'=' * w}")
         return "\n".join(lines)
 
-    def wald_test(self, R: NDArray, q: NDArray | None = None) -> dict:
+    def wald_test(self, R: NDArray, q: NDArray | None = None) -> WaldTestResult:
         """Wald test for linear restrictions R @ beta = q.
 
         Args:
