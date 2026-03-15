@@ -109,8 +109,9 @@ def test_groupby_regtable_integration(grouped_data):
     """GroupBy results should work with regtable."""
     result = pr.groupby_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group")
     table = pr.regtable(*result.values(), labels=list(result.keys()))
-    assert "x1" in table
-    assert "x2" in table
+    html = table.as_raw_html()
+    assert "x1" in html
+    assert "x2" in html
 
 
 def test_groupby_multikey():
