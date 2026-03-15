@@ -89,3 +89,10 @@ tests/
 - Public API lives in `__init__.py` — users import from `polars_reg` directly
 - Demeaning convergence tolerance: default 1e-8
 - Stata parity tests use `REGHDFE = 1e-5` tolerance (demeaning algorithm differences)
+
+## Principles
+
+Detailed development principles are in `docs/principles/`:
+- [`code-organization.md`](docs/principles/code-organization.md) — module placement, data flow, Rust contract, test structure
+- [`api-consistency.md`](docs/principles/api-consistency.md) — return types, parameter naming/ordering, vcov vocabulary, error handling
+- [`statistical-rigor.md`](docs/principles/statistical-rigor.md) — citation standards, numerical engineering, validation expectations

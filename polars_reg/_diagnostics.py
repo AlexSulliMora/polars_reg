@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
 import numpy as np
+import polars as pl
+from numpy.typing import NDArray
 from scipy import stats
 
 from polars_reg._results import RegressionResult
+
+if TYPE_CHECKING:
+    from polars_reg._groupby import GroupRegressionResult
 
 # Stock & Yogo (2005) Table 5.2: Critical values for Cragg-Donald Wald F test
 # k2=1 (single endogenous regressor), maximal IV relative bias
@@ -279,6 +287,430 @@ def kleibergen_paap_from_result(iv_result: RegressionResult) -> dict:
         vcov_type=vcov_type,
         cluster_arrays=iv_result._iv_cluster_arrays,
     )
+
+
+@dataclass
+class GRSTestResult:
+    """Result of a GRS (Gibbons-Ross-Shanken 1989) F-test.
+
+    Tests whether intercepts (alphas) from N time-series regressions are
+    jointly zero — the standard test for asset pricing model specification.
+    """
+
+    # Core test
+    statistic: float
+    pvalue: float
+    df: tuple[int, int]
+
+    # Wald variant
+    wald_statistic: float
+    wald_pvalue: float
+
+    # Dimensions
+    n_assets: int
+    n_periods: int
+    n_factors: int
+
+    # Alpha details
+    alphas: NDArray
+    alpha_names: list[str]
+    alpha_se: NDArray
+
+    # Sharpe ratio decomposition
+    sharpe_sq_factors: float
+    sharpe_sq_tangency: float
+
+    # Matrices
+    sigma: NDArray
+    factor_means: NDArray
+    factor_cov: NDArray
+
+    def summary(self, precision: int = 4) -> str:
+        """Formatted summary of GRS test results."""
+        N, T, K = self.n_assets, self.n_periods, self.n_factors
+        lines = [
+            "GRS Test (Gibbons, Ross, Shanken 1989)",
+            "\u2500" * 50,
+            f"GRS F-statistic:  {self.statistic:{precision + 5}.{precision}f}"
+            f"    F({N}, {self.df[1]})    p = {self.pvalue:.{precision}f}",
+            f"Wald chi2:        {self.wald_statistic:{precision + 5}.{precision}f}"
+            f"    chi2({N})      p = {self.wald_pvalue:.{precision}f}",
+            "",
+            f"N assets:   {N:>4}        N periods:  {T:>4}",
+            f"N factors:  {K:>4}        df:         ({N}, {self.df[1]})",
+            "",
+            "Sharpe ratios (squared):",
+            f"  Factor portfolio:    {self.sharpe_sq_factors:.{precision}f}",
+            f"  Tangency portfolio:  {self.sharpe_sq_tangency:.{precision}f}",
+            "",
+            f"Alpha range: [{self.alphas.min():.{precision}f}, {self.alphas.max():.{precision}f}]",
+        ]
+        return "\n".join(lines)
+
+    def critical_value(self, alpha: float = 0.05) -> float:
+        """F critical value at the given significance level.
+
+        Args:
+            alpha: Significance level (default 0.05).
+
+        Returns:
+            Critical value from F(N, T-N-K) distribution.
+        """
+        return float(stats.f.ppf(1.0 - alpha, self.df[0], self.df[1]))
+
+    def critical_values(self) -> dict[str, float]:
+        """F critical values at standard significance levels.
+
+        Returns:
+            Dict with keys '10%', '5%', '1%' and their F critical values.
+        """
+        return {
+            "10%": self.critical_value(0.10),
+            "5%": self.critical_value(0.05),
+            "1%": self.critical_value(0.01),
+        }
+
+    def alpha_table(self) -> pl.DataFrame:
+        """Per-asset alpha table with t-statistics and p-values."""
+        t_stats = self.alphas / self.alpha_se
+        df_t = self.n_periods - self.n_factors - 1
+        p_vals = 2.0 * (1.0 - stats.t.cdf(np.abs(t_stats), df_t))
+        return pl.DataFrame(
+            {
+                "asset": self.alpha_names,
+                "alpha": self.alphas,
+                "se": self.alpha_se,
+                "t": t_stats,
+                "p": p_vals,
+            }
+        )
+
+    def __repr__(self) -> str:
+        return self.summary()
+
+
+def _compute_grs(
+    alphas: NDArray,
+    residuals: NDArray,
+    factor_data: NDArray | None,
+    alpha_se: NDArray,
+    alpha_names: list[str],
+) -> GRSTestResult:
+    """Core GRS computation (Kamstra & Shi 2021, eq. 7).
+
+    Args:
+        alphas: (N,) vector of estimated intercepts.
+        residuals: (T, N) time-aligned residual matrix.
+        factor_data: (T, K) factor data, or None if K=0.
+        alpha_se: (N,) per-regression SEs of the intercept.
+        alpha_names: Asset/portfolio labels.
+    """
+    T, N = residuals.shape
+    K = 0 if factor_data is None else factor_data.shape[1]
+
+    if T <= N + K:
+        raise ValueError(f"GRS test requires T > N + K; got T={T}, N={N}, K={K}")
+
+    # Sigma_hat: unbiased estimator (1/(T-K-1))
+    Sigma_hat = (1.0 / (T - K - 1)) * residuals.T @ residuals
+    try:
+        Sigma_inv = np.linalg.inv(Sigma_hat)
+    except np.linalg.LinAlgError:
+        raise ValueError(
+            "Residual covariance matrix is singular — "
+            "check for redundant or perfectly correlated assets"
+        )
+
+    alpha_Sigma_inv_alpha = float(alphas @ Sigma_inv @ alphas)
+
+    if K == 0:
+        mu_Omega_inv_mu = 0.0
+        factor_means = np.array([])
+        factor_cov = np.array([]).reshape(0, 0)
+    else:
+        mu = factor_data.mean(axis=0)
+        # Omega_tilde: MLE estimator (1/T) — NOT np.cov which uses 1/(T-1)
+        centered = factor_data - mu
+        Omega_tilde = (1.0 / T) * centered.T @ centered
+        try:
+            Omega_inv = np.linalg.inv(Omega_tilde)
+        except np.linalg.LinAlgError:
+            raise ValueError("Factor covariance matrix is singular — check for collinear factors")
+        mu_Omega_inv_mu = float(mu @ Omega_inv @ mu)
+        factor_means = mu
+        factor_cov = Omega_tilde
+
+    # GRS F-statistic
+    grs = (T / N) * ((T - N - K) / (T - K - 1)) * alpha_Sigma_inv_alpha / (1.0 + mu_Omega_inv_mu)
+    df2 = T - N - K
+    pvalue = float(1.0 - stats.f.cdf(grs, N, df2))
+
+    # Wald chi-squared variant
+    wald = N * grs
+    wald_p = float(1.0 - stats.chi2.cdf(wald, N))
+
+    # Sharpe ratio decomposition
+    sh_f = mu_Omega_inv_mu
+    sh_t = alpha_Sigma_inv_alpha + sh_f
+
+    return GRSTestResult(
+        statistic=float(grs),
+        pvalue=pvalue,
+        df=(N, df2),
+        wald_statistic=float(wald),
+        wald_pvalue=wald_p,
+        n_assets=N,
+        n_periods=T,
+        n_factors=K,
+        alphas=alphas,
+        alpha_names=alpha_names,
+        alpha_se=alpha_se,
+        sharpe_sq_factors=sh_f,
+        sharpe_sq_tangency=sh_t,
+        sigma=Sigma_hat,
+        factor_means=factor_means,
+        factor_cov=factor_cov,
+    )
+
+
+def grs_test(
+    formula: str,
+    data: pl.DataFrame | pl.LazyFrame,
+    *,
+    assets: str,
+    time: str,
+) -> GRSTestResult:
+    """GRS (Gibbons-Ross-Shanken 1989) F-test for asset pricing models.
+
+    Tests whether intercepts (alphas) from N time-series regressions are
+    jointly zero. Uses the correct multi-factor formula from Kamstra & Shi
+    (2021) with asymmetric Sigma/Omega pairing for an exact F distribution.
+
+    Args:
+        formula: Formula string (e.g. "ret ~ mktrf + smb + hml").
+            Must include an intercept (no ``-1``).
+        data: Long-format panel with one row per (asset, time).
+        assets: Column name identifying test assets/portfolios.
+        time: Column name for the time dimension.
+
+    Returns:
+        GRSTestResult with F-statistic, p-value, Wald test, and diagnostics.
+    """
+    from polars_reg._formula import parse_formula
+    from polars_reg._utils import ensure_polars
+
+    data = ensure_polars(data)
+    if isinstance(data, pl.LazyFrame):
+        data = data.collect()
+
+    spec = parse_formula(formula)
+    if not spec.add_intercept:
+        raise ValueError("GRS test requires an intercept in each regression")
+    if spec.fe:
+        raise ValueError("GRS test does not support fixed effects in the formula")
+    if spec.endog:
+        raise ValueError("GRS test does not support IV formulas")
+
+    depvar = spec.depvar
+    factor_names = spec.exog
+
+    # Validate columns exist
+    for col in [depvar, assets, time] + factor_names:
+        if col not in data.columns:
+            raise ValueError(f"Column '{col}' not found in data")
+
+    # Sort by (assets, time) to guarantee alignment
+    data = data.sort([assets, time])
+
+    # Get unique assets
+    asset_values = data[assets].unique(maintain_order=False).sort().to_list()
+    len(asset_values)
+
+    # Validate balanced panel and collect per-asset data
+    alphas_list = []
+    alpha_se_list = []
+    residuals_list = []
+    T = None
+
+    for asset_val in asset_values:
+        mask = data[assets] == asset_val
+        asset_df = data.filter(mask)
+
+        # Drop rows with any null in relevant columns
+        cols = [depvar] + factor_names
+        asset_df = asset_df.drop_nulls(subset=cols)
+
+        if T is None:
+            T = len(asset_df)
+        elif len(asset_df) != T:
+            raise ValueError(
+                "Unbalanced panel: assets have different observation counts. "
+                "GRS requires a balanced panel."
+            )
+
+        # Extract arrays and run OLS
+        y = asset_df[depvar].to_numpy().astype(np.float64)
+        K = len(factor_names)
+        if K > 0:
+            X = np.column_stack([asset_df[c].to_numpy().astype(np.float64) for c in factor_names])
+            X = np.column_stack([X, np.ones(T)])
+        else:
+            X = np.ones((T, 1))
+
+        # OLS: beta = (X'X)^{-1} X'y
+        beta = np.linalg.lstsq(X, y, rcond=None)[0]
+        resid = y - X @ beta
+        alpha = beta[-1]  # intercept is last column
+        # SE of intercept: sqrt(sigma^2 * (X'X)^{-1}[-1,-1])
+        s2 = float(resid @ resid) / (T - K - 1)
+        XtX_inv = np.linalg.inv(X.T @ X)
+        se_alpha = float(np.sqrt(s2 * XtX_inv[-1, -1]))
+
+        alphas_list.append(alpha)
+        alpha_se_list.append(se_alpha)
+        residuals_list.append(resid)
+
+    alphas_arr = np.array(alphas_list)
+    alpha_se_arr = np.array(alpha_se_list)
+    residuals_mat = np.column_stack(residuals_list)  # (T, N)
+    alpha_names = [str(v) for v in asset_values]
+
+    # Factor data from first asset's rows (identical across assets)
+    first_asset_df = data.filter(data[assets] == asset_values[0]).drop_nulls(
+        subset=[depvar] + factor_names
+    )
+    if K > 0:
+        factor_data = np.column_stack(
+            [first_asset_df[c].to_numpy().astype(np.float64) for c in factor_names]
+        )
+    else:
+        factor_data = None
+
+    return _compute_grs(alphas_arr, residuals_mat, factor_data, alpha_se_arr, alpha_names)
+
+
+def grs_test_from_group(
+    group_result: "GroupRegressionResult",
+    formula: str,
+    data: pl.DataFrame | pl.LazyFrame,
+    *,
+    assets: str,
+    time: str,
+) -> GRSTestResult:
+    """GRS F-test from an existing GroupRegressionResult.
+
+    Re-computes time-aligned residuals from the stored coefficients to
+    guarantee cross-asset alignment.
+
+    Args:
+        group_result: Result from groupby_reg().
+        formula: Formula string used for the regressions.
+        data: Original data (needed for factor moments and residual alignment).
+        assets: Column name identifying test assets/portfolios.
+        time: Column name for the time dimension.
+
+    Returns:
+        GRSTestResult with F-statistic, p-value, Wald test, and diagnostics.
+    """
+    from polars_reg._formula import parse_formula
+    from polars_reg._groupby import GroupRegressionResult
+    from polars_reg._utils import ensure_polars
+
+    if not isinstance(group_result, GroupRegressionResult):
+        raise TypeError("group_result must be a GroupRegressionResult")
+
+    if group_result.failed:
+        failed_keys = list(group_result.failed.keys())
+        raise ValueError(
+            f"GRS test requires all group regressions to succeed; failed: {failed_keys}"
+        )
+
+    if len(group_result) == 0:
+        raise ValueError("GroupRegressionResult has no successful results")
+
+    data = ensure_polars(data)
+    if isinstance(data, pl.LazyFrame):
+        data = data.collect()
+
+    spec = parse_formula(formula)
+    if not spec.add_intercept:
+        raise ValueError("GRS test requires an intercept in each regression")
+
+    depvar = spec.depvar
+    factor_names = spec.exog
+
+    # Sort data by (assets, time) for alignment
+    data = data.sort([assets, time])
+
+    # Extract alphas and SEs from group results
+    asset_keys = list(group_result.keys())
+    len(asset_keys)
+    alpha_names = [str(k) for k in asset_keys]
+
+    alphas_list = []
+    alpha_se_list = []
+
+    for key in asset_keys:
+        result = group_result[key]
+        if "_cons" not in result.names:
+            raise ValueError(
+                f"Group '{key}' has no intercept ('_cons'). "
+                "GRS test requires an intercept in each regression."
+            )
+        cons_idx = list(result.names).index("_cons")
+        alphas_list.append(result.coefficients[cons_idx])
+        alpha_se_list.append(result.se[cons_idx])
+
+    alphas_arr = np.array(alphas_list)
+    alpha_se_arr = np.array(alpha_se_list)
+
+    # Re-compute aligned residuals from data using stored coefficients
+    K = len(factor_names)
+    residuals_list = []
+    T = None
+
+    for i, key in enumerate(asset_keys):
+        mask = data[assets] == key
+        asset_df = data.filter(mask)
+        asset_df = asset_df.drop_nulls(subset=[depvar] + factor_names)
+
+        if T is None:
+            T = len(asset_df)
+        elif len(asset_df) != T:
+            raise ValueError(
+                "Unbalanced panel: assets have different observation counts. "
+                "GRS requires a balanced panel."
+            )
+
+        y = asset_df[depvar].to_numpy().astype(np.float64)
+        result = group_result[key]
+
+        # Reconstruct residuals: y - X @ beta_slope - alpha
+        fitted = np.full(T, alphas_list[i])
+        for name in factor_names:
+            if name in result.names:
+                coef_idx = list(result.names).index(name)
+                fitted += result.coefficients[coef_idx] * asset_df[name].to_numpy().astype(
+                    np.float64
+                )
+
+        resid = y - fitted
+        residuals_list.append(resid)
+
+    residuals_mat = np.column_stack(residuals_list)  # (T, N)
+
+    # Factor data from first asset's rows
+    first_asset_df = data.filter(data[assets] == asset_keys[0]).drop_nulls(
+        subset=[depvar] + factor_names
+    )
+    if K > 0:
+        factor_data = np.column_stack(
+            [first_asset_df[c].to_numpy().astype(np.float64) for c in factor_names]
+        )
+    else:
+        factor_data = None
+
+    return _compute_grs(alphas_arr, residuals_mat, factor_data, alpha_se_arr, alpha_names)
 
 
 def _matrix_power(A: np.ndarray, p: float) -> np.ndarray:

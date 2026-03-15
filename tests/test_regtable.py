@@ -482,3 +482,99 @@ def test_normalize_stat_invalid_tuple():
 def test_normalize_stat_too_many():
     with pytest.raises(ValueError, match="1 or 2 elements"):
         _normalize_stat(("t", "se", "p"), "round")
+
+
+# ── Transposed layout tests ──────────────────────────────────────
+
+
+def test_regtable_transpose_basic(simple_data):
+    """Transposed table has variables as column headers and models as rows."""
+    r1 = ols("y ~ x1", data=simple_data)
+    r2 = ols("y ~ x1 + x2", data=simple_data)
+    table = regtable(r1, r2, transpose=True)
+    # Variables should appear in the header row
+    lines = table.split("\n")
+    header = lines[1]  # second line (after top separator)
+    assert "x1" in header
+    assert "N" in header
+    # Model labels should appear as row labels
+    assert "(1) OLS" in table
+    assert "(2) OLS" in table
+
+
+def test_regtable_transpose_custom_labels(simple_data):
+    r1 = ols("y ~ x1", data=simple_data)
+    r2 = ols("y ~ x1 + x2", data=simple_data)
+    table = regtable(r1, r2, labels=["Base", "Full"], transpose=True)
+    assert "Base OLS" in table
+    assert "Full OLS" in table
+
+
+def test_regtable_transpose_stat_se(simple_data):
+    r1 = ols("y ~ x1", data=simple_data)
+    table = regtable(r1, transpose=True, stat="se")
+    assert "Standard errors in parentheses" in table
+
+
+def test_regtable_transpose_stat_none(simple_data):
+    """No stat sub-rows when stat=None."""
+    r1 = ols("y ~ x1", data=simple_data)
+    r2 = ols("y ~ x1 + x2", data=simple_data)
+    table = regtable(r1, r2, transpose=True, stat=None)
+    lines = [
+        line
+        for line in table.split("\n")
+        if line.strip()
+        and not line.startswith("=")
+        and not line.startswith("-")
+        and not line.startswith("*")
+    ]
+    # Header + 2 model rows = 3 non-separator content lines
+    assert len(lines) == 3
+
+
+def test_regtable_transpose_fe_indicators(simple_data):
+    """FE/cluster indicators appear as prefixed columns."""
+    fe = np.random.default_rng(42).integers(0, 5, len(simple_data))
+    df = simple_data.with_columns(pl.Series("g", fe))
+    r1 = ols("y ~ x1 + x2", data=df)
+    r2 = ols("y ~ x1 + x2 | g", data=df, cluster=["g"])
+    table = regtable(r1, r2, transpose=True)
+    assert "FE:g" in table
+    assert "Cl:g" in table
+
+
+def test_regtable_transpose_missing_vars(simple_data):
+    """Models with different variables show blanks in transposed layout."""
+    r1 = ols("y ~ x1", data=simple_data)
+    r2 = ols("y ~ x1 + x2", data=simple_data)
+    table = regtable(r1, r2, transpose=True)
+    # r1 doesn't have x2 — its row should have a blank for the x2 column
+    assert "x2" in table
+
+
+def test_regtable_transpose_latex(simple_data):
+    r1 = ols("y ~ x1", data=simple_data)
+    r2 = ols("y ~ x1 + x2", data=simple_data)
+    table = regtable(r1, r2, transpose=True, output_format="latex")
+    assert r"\begin{tabular}" in table
+    assert r"\toprule" in table
+    assert "x1" in table
+    assert "(1) OLS" in table
+
+
+def test_regtable_transpose_html(simple_data):
+    r1 = ols("y ~ x1", data=simple_data)
+    r2 = ols("y ~ x1 + x2", data=simple_data)
+    table = regtable(r1, r2, transpose=True, output_format="html")
+    assert "<table" in table
+    assert "<th>x1</th>" in table
+    assert "model-label" in table
+
+
+def test_regtable_transpose_html_repr(simple_data):
+    """Transposed text mode should still have HTML repr for Jupyter."""
+    r1 = ols("y ~ x1", data=simple_data)
+    table = regtable(r1, transpose=True)
+    assert isinstance(table, RegTable)
+    assert table._repr_html_() is not None
