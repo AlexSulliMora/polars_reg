@@ -138,7 +138,7 @@ def kleibergen_paap_test(
     X_exog: np.ndarray,
     X_endog: np.ndarray,
     Z_excl: np.ndarray,
-    vcov_type: str = "robust",
+    vcov_type: str = "HC",
     cluster_arrays: list[np.ndarray] | None = None,
 ) -> dict:
     """Kleibergen-Paap (2006) rk Wald F-statistic for weak instruments.
@@ -154,7 +154,7 @@ def kleibergen_paap_test(
         X_exog: Exogenous regressors including intercept (n x k1).
         X_endog: Endogenous regressors (n x k2).
         Z_excl: Excluded instruments (n x l).
-        vcov_type: "robust" for HC-robust, "cluster" for cluster-robust.
+        vcov_type: "HC" for HC-robust, "cluster" for cluster-robust.
         cluster_arrays: List of cluster code arrays (required when vcov_type="cluster").
 
     Returns:
@@ -278,7 +278,7 @@ def kleibergen_paap_from_result(iv_result: RegressionResult) -> dict:
             "Use iv2sls() (not liml or gmm_iv) to get these."
         )
 
-    vcov_type = "cluster" if iv_result._iv_cluster_arrays else "robust"
+    vcov_type = "cluster" if iv_result._iv_cluster_arrays else "HC"
 
     return kleibergen_paap_test(
         X_exog=iv_result._iv_X_exog,

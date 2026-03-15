@@ -58,8 +58,8 @@ def ppml(
             (absorbed FE) are not supported.
         data: Polars DataFrame or LazyFrame (pandas DataFrames are
             auto-converted).
-        vcov: Variance-covariance type. "HC1" or "robust" (default) for
-            sandwich VCV with n/(n-k) small-sample correction.
+        vcov: Variance-covariance type. "HC1" (default) for sandwich VCV
+            with n/(n-k) small-sample correction.
         cluster: Column name(s) for cluster-robust standard errors.
             Overrides vcov when provided.
         max_iter: Maximum number of IRLS iterations (default 250).
@@ -164,12 +164,12 @@ def ppml(
         vcov_type_out = "cluster"
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1
-    elif vcov in ("HC1", "robust"):
+    elif vcov == "HC1":
         # Robust sandwich: H^{-1} M H^{-1} with n/(n-k) scaling
         meat = X.T @ (X * (score_resid**2)[:, None])
         dfc = n / (n - k)
         V = dfc * H_inv @ meat @ H_inv
-        vcov_type_out = "robust"
+        vcov_type_out = "HC1"
         n_clusters = None
         df_r = n - k
     else:

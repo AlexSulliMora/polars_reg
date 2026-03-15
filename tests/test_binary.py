@@ -83,8 +83,8 @@ def test_probit_summary(binary_data):
 
 def test_probit_robust(binary_data):
     """Probit with robust SEs."""
-    r = probit("y ~ x1 + x2", data=binary_data, vcov="robust")
-    assert r.vcov_type == "robust"
+    r = probit("y ~ x1 + x2", data=binary_data, vcov="HC1")
+    assert r.vcov_type == "HC1"
     assert np.all(r.se > 0)
 
 
@@ -131,8 +131,8 @@ def test_logit_coefficients_close(logit_data):
 
 def test_logit_robust(logit_data):
     """Logit with robust SEs."""
-    r = logit("y ~ x1 + x2", data=logit_data, vcov="robust")
-    assert r.vcov_type == "robust"
+    r = logit("y ~ x1 + x2", data=logit_data, vcov="HC1")
+    assert r.vcov_type == "HC1"
     assert np.all(r.se > 0)
 
 

@@ -401,7 +401,7 @@ def gmm_iv(
         n_clusters_dict = None
         df_r = n - k
     else:
-        vcov_type = "robust"  # GMM naturally uses heteroskedasticity-robust VCV
+        vcov_type = "HC1"  # GMM naturally uses heteroskedasticity-robust VCV
         n_clusters_dict = None
         df_r = n - k
 

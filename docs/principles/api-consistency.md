@@ -77,10 +77,10 @@ def ols(formula, data, vcov="iid", cluster=None, time=None, bandwidth=None,
 Input vocabulary:
 
 ```python
-{"iid", "HC0", "HC1", "HC2", "HC3", "robust", "NW", "DK", "bootstrap", "wildboot"}
+{"iid", "HC0", "HC1", "HC2", "HC3", "NW", "DK", "bootstrap", "wildboot"}
 ```
 
-`"robust"` is a user-facing alias for `"HC1"`, already used in `probit()`, `logit()`, and `ppml()` docstrings.
+`"robust"` is **not** a valid input value. Stata's `robust` maps to HC1, but R's `sandwich` package defaults to HC0 — the ambiguity invites mistakes. Use the explicit HC variant instead.
 
 **Minimum set for new estimators:**
 - *vcov strings:* `{iid, HC1}`

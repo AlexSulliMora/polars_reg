@@ -150,7 +150,7 @@ class TestPPMLRobustSE:
         """Default vcov should be HC1 (robust)."""
         df = _make_poisson_data()
         res = ppml("y ~ x1 + x2", data=df)
-        assert res.vcov_type == "robust"
+        assert res.vcov_type == "HC1"
 
     def test_robust_se_larger_than_hessian(self):
         """Robust SEs should generally differ from Hessian-based SEs."""

@@ -139,13 +139,13 @@ def _binary_model(
         vcov_type_out = "cluster"
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1
-    elif vcov in ("HC1", "robust"):
+    elif vcov == "HC1":
         # Robust (sandwich): H^{-1} (sum s_i s_i') H^{-1}
         scores = X * score_resid[:, None]
         meat = scores.T @ scores
         dfc = n / (n - k)
         V = dfc * H_inv @ meat @ H_inv
-        vcov_type_out = "robust"
+        vcov_type_out = "HC1"
         n_clusters = None
         df_r = n - k
     else:
@@ -191,7 +191,7 @@ def probit(
     Args:
         formula: Formula string, e.g. "y ~ x1 + x2"
         data: Polars DataFrame or LazyFrame
-        vcov: "iid" (information matrix) or "HC1"/"robust" (sandwich)
+        vcov: "iid" (information matrix) or "HC1" (sandwich)
         cluster: Column name(s) for clustered SEs.
     """
     return _binary_model("Probit", formula, data, vcov=vcov, cluster=cluster)
@@ -208,7 +208,7 @@ def logit(
     Args:
         formula: Formula string, e.g. "y ~ x1 + x2"
         data: Polars DataFrame or LazyFrame
-        vcov: "iid" (information matrix) or "HC1"/"robust" (sandwich)
+        vcov: "iid" (information matrix) or "HC1" (sandwich)
         cluster: Column name(s) for clustered SEs.
     """
     return _binary_model("Logit", formula, data, vcov=vcov, cluster=cluster)
