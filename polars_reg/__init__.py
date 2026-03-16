@@ -22,6 +22,7 @@ from polars_reg._ppml import ppml
 from polars_reg._quantile import quantreg
 from polars_reg._regtable import regtable
 from polars_reg._results import RegressionResult
+from polars_reg._rolling import RollingRegressionResult, rolling_reg
 from polars_reg._ssc import SSC, ssc
 from polars_reg.r_equiv import to_r
 from polars_reg.stata import to_stata
@@ -60,4 +61,6 @@ __all__ = [
     "avplot",
     "SSC",
     "ssc",
+    "rolling_reg",
+    "RollingRegressionResult",
 ]
