@@ -190,6 +190,28 @@ def test_backend_result_diff_computed(ols_data):
 # ── repr ──────────────────────────────────────────────────────────
 
 
+def test_compare_code_output(ols_data):
+    """code() returns formatted code for all backends."""
+    report = compare("ols", "y ~ x1 + x2", ols_data, vcov="HC1", backend="pyfixest")
+    code = report.code()
+    assert "polars_reg" in code
+    assert "pyfixest" in code
+    assert "y ~ x1 + x2" in code
+
+
+def test_compare_code_includes_kwargs(ols_data):
+    """code() polars_reg section includes vcov, cluster, entity, time when set."""
+    report = compare("ols", "y ~ x1 + x2", ols_data, vcov="HC1", backend="pyfixest")
+    assert 'vcov="HC1"' in report.polars_code
+    assert "pr.ols" in report.polars_code
+
+
+def test_compare_code_iid_omits_vcov(ols_data):
+    """code() omits vcov when iid (the default)."""
+    report = compare("ols", "y ~ x1 + x2", ols_data, vcov="iid", backend="pyfixest")
+    assert "vcov" not in report.polars_code
+
+
 def test_compare_repr(ols_data):
     """ComparisonReport has informative repr."""
     report = compare("ols", "y ~ x1 + x2", ols_data, backend="pyfixest")

@@ -44,6 +44,14 @@ class ComparisonReport:
     backends: dict[str, BackendResult] = field(default_factory=dict)
     skipped: dict[str, str] = field(default_factory=dict)
     rtol: float = 1e-6
+    polars_code: str = ""
+
+    def code(self) -> str:
+        """Return formatted equivalent code for polars_reg and each backend."""
+        sections = [f"--- polars_reg ---\n{self.polars_code}"]
+        for br in self.backends.values():
+            sections.append(f"--- {br.name} ---\n{br.code}")
+        return "\n\n".join(sections)
 
     def summary(self) -> GT:
         """Formatted side-by-side comparison table as a GT object."""
@@ -610,6 +618,14 @@ def _run_r(
 ) -> BackendResult | None:
     """Run regression in R via Rscript subprocess."""
     try:
+        import sys
+        from pathlib import Path
+
+        # Ensure project root is on sys.path so `tests.r_compare` resolves
+        # even when running from a different working directory (e.g. Jupyter).
+        _project_root = str(Path(__file__).resolve().parent.parent)
+        if _project_root not in sys.path:
+            sys.path.insert(0, _project_root)
         from tests.r_compare import RResult, _parse_r_csv, _run_r_script, r_available, to_r_script
     except ImportError:
         return None
@@ -682,6 +698,14 @@ def _run_stata(
 ) -> BackendResult | None:
     """Run regression in Stata via batch mode subprocess."""
     try:
+        import sys
+        from pathlib import Path
+
+        # Ensure project root is on sys.path so `tests.stata_compare` resolves
+        # even when running from a different working directory (e.g. Jupyter).
+        _project_root = str(Path(__file__).resolve().parent.parent)
+        if _project_root not in sys.path:
+            sys.path.insert(0, _project_root)
         from tests.stata_compare import StataResult, stata_available
     except ImportError:
         return None
@@ -803,6 +827,20 @@ def compare(
     else:
         backends_to_run = list(backend)
 
+    # Build polars_reg code string
+    polars_code = f'pr.{estimator}("{formula}", data=df'
+    if vcov != "iid" and estimator not in _no_vcov:
+        polars_code += f', vcov="{vcov}"'
+    if cluster and estimator not in _no_vcov:
+        polars_code += f", cluster={cluster!r}"
+    if entity:
+        polars_code += f', entity="{entity}"'
+    if time:
+        polars_code += f', time="{time}"'
+    for k, v in kwargs.items():
+        polars_code += f", {k}={v!r}"
+    polars_code += ")"
+
     report = ComparisonReport(
         estimator=estimator,
         formula=formula,
@@ -812,6 +850,7 @@ def compare(
         polars_n_obs=polars_n,
         polars_r_squared=polars_r2,
         rtol=rtol,
+        polars_code=polars_code,
     )
 
     # Run each backend
