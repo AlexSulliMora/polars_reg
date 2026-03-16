@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import polars as pl
+import pytest
 
 from polars_reg._fama_macbeth import FamaMacBethResult, fama_macbeth
 from polars_reg._group_by import GroupRegressionResult
@@ -250,6 +251,7 @@ class TestFamaMacBethOutput:
 
     def test_fm_plot_lambdas(self) -> None:
         """plot_lambdas() returns an Altair chart object."""
+        pytest.importorskip("altair")
         rng = np.random.default_rng(42)
         df, _, _ = _simulate_factor_model(rng, n_assets=20, n_periods=60)
 
@@ -265,6 +267,7 @@ class TestFamaMacBethOutput:
 
     def test_fm_plot_lambdas_subset(self) -> None:
         """plot_lambdas() with variables subset."""
+        pytest.importorskip("altair")
         rng = np.random.default_rng(42)
         df, _, _ = _simulate_factor_model(rng, n_assets=20, n_periods=60)
 
