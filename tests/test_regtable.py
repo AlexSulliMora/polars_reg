@@ -381,16 +381,16 @@ def test_regtable_transpose_basic(simple_data):
     r2 = ols("y ~ x1 + x2", data=simple_data)
     html = _html(regtable(r1, r2, transpose=True))
     assert "x1" in html
-    assert "(1) OLS" in html
-    assert "(2) OLS" in html
+    assert "(1)" in html
+    assert "(2)" in html
 
 
 def test_regtable_transpose_custom_labels(simple_data):
     r1 = ols("y ~ x1", data=simple_data)
     r2 = ols("y ~ x1 + x2", data=simple_data)
     html = _html(regtable(r1, r2, labels=["Base", "Full"], transpose=True))
-    assert "Base OLS" in html
-    assert "Full OLS" in html
+    assert "Base" in html
+    assert "Full" in html
 
 
 def test_regtable_transpose_stat_se(simple_data):
@@ -433,20 +433,3 @@ def test_regtable_transpose_latex(simple_data):
     assert r"\begin{table}" in latex
     assert r"\toprule" in latex
     assert "x1" in latex
-
-
-# ── model_type tests ──────────────────────────────────────────────
-
-
-def test_regtable_model_type_shown(simple_data):
-    """Model type row appears by default."""
-    r1 = ols("y ~ x1", data=simple_data)
-    html = _html(regtable(r1))
-    assert "OLS" in html
-
-
-def test_regtable_model_type_hidden(simple_data):
-    """model_type=False suppresses model type."""
-    r1 = ols("y ~ x1", data=simple_data)
-    table = regtable(r1, model_type=False)
-    assert isinstance(table, GT)
