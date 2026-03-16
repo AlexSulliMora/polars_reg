@@ -462,3 +462,186 @@ def _mle_multiway_clustered(
             V += sign * dfc * H_inv @ meat @ H_inv
 
     return V
+
+
+def compute_vcov(
+    X: NDArray,
+    resid: NDArray,
+    vcov: str,
+    ssc: SSC,
+    *,
+    cluster_arrays: list[NDArray] | None = None,
+    time_array: NDArray | None = None,
+    bandwidth: int | None = None,
+    df_abs: int = 0,
+    df_a_non_nested: int = 0,
+    n_boot: int = 999,
+    seed: int | None = None,
+    y: NDArray | None = None,
+    bread: NDArray | None = None,
+    score_X: NDArray | None = None,
+) -> NDArray:
+    """Unified VCV dispatch.
+
+    Replaces copy-pasted if/elif chains in estimators. Delegates to the
+    individual ``vcov_*`` functions for OLS-family models, or computes
+    bread-meat-bread sandwiches directly when a custom bread matrix is
+    provided (for MLE / IV models).
+
+    For OLS-family: bread and score_X default to (X'X)^{-1} and X.
+    For IV: pass bread=(X_hat'X)^{-1} and score_X=X_hat.
+    For MLE: pass bread=H_inv (and compute meat from per-obs scores).
+
+    Args:
+        X: Design matrix (n x k).
+        resid: Residual vector (n,). For MLE models, this is the score
+            residual (e.g. y - mu for PPML, lambda for probit).
+        vcov: VCV type string ("iid", "HC0"-"HC3", "NW", "DK",
+            "bootstrap", "wildboot").
+        ssc: Small-sample correction configuration.
+        cluster_arrays: List of cluster code arrays. If provided and vcov
+            is not "wildboot", clustered SEs are computed.
+        time_array: Time identifiers (required for NW/DK).
+        bandwidth: Number of lags for HAC/DK.
+        df_abs: Total absorbed FE degrees of freedom.
+        df_a_non_nested: Non-nested FE degrees of freedom.
+        n_boot: Bootstrap replications (default 999).
+        seed: Random seed for bootstrap.
+        y: Dependent variable (required for pairs bootstrap).
+        bread: Override the bread matrix. When None, (X'X)^{-1} is used.
+        score_X: Override X used in score/meat computation. When None, X
+            itself is used.
+    """
+    n, k = X.shape
+
+    if bread is not None:
+        # Custom bread (MLE or IV) — compute sandwich directly
+        effective_X = score_X if score_X is not None else X
+
+        if cluster_arrays and vcov != "wildboot":
+            if len(cluster_arrays) == 1:
+                codes, G = _recode_to_contiguous(cluster_arrays[0])
+                if G < 2:
+                    raise ValueError("Clustered SEs require at least 2 cluster groups")
+                meat = _clustered_meat(effective_X, resid, codes, G)
+                k_eff = _compute_k_eff(k, ssc.k_fixef, 0, 0)
+                k_adj_factor = (n - 1) / (n - k_eff) if ssc.k_adj else 1.0
+                G_adj_factor = G / (G - 1) if ssc.G_adj else 1.0
+                dfc = k_adj_factor * G_adj_factor
+                return dfc * bread @ meat @ bread
+            else:
+                return _mle_multiway_clustered(
+                    effective_X,
+                    resid,
+                    cluster_arrays,
+                    bread,
+                    n,
+                    k,
+                    ssc=ssc,
+                )
+        elif vcov == "wildboot":
+            if not cluster_arrays:
+                raise ValueError("vcov='wildboot' requires cluster_arrays")
+            return vcov_wild_bootstrap(
+                X,
+                resid,
+                cluster_arrays[0],
+                n_boot=n_boot,
+                seed=seed,
+                bread=bread,
+                score_X=score_X,
+                ssc=ssc,
+            )
+        elif vcov in ("HC0", "HC1"):
+            meat = effective_X.T @ (effective_X * (resid**2)[:, None])
+            k_eff = _compute_k_eff(k, ssc.k_fixef, 0, 0)
+            dfc = (n / (n - k_eff)) if (ssc.k_adj and vcov == "HC1") else 1.0
+            return dfc * bread @ meat @ bread
+        elif vcov == "NW":
+            if time_array is None:
+                raise ValueError("vcov='NW' requires time_array")
+            score = effective_X * resid[:, None]
+            S = _hac_meat(score, time_array, bandwidth)
+            k_eff = _compute_k_eff(k, ssc.k_fixef, df_abs, 0)
+            dfc = n / (n - k_eff) if ssc.k_adj else 1.0
+            return dfc * bread @ S @ bread
+        elif vcov == "DK":
+            if time_array is None:
+                raise ValueError("vcov='DK' requires time_array")
+            score = effective_X * resid[:, None]
+            S = _dk_meat(score, time_array, bandwidth)
+            T = len(np.unique(time_array))
+            if T < 2:
+                raise ValueError("Driscoll-Kraay SEs require at least 2 time periods")
+            dfc = T / (T - 1)
+            return dfc * bread @ S @ bread
+        elif vcov == "bootstrap":
+            if y is None:
+                raise ValueError("Pairs bootstrap requires y")
+            return vcov_pairs_bootstrap(X, y, n_boot=n_boot, seed=seed, ssc=ssc)
+        elif vcov == "iid":
+            # MLE iid: bread is already the VCV (inverse information matrix)
+            return bread
+        else:
+            raise ValueError(f"Unknown vcov type: {vcov}")
+    else:
+        # Standard OLS bread — delegate to existing functions
+        if cluster_arrays and vcov != "wildboot":
+            if len(cluster_arrays) == 1:
+                return vcov_clustered(
+                    X,
+                    resid,
+                    cluster_arrays[0],
+                    ssc=ssc,
+                    df_a_non_nested=df_a_non_nested,
+                )
+            else:
+                return vcov_multiway_clustered(
+                    X,
+                    resid,
+                    cluster_arrays,
+                    ssc=ssc,
+                    df_a_non_nested=df_a_non_nested,
+                )
+        elif vcov == "bootstrap":
+            if y is None:
+                raise ValueError("Pairs bootstrap requires y")
+            return vcov_pairs_bootstrap(X, y, n_boot=n_boot, seed=seed, ssc=ssc)
+        elif vcov == "wildboot":
+            if not cluster_arrays:
+                raise ValueError("vcov='wildboot' requires cluster_arrays")
+            return vcov_wild_bootstrap(
+                X,
+                resid,
+                cluster_arrays[0],
+                n_boot=n_boot,
+                seed=seed,
+                ssc=ssc,
+            )
+        elif vcov in ("NW", "DK"):
+            if time_array is None:
+                raise ValueError(f"vcov='{vcov}' requires time_array")
+            if vcov == "NW":
+                return vcov_hac(
+                    X,
+                    resid,
+                    time_array,
+                    bandwidth=bandwidth,
+                    ssc=ssc,
+                    df_abs=df_abs,
+                )
+            else:
+                return vcov_driscoll_kraay(
+                    X,
+                    resid,
+                    time_array,
+                    bandwidth=bandwidth,
+                    ssc=ssc,
+                    df_abs=df_abs,
+                )
+        elif vcov == "iid":
+            return vcov_iid(X, resid, ssc=ssc, df_abs=df_abs)
+        elif vcov in ("HC0", "HC1", "HC2", "HC3"):
+            return vcov_robust(X, resid, kind=vcov, ssc=ssc, df_abs=df_abs)
+        else:
+            raise ValueError(f"Unknown vcov type: {vcov}")

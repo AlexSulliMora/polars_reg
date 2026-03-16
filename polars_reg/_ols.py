@@ -9,16 +9,7 @@ from polars_reg._native import rust_ols_core as _rust_ols_core
 from polars_reg._native import rust_ols_from_arrays as _rust_ols_from_arrays
 from polars_reg._native import rust_ols_nofe as _rust_ols_nofe
 from polars_reg._results import RegressionResult
-from polars_reg._se import (
-    vcov_clustered,
-    vcov_driscoll_kraay,
-    vcov_hac,
-    vcov_iid,
-    vcov_multiway_clustered,
-    vcov_pairs_bootstrap,
-    vcov_robust,
-    vcov_wild_bootstrap,
-)
+from polars_reg._se import compute_vcov
 from polars_reg._ssc import SSC, _default_ssc
 from polars_reg._utils import _to_codes, ensure_polars, extract_arrays, sanitize_inf, validate_vcov
 
@@ -523,49 +514,48 @@ def ols(
     # Variance-covariance (uses weighted X and residuals for sandwich)
     n_clusters = None
     if cluster and vcov != "wildboot":
-        cluster_arrays = [arrays.cluster_arrays[c] for c in cluster]
-        # Compute non-nested FE DoF for reghdfe-style dfc adjustment
+        cl_list = [arrays.cluster_arrays[c] for c in cluster]
         df_a_nn = _non_nested_fe_dof(fe_dict, arrays.cluster_arrays, cluster) if has_fe else 0
-        if len(cluster_arrays) == 1:
-            V = vcov_clustered(Xw, resid_w, cluster_arrays[0], ssc=ssc, df_a_non_nested=df_a_nn)
-        else:
-            V = vcov_multiway_clustered(
-                Xw, resid_w, cluster_arrays, ssc=ssc, df_a_non_nested=df_a_nn
-            )
+        V = compute_vcov(
+            Xw,
+            resid_w,
+            vcov,
+            ssc,
+            cluster_arrays=cl_list,
+            df_a_non_nested=df_a_nn,
+        )
         vcov_type = "cluster"
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1
-    elif vcov == "bootstrap":
-        V = vcov_pairs_bootstrap(Xw, yw, n_boot=n_boot, seed=seed, ssc=ssc)
-        vcov_type = "bootstrap"
-        df_r = n_eff - k - df_abs
     elif vcov == "wildboot":
         if not cluster:
             raise ValueError("vcov='wildboot' requires cluster= parameter")
-        cl_arr = arrays.cluster_arrays[cluster[0]]
-        V = vcov_wild_bootstrap(Xw, resid_w, cl_arr, n_boot=n_boot, seed=seed, ssc=ssc)
+        cl_list = [arrays.cluster_arrays[c] for c in cluster]
+        V = compute_vcov(
+            Xw,
+            resid_w,
+            vcov,
+            ssc,
+            cluster_arrays=cl_list,
+            n_boot=n_boot,
+            seed=seed,
+        )
         vcov_type = "wildboot"
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1
-    elif vcov in ("NW", "DK"):
-        if arrays.time_array is None:
-            raise ValueError(f"vcov='{vcov}' requires time= parameter")
-        if vcov == "NW":
-            V = vcov_hac(
-                Xw, resid_w, arrays.time_array, bandwidth=bandwidth, ssc=ssc, df_abs=df_abs
-            )
-        else:
-            V = vcov_driscoll_kraay(
-                Xw, resid_w, arrays.time_array, bandwidth=bandwidth, ssc=ssc, df_abs=df_abs
-            )
-        vcov_type = vcov
-        df_r = n_eff - k - df_abs
-    elif vcov == "iid":
-        V = vcov_iid(Xw, resid_w, ssc=ssc, df_abs=df_abs)
-        vcov_type = "iid"
-        df_r = n_eff - k - df_abs
     else:
-        V = vcov_robust(Xw, resid_w, kind=vcov, ssc=ssc, df_abs=df_abs)
+        V = compute_vcov(
+            Xw,
+            resid_w,
+            vcov,
+            ssc,
+            time_array=arrays.time_array,
+            bandwidth=bandwidth,
+            df_abs=df_abs,
+            n_boot=n_boot,
+            seed=seed,
+            y=yw,
+        )
         vcov_type = vcov
         df_r = n_eff - k - df_abs
 
