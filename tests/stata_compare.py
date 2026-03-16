@@ -700,6 +700,7 @@ def assert_stata_parity(
     cluster: list[str] | str | None = None,
     rtol: float = 1e-6,
     stata_pre_commands: list[str] | None = None,
+    ssc=None,
 ) -> ComparisonResult:
     """Run a regression in both polars_reg and Stata, assert results match.
 
@@ -712,6 +713,7 @@ def assert_stata_parity(
         rtol: Relative tolerance for comparisons (default 1e-6)
         stata_pre_commands: Extra Stata commands to run before the regression
             (e.g., ["set matsize 10000"])
+        ssc: SSC configuration for polars_reg. If None, uses default.
 
     Returns:
         ComparisonResult with detailed comparison
@@ -738,6 +740,8 @@ def assert_stata_parity(
         kwargs["vcov"] = vcov
     if cluster:
         kwargs["cluster"] = cluster
+    if ssc is not None:
+        kwargs["ssc"] = ssc
     polars_result = func(**kwargs)
 
     # 2. Translate to Stata

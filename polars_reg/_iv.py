@@ -24,8 +24,11 @@ def _iv2sls_rust(
     spec,
     cluster: list[str] | None,
     vcov: str,
+    ssc: SSC | None = None,
 ) -> RegressionResult:
     """Rust fast path for 2SLS IV regression."""
+    if ssc is None:
+        ssc = _default_ssc()
     if isinstance(data, pl.LazyFrame):
         all_cols = (
             [spec.depvar]
@@ -93,6 +96,8 @@ def _iv2sls_rust(
         100_000,
         vcov if not cluster else "cluster",
         spec.add_intercept and not spec.fe,
+        ssc.k_adj,
+        ssc.G_adj,
     )
 
     beta = np.asarray(beta)
@@ -197,7 +202,7 @@ def iv2sls(
         and (cluster or vcov in ("iid", "HC0", "HC1"))
     )
     if _rust_eligible:
-        result = _iv2sls_rust(data, spec, cluster, vcov)
+        result = _iv2sls_rust(data, spec, cluster, vcov, ssc=ssc)
         result.ssc = ssc
         return result
 

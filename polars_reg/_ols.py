@@ -67,8 +67,11 @@ def _ols_nofe_rust(
     spec,
     cluster: list[str] | None,
     vcov: str,
+    ssc: SSC | None = None,
 ) -> RegressionResult:
     """Rust path for plain OLS (no FE) with all SE types."""
+    if ssc is None:
+        ssc = _default_ssc()
     if isinstance(data, pl.LazyFrame):
         all_cols = [spec.depvar] + list(spec.exog)
         if cluster:
@@ -115,6 +118,8 @@ def _ols_nofe_rust(
         [np.ascontiguousarray(a, dtype=np.int32) for a in cl_arrays],
         cl_names,
         vcov if not cluster else "cluster",
+        ssc.k_adj,
+        ssc.G_adj,
     )
 
     beta = np.asarray(beta)
@@ -152,11 +157,14 @@ def _ols_direct_rust(
     spec,
     cluster: list[str] | None,
     vcov: str,
+    ssc: SSC | None = None,
 ) -> RegressionResult:
     """Ultra-fast path: extract columns and run OLS entirely in Rust.
 
     Skips extract_arrays, column_stack, and astype overhead.
     """
+    if ssc is None:
+        ssc = _default_ssc()
     if isinstance(data, pl.LazyFrame):
         all_cols = [spec.depvar] + list(spec.exog) + list(spec.fe)
         if cluster:
@@ -224,6 +232,8 @@ def _ols_direct_rust(
         1e-8,
         100_000,
         vcov if not cluster else "cluster",
+        ssc.k_adj,
+        ssc.G_adj,
     )
 
     beta = np.asarray(beta)
@@ -264,8 +274,11 @@ def _ols_rust_path(
     fe_dict: dict[str, np.ndarray],
     cluster: list[str] | None,
     vcov: str,
+    ssc: SSC | None = None,
 ) -> RegressionResult:
     """Fast Rust path for OLS with FE + optional clustering."""
+    if ssc is None:
+        ssc = _default_ssc()
     X, y = arrays.X, arrays.y
 
     # Remove intercept (absorbed by FE)
@@ -290,6 +303,8 @@ def _ols_rust_path(
         cl_codes_list,
         1e-8,  # tol
         100_000,  # max_iter
+        ssc.k_adj,
+        ssc.G_adj,
     )
 
     beta = np.asarray(beta)
@@ -303,13 +318,6 @@ def _ols_rust_path(
         vcov_type = "cluster"
     else:
         n_clusters = None
-        # Rust computed iid VCV with sigma^2/(n-k), adjust for df_abs
-        rss = resid @ resid
-        sigma2 = rss / (n - k - df_abs) if (n - k - df_abs) > 0 else 0.0
-        if (n - k) > 0 and rss > 0:
-            XtX_inv = V / (rss / (n - k))
-            V = sigma2 * XtX_inv
-        # else: V stays as the Rust-computed value (or zero for perfect fit)
         df_r = n - k - df_abs
         vcov_type = "iid"
 
@@ -387,13 +395,13 @@ def ols(
 
     # Path 1: FE present — use rust_ols_from_arrays (demean + solve + all SE types)
     if _rust_eligible and spec.fe and (cluster or vcov in ("iid", "HC0", "HC1", "HC2", "HC3")):
-        result = _ols_direct_rust(data, spec, cluster, vcov)
+        result = _ols_direct_rust(data, spec, cluster, vcov, ssc=ssc)
         result.ssc = ssc
         return result
 
     # Path 2: No FE — use rust_ols_nofe (solve + iid/HC0-HC3/cluster SE)
     if _rust_eligible and not spec.fe and (cluster or vcov in ("iid", "HC0", "HC1", "HC2", "HC3")):
-        result = _ols_nofe_rust(data, spec, cluster, vcov)
+        result = _ols_nofe_rust(data, spec, cluster, vcov, ssc=ssc)
         result.ssc = ssc
         return result
 
@@ -419,6 +427,7 @@ def ols(
             fe_dict,
             cluster,
             vcov,
+            ssc=ssc,
         )
         result.ssc = ssc
         return result
