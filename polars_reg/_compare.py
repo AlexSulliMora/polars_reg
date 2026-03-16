@@ -736,9 +736,12 @@ def compare(
     if isinstance(data, pl.LazyFrame):
         data = data.collect()
 
-    # Run polars_reg
-    pr_kwargs: dict[str, Any] = {"vcov": vcov}
-    if cluster:
+    # Run polars_reg — only pass params the estimator accepts
+    _no_vcov = {"panel_ab", "panel_sys_gmm", "quantreg"}
+    pr_kwargs: dict[str, Any] = {}
+    if estimator not in _no_vcov:
+        pr_kwargs["vcov"] = vcov
+    if cluster and estimator not in _no_vcov:
         pr_kwargs["cluster"] = cluster
     if entity:
         pr_kwargs["entity"] = entity
