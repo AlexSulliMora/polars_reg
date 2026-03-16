@@ -382,7 +382,12 @@ class TestSSCEndToEnd:
         assert result.ssc.G_adj is False
 
     def test_panel_fe_ssc_iid(self, sample_data):
-        """panel_fe iid VCV respects SSC k_adj."""
+        """panel_fe iid VCV respects SSC k_adj.
+
+        panel_fe delegates to ols(), which uses the Rust path for FE + iid.
+        The Rust path accounts for absorbed FE dof: sigma2 = e'e/(n-k-df_abs)
+        when k_adj=True, and sigma2 = e'e/n when k_adj=False.
+        """
         r_default = pr.panel_fe(
             "y ~ x1 + x2", data=sample_data, entity="firm_id", vcov="iid", cluster=[]
         )
@@ -397,10 +402,8 @@ class TestSSCEndToEnd:
 
         n = r_default.n_obs
         k = r_default.k
-        k_eff_default = k  # k_fixef="none" by default
+        df_abs = r_default.df_absorbed
         ratio = (r_no_adj.se / r_default.se) ** 2
-        # Default uses e'e/(n-k_eff), no_adj uses e'e/n
-        # But k_eff = k because k_fixef="none", so default sigma2 = e'e/(n-k)
-        # and with df_abs, vcov_iid uses _compute_k_eff(k, "none", df_abs, 0) = k
-        expected = (n - k_eff_default) / n
+        # Default: sigma2 = e'e/(n-k-df_abs), no_adj: sigma2 = e'e/n
+        expected = (n - k - df_abs) / n
         np.testing.assert_allclose(ratio, expected, rtol=1e-6)

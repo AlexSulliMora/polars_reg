@@ -3,23 +3,29 @@ from __future__ import annotations
 import numpy as np
 import polars as pl
 
-from polars_reg._demean import absorbed_dof, demean, drop_singletons, reindex_fe_codes
 from polars_reg._formula import parse_formula
+from polars_reg._ols import ols
 from polars_reg._results import RegressionResult
-from polars_reg._se import (
-    _dk_meat,
-    _hac_meat,
-    vcov_clustered,
-    vcov_driscoll_kraay,
-    vcov_hac,
-    vcov_iid,
-    vcov_multiway_clustered,
-    vcov_pairs_bootstrap,
-    vcov_robust,
-    vcov_wild_bootstrap,
-)
+from polars_reg._se import compute_vcov
 from polars_reg._ssc import SSC, _default_ssc
 from polars_reg._utils import ensure_polars, extract_arrays, sanitize_inf, validate_vcov
+
+
+def _inject_fe(formula: str, entity: str, time: str | None = None) -> str:
+    """Inject entity (and optionally time) as FE into a formula string.
+
+    'y ~ x1 + x2' + entity='firm' -> 'y ~ x1 + x2 | firm'
+    'y ~ x1 + x2' + entity='firm', time='year' -> 'y ~ x1 + x2 | firm + year'
+
+    Raises ValueError if formula already contains '|' (FE already specified).
+    """
+    if "|" in formula:
+        raise ValueError(
+            "Formula already contains fixed effects ('|'). "
+            "Use ols() directly instead of panel_fe() when specifying FE in the formula."
+        )
+    fe_part = entity if time is None else f"{entity} + {time}"
+    return f"{formula} | {fe_part}"
 
 
 def panel_fe(
@@ -33,134 +39,65 @@ def panel_fe(
     bandwidth: int | None = None,
     n_boot: int = 999,
     seed: int | None = None,
+    weights: str | None = None,
+    fweights: str | None = None,
+    time_col: str | None = None,
 ) -> RegressionResult:
     """Panel fixed effects (within) estimator.
 
-    Demeans by entity (and optionally time), then OLS on demeaned data.
-    Default clusters SEs by entity. See Wooldridge (2010), Econometric
-    Analysis of Cross Section and Panel Data, ch. 10.
+    Sugar for ols() with absorbed entity (and optionally time) fixed effects.
+    Default clusters SEs by entity. See Wooldridge (2010), ch. 10.
 
     Args:
-        vcov: "iid", "NW", "DK", "bootstrap", or "wildboot".
+        formula: Formula string, e.g. "y ~ x1 + x2"
+        data: Polars DataFrame or LazyFrame
+        entity: Column name for entity (panel) identifier
+        time: Column name for time identifier (optional, adds time FE)
+        vcov: "iid", "HC0"-"HC3", "NW", "DK", "bootstrap", or "wildboot"
+        cluster: Column name(s) for clustered SEs. Default: [entity].
         ssc: Small-sample correction configuration. Default: pyfixest conventions.
         bandwidth: Number of lags for NW/DK. Default: Newey-West rule of thumb.
         n_boot: Bootstrap replications (default 999).
         seed: Random seed for bootstrap reproducibility.
+        weights: Column name for analytic weights (WLS).
+        fweights: Column name for frequency weights.
+        time_col: Column name for time ordering (for NW/DK). Defaults to time if provided.
     """
-    if ssc is None:
-        ssc = _default_ssc()
+    # Handle cluster defaults.
+    # In ols(), cluster overrides vcov (except wildboot), so we only default
+    # cluster=[entity] when the vcov type won't conflict with clustering.
+    # NW/DK/bootstrap need cluster=None so ols() uses the requested vcov.
+    _no_default_cluster = {"NW", "DK", "bootstrap"}
     if isinstance(cluster, str):
         cluster = [cluster]
     elif isinstance(cluster, list) and len(cluster) == 0:
-        # Explicit empty list → iid SEs (useful for Hausman test)
-        pass
+        cluster = None  # Explicit empty list -> iid SEs (Hausman test pattern)
     elif cluster is None:
-        cluster = [entity]
-    _fe_vcov = {"iid", "NW", "DK", "bootstrap", "wildboot"}
-    validate_vcov(vcov, _fe_vcov, "Panel FE")
-    data = ensure_polars(data)
+        if vcov not in _no_default_cluster:
+            cluster = [entity]
+        # else: leave cluster=None so ols() uses the vcov-specific path
 
-    spec = parse_formula(formula)
-    spec.fe = [entity] + ([time] if time else [])
-    spec.add_intercept = False
+    # Inject FE into formula
+    fe_formula = _inject_fe(formula, entity, time)
 
-    arrays = extract_arrays(data, spec, cluster=cluster if cluster else None, time=time)
-    y, X = arrays.y, arrays.X
-    fe_dict = arrays.fe_arrays
+    # For HAC/DK, time_col defaults to time if provided
+    if time_col is None and time is not None and vcov in ("NW", "DK"):
+        time_col = time
 
-    # Remove intercept column if present
-    if arrays.names and arrays.names[-1] == "_cons":
-        X = X[:, :-1]
-        arrays.names = arrays.names[:-1]
-
-    keep = drop_singletons(fe_dict)
-    if not keep.all():
-        if keep.sum() == 0:
-            raise ValueError("All observations dropped as singletons")
-        y, X = y[keep], X[keep]
-        fe_dict = {k: v[keep] for k, v in fe_dict.items()}
-        fe_dict = reindex_fe_codes(fe_dict)
-        arrays.cluster_arrays = {k: v[keep] for k, v in arrays.cluster_arrays.items()}
-        if arrays.time_array is not None:
-            arrays.time_array = arrays.time_array[keep]
-
-    all_vars = np.column_stack([y.reshape(-1, 1), X])
-    demeaned = demean(all_vars, fe_dict)
-    y_dm, X_dm = demeaned[:, 0], demeaned[:, 1:]
-
-    n, k = X_dm.shape
-    df_abs = absorbed_dof(fe_dict)
-
-    try:
-        beta = np.linalg.solve(X_dm.T @ X_dm, X_dm.T @ y_dm)
-    except np.linalg.LinAlgError:
-        raise ValueError(
-            "Design matrix is singular after within-transformation (perfect collinearity)."
-        )
-    resid = y_dm - X_dm @ beta
-
-    ss_res = resid @ resid
-    ss_tot = (y_dm - y_dm.mean()) @ (y_dm - y_dm.mean())
-    r2 = 1.0 - ss_res / ss_tot
-    r2_adj = 1.0 - (1.0 - r2) * (n - 1) / (n - k - df_abs)
-
-    n_clusters_dict = None
-    if vcov == "bootstrap":
-        V = vcov_pairs_bootstrap(X_dm, y_dm, n_boot=n_boot, seed=seed, ssc=ssc)
-        vcov_type_str = "bootstrap"
-        df_r = n - k - df_abs
-    elif vcov == "wildboot":
-        if not cluster:
-            raise ValueError("vcov='wildboot' requires cluster= parameter")
-        cl_arr = arrays.cluster_arrays[cluster[0]]
-        V = vcov_wild_bootstrap(X_dm, resid, cl_arr, n_boot=n_boot, seed=seed, ssc=ssc)
-        vcov_type_str = "wildboot"
-        n_clusters_dict = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
-        df_r = min(n_clusters_dict.values()) - 1
-    elif vcov in ("NW", "DK"):
-        if arrays.time_array is None:
-            raise ValueError(f"vcov='{vcov}' requires time= parameter")
-        if vcov == "NW":
-            V = vcov_hac(
-                X_dm, resid, arrays.time_array, bandwidth=bandwidth, ssc=ssc, df_abs=df_abs
-            )
-        else:
-            V = vcov_driscoll_kraay(
-                X_dm, resid, arrays.time_array, bandwidth=bandwidth, ssc=ssc, df_abs=df_abs
-            )
-        vcov_type_str = vcov
-        df_r = n - k - df_abs
-    elif cluster:
-        cluster_arrays_list = [arrays.cluster_arrays[c] for c in cluster]
-        if len(cluster_arrays_list) == 1:
-            V = vcov_clustered(X_dm, resid, cluster_arrays_list[0], ssc=ssc)
-        else:
-            V = vcov_multiway_clustered(X_dm, resid, cluster_arrays_list, ssc=ssc)
-        n_clusters_dict = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
-        df_r = min(n_clusters_dict.values()) - 1
-        vcov_type_str = "cluster"
-    else:
-        V = vcov_iid(X_dm, resid, ssc=ssc, df_abs=df_abs)
-        df_r = n - k - df_abs
-        vcov_type_str = "iid"
-
-    result = RegressionResult(
-        coefficients=beta,
-        vcov=V,
-        residuals=resid,
-        names=arrays.names,
-        n_obs=n,
-        k=k,
-        df_r=df_r,
-        r_squared=r2,
-        r_squared_adj=r2_adj,
-        model_type="Panel FE",
-        vcov_type=vcov_type_str,
-        n_clusters=n_clusters_dict,
-        fe_absorbed=list(fe_dict.keys()),
-        df_absorbed=df_abs,
+    result = ols(
+        fe_formula,
+        data,
+        vcov=vcov,
+        cluster=cluster,
+        ssc=ssc,
+        time=time_col,
+        bandwidth=bandwidth,
+        weights=weights,
+        fweights=fweights,
+        n_boot=n_boot,
+        seed=seed,
     )
-    result.ssc = ssc
+    result.model_type = "Panel FE"
     return result
 
 
@@ -224,7 +161,7 @@ def panel_re(
     relevant_cols = list(dict.fromkeys(relevant_cols))
     data = data.drop_nulls(subset=relevant_cols)
 
-    # Don't put entity in spec.fe — RE keeps the intercept and handles
+    # Don't put entity in spec.fe -- RE keeps the intercept and handles
     # entity codes internally for variance component estimation.
     arrays = extract_arrays(data, spec, cluster=cluster if cluster else None, time=time)
     y, X = arrays.y, arrays.X
@@ -266,7 +203,6 @@ def panel_re(
     # Step 2: Estimate sigma_u^2 from between regression
     T_i = np.bincount(entity_codes, minlength=n_entities).astype(float)
     T_bar = n / n_entities
-    # Between regression uses group means including intercept
     X_bar = entity_means_X
     if has_cons:
         X_bar = np.column_stack([X_bar, np.ones(n_entities)])
@@ -296,67 +232,21 @@ def panel_re(
     r2 = 1.0 - ss_res / ss_tot
     r2_adj = 1.0 - (1.0 - r2) * (n - 1) / (n - k)
 
-    # Original residuals (for R² and output)
     resid = y - X @ beta
-    # Quasi-demeaned residuals (for sandwich VCV and iid VCV)
     resid_re = y_re - X_re @ beta
 
+    # Build cluster arrays (needed for cluster/wildboot VCV)
     n_clusters_dict = None
-    if vcov == "bootstrap":
-        V = vcov_pairs_bootstrap(X_re, y_re, n_boot=n_boot, seed=seed, ssc=ssc)
-        vcov_type_str = "bootstrap"
-        df_r = n - k
-    elif vcov == "wildboot":
+    cl_list = None
+    if cluster or vcov in ("wildboot", "HC0", "HC1"):
         if not cluster:
             cluster = [entity]
-        cl_codes = (
-            entity_codes
-            if cluster == [entity]
-            else (
-                data[cluster[0]]
-                .cast(pl.Utf8)
-                .cast(pl.Categorical)
-                .to_physical()
-                .to_numpy()
-                .astype(np.int32)
-            )
-        )
-        V = vcov_wild_bootstrap(X_re, resid_re, cl_codes, n_boot=n_boot, seed=seed, ssc=ssc)
-        vcov_type_str = "wildboot"
-        n_clusters_dict = {cluster[0]: len(np.unique(cl_codes))}
-        df_r = n_clusters_dict[cluster[0]] - 1
-    elif vcov in ("NW", "DK"):
-        if arrays.time_array is None:
-            raise ValueError(f"vcov='{vcov}' requires time= parameter")
-        try:
-            XtX_inv = np.linalg.inv(X_re.T @ X_re)
-        except np.linalg.LinAlgError:
-            raise ValueError("GLS design matrix is singular for HAC VCV.")
-        score = X_re * resid_re[:, None]
-        from polars_reg._ssc import _compute_k_eff
-
-        k_eff = _compute_k_eff(k, ssc.k_fixef, 0, 0)
-        if vcov == "NW":
-            S = _hac_meat(score, arrays.time_array, bandwidth)
-            dfc = n / (n - k_eff) if ssc.k_adj else 1.0
-        else:
-            S = _dk_meat(score, arrays.time_array, bandwidth)
-            T_unique = len(np.unique(arrays.time_array))
-            # T/(T-1) is intrinsic to DK, always applied
-            dfc = T_unique / (T_unique - 1)
-        V = dfc * XtX_inv @ S @ XtX_inv
-        vcov_type_str = vcov
-        df_r = n - k
-    elif cluster or vcov in ("HC0", "HC1"):
-        if not cluster:
-            cluster = [entity]
-        # Need cluster codes
-        cluster_arrays_list = []
+        cl_list = []
         for c in cluster:
             if c == entity:
-                cluster_arrays_list.append(entity_codes)
+                cl_list.append(entity_codes)
             elif arrays.cluster_arrays and c in arrays.cluster_arrays:
-                cluster_arrays_list.append(arrays.cluster_arrays[c])
+                cl_list.append(arrays.cluster_arrays[c])
             else:
                 cl = (
                     data[c]
@@ -366,25 +256,38 @@ def panel_re(
                     .to_numpy()
                     .astype(np.int32)
                 )
-                cluster_arrays_list.append(cl)
+                cl_list.append(cl)
 
-        if vcov in ("HC0", "HC1"):
-            V = vcov_robust(X_re, resid_re, kind=vcov, ssc=ssc)
-        elif len(cluster_arrays_list) == 1:
-            V = vcov_clustered(X_re, resid_re, cluster_arrays_list[0], ssc=ssc)
-        else:
-            V = vcov_multiway_clustered(X_re, resid_re, cluster_arrays_list, ssc=ssc)
-        if vcov in ("HC0", "HC1"):
-            n_clusters_dict = None  # HC0/HC1 is robust, not clustered
-            vcov_type_str = vcov
-            df_r = n - k
-        else:
-            n_clusters_dict = {c: len(np.unique(a)) for c, a in zip(cluster, cluster_arrays_list)}
-            vcov_type_str = "cluster"
-            df_r = min(n_clusters_dict.values()) - 1
+    if cluster and vcov not in ("HC0", "HC1", "wildboot", "bootstrap", "NW", "DK"):
+        V = compute_vcov(X_re, resid_re, vcov, ssc, cluster_arrays=cl_list)
+        n_clusters_dict = {c: len(np.unique(a)) for c, a in zip(cluster, cl_list)}
+        vcov_type_str = "cluster"
+        df_r = min(n_clusters_dict.values()) - 1
+    elif vcov == "wildboot":
+        V = compute_vcov(
+            X_re, resid_re, vcov, ssc, cluster_arrays=cl_list, n_boot=n_boot, seed=seed
+        )
+        vcov_type_str = "wildboot"
+        n_clusters_dict = {cluster[0]: len(np.unique(cl_list[0]))}
+        df_r = n_clusters_dict[cluster[0]] - 1
+    elif vcov in ("HC0", "HC1"):
+        V = compute_vcov(X_re, resid_re, vcov, ssc)
+        n_clusters_dict = None
+        vcov_type_str = vcov
+        df_r = n - k
     else:
-        V = vcov_iid(X_re, resid_re, ssc=ssc)
-        vcov_type_str = "iid"
+        V = compute_vcov(
+            X_re,
+            resid_re,
+            vcov,
+            ssc,
+            time_array=arrays.time_array,
+            bandwidth=bandwidth,
+            n_boot=n_boot,
+            seed=seed,
+            y=y_re,
+        )
+        vcov_type_str = vcov
         df_r = n - k
 
     result = RegressionResult(
@@ -405,6 +308,55 @@ def panel_re(
     return result
 
 
+def _first_difference(
+    data: pl.DataFrame,
+    entity: str,
+    time: str,
+    formula: str,
+    cluster: list[str] | None = None,
+) -> tuple[pl.DataFrame, list[str]]:
+    """First-difference data within entity groups.
+
+    Sorts by [entity, time], computes within-entity diffs for all numeric
+    columns in the formula, drops first obs per entity.
+
+    Returns (diffed_data, diff_col_names) where diffed_data has columns
+    named with original names (containing differenced values), plus any
+    cluster and entity columns preserved.
+    """
+    spec = parse_formula(formula)
+    all_needed = [spec.depvar] + spec.exog + [entity, time]
+    if cluster:
+        all_needed += [c for c in cluster if c not in all_needed]
+    all_needed = list(dict.fromkeys(all_needed))
+
+    data = sanitize_inf(data, all_needed)
+    df_sorted = data.select(all_needed).sort([entity, time])
+
+    diff_exprs = []
+    numeric_cols = [spec.depvar] + spec.exog
+    for col in numeric_cols:
+        diff_exprs.append((pl.col(col) - pl.col(col).shift(1)).over(entity).alias(f"d_{col}"))
+
+    df_diff = df_sorted.with_columns(diff_exprs)
+    df_diff = df_diff.with_columns((pl.col(f"d_{spec.depvar}").is_not_null()).alias("_has_diff"))
+    df_diff = df_diff.filter(pl.col("_has_diff"))
+
+    rename_exprs = []
+    diff_col_names = []
+    for col in numeric_cols:
+        rename_exprs.append(pl.col(f"d_{col}").alias(col))
+        diff_col_names.append(f"d_{col}")
+
+    keep_cols = [entity, time]
+    if cluster:
+        keep_cols += [c for c in cluster if c not in keep_cols]
+    keep_cols = list(dict.fromkeys(keep_cols))
+
+    diffed_data = df_diff.select(rename_exprs + [pl.col(c) for c in keep_cols])
+    return diffed_data, diff_col_names
+
+
 def panel_fd(
     formula: str,
     data: pl.DataFrame | pl.LazyFrame,
@@ -416,138 +368,51 @@ def panel_fd(
     n_boot: int = 999,
     seed: int | None = None,
 ) -> RegressionResult:
-    """Panel first-difference estimator.
+    """First-difference estimator.
 
-    Takes first differences within entity groups (sorted by time),
-    then runs OLS on the differenced data. See Wooldridge (2010), ch. 10.2.
+    Differences data within entity, then runs OLS on differenced data.
+    See Wooldridge (2010), ch. 13.
 
     Args:
         formula: Formula string, e.g. "y ~ x1 + x2"
         data: Polars DataFrame or LazyFrame
         entity: Column name for entity identifier
         time: Column name for time identifier
-        vcov: "iid", "HC1", "bootstrap", or "wildboot"
-        cluster: Column name(s) for clustered SEs
+        vcov: "iid", "HC0"-"HC3", "NW", "DK", "bootstrap", or "wildboot"
+        cluster: Column name(s) for clustered SEs. Default: [entity].
         ssc: Small-sample correction configuration. Default: pyfixest conventions.
         n_boot: Bootstrap replications (default 999).
         seed: Random seed for bootstrap reproducibility.
     """
-    if ssc is None:
-        ssc = _default_ssc()
+    _no_default_cluster = {"NW", "DK", "bootstrap"}
     if isinstance(cluster, str):
         cluster = [cluster]
-    if cluster is None:
-        cluster = [entity]
-    _fd_vcov = {"iid", "HC1", "bootstrap", "wildboot"}
-    validate_vcov(vcov, _fd_vcov, "Panel FD")
+    elif isinstance(cluster, list) and len(cluster) == 0:
+        cluster = None
+    elif cluster is None:
+        if vcov not in _no_default_cluster:
+            cluster = [entity]
+
     data = ensure_polars(data)
-
-    spec = parse_formula(formula)
-    # We need entity and time columns but not as FE
-    all_needed = [spec.depvar] + spec.exog + [entity, time]
-    if cluster:
-        all_needed += [c for c in cluster if c not in all_needed]
-    all_needed = list(dict.fromkeys(all_needed))
-
     if isinstance(data, pl.LazyFrame):
+        spec = parse_formula(formula)
+        all_needed = [spec.depvar] + spec.exog + [entity, time]
+        if cluster:
+            all_needed += [c for c in cluster if c not in all_needed]
+        all_needed = list(dict.fromkeys(all_needed))
         data = data.select(all_needed).collect()
 
-    # Sanitize inf/NaN before any computation
-    data = sanitize_inf(data, all_needed)
+    fd_cluster = cluster if cluster else [entity]
+    diffed_data, _diff_cols = _first_difference(data, entity, time, formula, fd_cluster)
 
-    # Sort by entity then time, compute first differences
-    df_sorted = data.select(all_needed).sort([entity, time])
-
-    # Compute differences within entities using Polars
-    diff_exprs = []
-    numeric_cols = [spec.depvar] + spec.exog
-    for col in numeric_cols:
-        diff_exprs.append((pl.col(col) - pl.col(col).shift(1)).over(entity).alias(f"d_{col}"))
-
-    df_diff = df_sorted.with_columns(diff_exprs)
-
-    # Mark first observation per entity (diff is null)
-    df_diff = df_diff.with_columns((pl.col(f"d_{spec.depvar}").is_not_null()).alias("_has_diff"))
-    df_diff = df_diff.filter(pl.col("_has_diff"))
-
-    # Extract differenced arrays
-    n = len(df_diff)
-    y_d = df_diff[f"d_{spec.depvar}"].to_numpy().astype(np.float64)
-
-    x_cols = []
-    names = []
-    for col in spec.exog:
-        x_cols.append(df_diff[f"d_{col}"].to_numpy().astype(np.float64))
-        names.append(col)
-
-    if spec.add_intercept:
-        x_cols.append(np.ones(n, dtype=np.float64))
-        names.append("_cons")
-
-    X_d = np.column_stack(x_cols) if x_cols else np.empty((n, 0))
-    k = X_d.shape[1]
-
-    beta = np.linalg.solve(X_d.T @ X_d, X_d.T @ y_d)
-    resid = y_d - X_d @ beta
-
-    ss_res = resid @ resid
-    y_dm = y_d - y_d.mean()
-    ss_tot = y_dm @ y_dm
-    r2 = 1.0 - ss_res / ss_tot
-    r2_adj = 1.0 - (1.0 - r2) * (n - 1) / (n - k)
-
-    # Cluster SEs by entity
-    cluster_arrays: dict[str, np.ndarray] = {}
-    for c in cluster:
-        raw = df_diff[c].cast(pl.Utf8).cast(pl.Categorical).to_physical()
-        codes = raw.to_numpy().astype(np.int32)
-        cluster_arrays[c] = codes
-
-    n_clusters_dict = {c: len(np.unique(cluster_arrays[c])) for c in cluster}
-
-    if vcov == "bootstrap":
-        V = vcov_pairs_bootstrap(X_d, y_d, n_boot=n_boot, seed=seed, ssc=ssc)
-        vcov_type_str = "bootstrap"
-        df_r = n - k
-    elif vcov == "wildboot":
-        cl_arr = cluster_arrays[cluster[0]]
-        V = vcov_wild_bootstrap(X_d, resid, cl_arr, n_boot=n_boot, seed=seed, ssc=ssc)
-        vcov_type_str = "wildboot"
-        df_r = min(n_clusters_dict.values()) - 1
-    elif cluster:
-        cluster_list = [cluster_arrays[c] for c in cluster]
-        if len(cluster_list) == 1:
-            V = vcov_clustered(X_d, resid, cluster_list[0], ssc=ssc)
-        else:
-            V = vcov_multiway_clustered(X_d, resid, cluster_list, ssc=ssc)
-        vcov_type_str = "cluster"
-        df_r = min(n_clusters_dict.values()) - 1
-    elif vcov == "iid":
-        V = vcov_iid(X_d, resid, ssc=ssc)
-        vcov_type_str = "iid"
-        df_r = n - k
-    elif vcov in ("HC1", "HC0", "HC2", "HC3"):
-        V = vcov_robust(X_d, resid, kind=vcov, ssc=ssc)
-        vcov_type_str = vcov
-        df_r = n - k
-    else:
-        V = vcov_iid(X_d, resid, ssc=ssc)
-        vcov_type_str = "iid"
-        df_r = n - k
-
-    result = RegressionResult(
-        coefficients=beta,
-        vcov=V,
-        residuals=resid,
-        names=names,
-        n_obs=n,
-        k=k,
-        df_r=df_r,
-        r_squared=r2,
-        r_squared_adj=r2_adj,
-        model_type="Panel FD",
-        vcov_type=vcov_type_str,
-        n_clusters=n_clusters_dict,
+    result = ols(
+        formula,
+        diffed_data,
+        vcov=vcov,
+        cluster=cluster,
+        ssc=ssc,
+        n_boot=n_boot,
+        seed=seed,
     )
-    result.ssc = ssc
+    result.model_type = "Panel FD"
     return result

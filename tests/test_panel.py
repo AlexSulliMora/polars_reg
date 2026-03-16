@@ -1,8 +1,9 @@
 import numpy as np
 import polars as pl
+import pytest
 
 from polars_reg._ols import ols
-from polars_reg._panel import panel_fd, panel_fe, panel_re
+from polars_reg._panel import _inject_fe, panel_fd, panel_fe, panel_re
 
 
 def test_panel_fe_basic(panel_data):
@@ -21,13 +22,15 @@ def test_panel_fe_default_cluster(panel_data):
 
 
 def test_panel_fe_matches_ols_fe(panel_data):
-    """Panel FE should give same coefficients as OLS with absorbed FE."""
-    # Note: only coefficients are compared. SEs differ because panel_fe and ols
-    # use different degrees-of-freedom corrections (panel_fe uses reg-style,
-    # ols with FE uses reghdfe-style dfc).
+    """Panel FE should give identical results to OLS with absorbed FE.
+
+    Since panel_fe is a thin wrapper around ols(), coefficients AND SEs
+    should match exactly.
+    """
     panel_result = panel_fe("y ~ x1 + x2", data=panel_data, entity="firm_id", time="year_id")
     ols_result = ols("y ~ x1 + x2 | firm_id + year_id", data=panel_data, cluster=["firm_id"])
-    np.testing.assert_allclose(panel_result.coefficients, ols_result.coefficients, rtol=1e-6)
+    np.testing.assert_allclose(panel_result.coefficients, ols_result.coefficients, rtol=1e-10)
+    np.testing.assert_allclose(panel_result.se, ols_result.se, rtol=1e-10)
 
 
 def test_panel_fe_entity_only(panel_data):
@@ -341,3 +344,63 @@ def test_panel_fd_iid_vcov():
     result = panel_fd("y ~ x1", data=df, entity="entity", time="time", vcov="iid", cluster=[])
     assert result.vcov_type == "iid"
     assert np.all(result.se > 0)
+
+
+# ── _inject_fe helper tests ───────────────────────────────────────
+
+
+def test_inject_fe_entity_only():
+    """_inject_fe with entity only."""
+    assert _inject_fe("y ~ x1 + x2", "firm") == "y ~ x1 + x2 | firm"
+
+
+def test_inject_fe_entity_and_time():
+    """_inject_fe with entity and time."""
+    assert _inject_fe("y ~ x1 + x2", "firm", "year") == "y ~ x1 + x2 | firm + year"
+
+
+def test_inject_fe_raises_if_fe_present():
+    """_inject_fe should raise if formula already has FE."""
+    with pytest.raises(ValueError, match="already contains fixed effects"):
+        _inject_fe("y ~ x1 | fe1", "firm")
+
+
+# ── panel_fe wrapper equivalence tests ────────────────────────────
+
+
+def test_panel_fe_wrapper_exact_match_iid(panel_data):
+    """panel_fe(cluster=[]) should be identical to ols() with FE and no cluster."""
+    panel_result = panel_fe(
+        "y ~ x1 + x2", data=panel_data, entity="firm_id", time="year_id", cluster=[]
+    )
+    ols_result = ols("y ~ x1 + x2 | firm_id + year_id", data=panel_data)
+    np.testing.assert_allclose(panel_result.coefficients, ols_result.coefficients, rtol=1e-10)
+    np.testing.assert_allclose(panel_result.se, ols_result.se, rtol=1e-10)
+    assert panel_result.model_type == "Panel FE"
+    assert ols_result.model_type == "OLS"
+
+
+def test_panel_fe_supports_hc_vcov(panel_data):
+    """panel_fe now supports HC0-HC3 (inherited from ols)."""
+    for hc in ("HC0", "HC1", "HC2", "HC3"):
+        result = panel_fe("y ~ x1 + x2", data=panel_data, entity="firm_id", cluster=[], vcov=hc)
+        assert result.vcov_type == hc
+        assert result.model_type == "Panel FE"
+        assert np.all(result.se > 0)
+
+
+def test_panel_fe_hausman_cluster_empty_list(panel_data):
+    """cluster=[] should produce iid SEs for Hausman test compatibility."""
+    from polars_reg._diagnostics import hausman_test
+
+    r_fe = panel_fe(
+        "y ~ x1 + x2",
+        data=panel_data,
+        entity="firm_id",
+        time="year_id",
+        cluster=[],
+    )
+    r_re = panel_re("y ~ x1 + x2", data=panel_data, entity="firm_id")
+    result = hausman_test(r_fe, r_re)
+    assert result["statistic"] >= 0
+    assert result["df"] == 2
