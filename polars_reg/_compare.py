@@ -637,11 +637,11 @@ def _run_r(
 
     from polars_reg.r_equiv import to_r
 
-    # Generate R code string for the report
+    # Generate R code string for the report (to_r may not support all estimators)
     try:
         code = to_r(estimator, formula, vcov=vcov, cluster=cluster, entity=entity, time=time)
     except (ValueError, NotImplementedError):
-        return None
+        code = f"# R script generated internally for {estimator}"
 
     # Write data to CSV, generate R script, run it
     try:
