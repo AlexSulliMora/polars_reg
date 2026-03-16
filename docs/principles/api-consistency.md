@@ -42,6 +42,11 @@ Canonical parameter names and their types:
 | `fweights` | `str \| None`                  | Column name for frequency weights                  |
 | `n_boot`   | `int`                          | Number of bootstrap replications                   |
 | `seed`     | `int \| None`                  | RNG seed for reproducibility                       |
+| `window`      | `int \| None`                  | Rolling window size (number of periods or observations) |
+| `stride`      | `int`                          | Step size between consecutive windows                   |
+| `shanken`     | `bool`                         | Apply Shanken (1992) errors-in-variables correction     |
+| `window_type` | `str`                          | "periods" or "obs" -- how window size is measured        |
+| `store_residuals` | `bool`                     | Whether to keep per-window residuals in memory          |
 
 **Never use:** `df`, `fml`, `cl`, `se_type`, `B`, `panel_id`.
 
@@ -143,6 +148,7 @@ Current values assigned to `RegressionResult.model_type`:
 | `"Logit"`          | `logit()`      |                              |
 | `"Quantile(τ)"`    | `quantreg()`   | Parameterized (e.g., `"Quantile(0.50)"`) |
 | `"PPML"`           | `ppml()`       |                              |
+| `"Fama-MacBeth"`   | `fama_macbeth()` |                              |
 
 **Naming convention:** all-caps for acronyms (`"OLS"`, `"2SLS"`, `"PPML"`), title-case for descriptive names (`"Panel FE"`, `"Arellano-Bond"`), title-case for proper nouns (`"Probit"`, `"Logit"`).
 
@@ -187,6 +193,10 @@ Any estimator that meets these four conditions works automatically with `group_b
 4. Populates the standard fields: `names`, `coefficients`, `vcov`, `n_obs`, `r_squared`, `model_type`
 
 `regtable()` renders from: `params`, `se`, `pvalues`, `nobs`, `r_squared`, `model_type`.
+
+`rolling_reg()` follows the same pattern but with `time` as an additional required parameter.
+
+`fama_macbeth()` returns `FamaMacBethResult` (not `RegressionResult`), but provides duck-typing properties (`.coefficients`, `.se`, `.tstat`, `.pvalue`, `.n_obs`, `.r_squared`) for `regtable()` compatibility.
 
 ## Output Formatting
 

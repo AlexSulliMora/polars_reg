@@ -16,6 +16,8 @@ Estimators live in `_<name>.py`, one estimator family per module. A "family" gro
 | `_binary.py`        | `probit()`, `logit()`, `marginal_effects()`, `odds_ratios()` |
 | `_ppml.py`          | `ppml()`                                         |
 | `_quantile.py`      | `quantreg()`                                     |
+| `_rolling.py`       | `rolling_reg()`                                   |
+| `_fama_macbeth.py`  | `fama_macbeth()`                                  |
 
 **Singleton modules are valid** when an estimator has a distinct mathematical framework (e.g., PPML is IRLS-based Poisson pseudo-likelihood, quantile regression is IRLS + bootstrap).
 
@@ -110,6 +112,8 @@ This principle exists because of a real incident: the Rust OLS path once returne
 | `test_diagnostics.py`    | `_diagnostics.py`              |
 | `test_stata_parity.py`   | Stata parity (requires Stata)  |
 | `test_r_equiv.py`        | R equivalence (requires R)     |
+| `test_rolling.py`        | `_rolling.py`                  |
+| `test_fama_macbeth.py`   | `_fama_macbeth.py`             |
 
 **Cross-cutting tests** use descriptive names: `test_bootstrap.py`, `test_hac.py`, `test_pandas_compat.py`.
 
