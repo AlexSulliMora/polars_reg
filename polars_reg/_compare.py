@@ -55,7 +55,7 @@ class ComparisonReport:
 
     def summary(self) -> GT:
         """Formatted side-by-side comparison table as a GT object."""
-        backend_names = ["polars_reg"] + list(self.backends.keys())
+        backend_names = ["polars_reg"] + [br.name for br in self.backends.values()]
 
         rows: list[dict[str, str]] = []
 
