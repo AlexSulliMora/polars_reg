@@ -1,4 +1,8 @@
-"""Quantile regression via iteratively reweighted least squares (IRLS)."""
+"""Quantile regression via iteratively reweighted least squares (IRLS).
+
+Reference: Koenker, R. and G. Bassett (1978), "Regression Quantiles",
+Econometrica, 46(1), 33-50.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +15,10 @@ from polars_reg._utils import ensure_polars, extract_arrays
 
 
 def _check_function(u: np.ndarray, tau: float) -> float:
-    """Quantile regression check function: rho_tau(u) = u*(tau - I(u<0))."""
+    """Quantile regression check function: rho_tau(u) = u*(tau - I(u<0)).
+
+    Koenker & Bassett (1978), eq. 1.
+    """
     return float(np.sum(u * (tau - (u < 0).astype(float))))
 
 
@@ -42,7 +49,7 @@ def _irls_quantreg(
         resid = y - X @ beta
         # Weights for IRLS
         abs_resid = np.maximum(np.abs(resid), eps)
-        # Asymmetric weights for quantile tau
+        # Asymmetric weights for quantile tau (Koenker & Bassett 1978)
         w = np.where(resid >= 0, tau, 1 - tau) / abs_resid
 
         # Weighted least squares step

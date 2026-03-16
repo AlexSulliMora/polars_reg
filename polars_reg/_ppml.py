@@ -100,7 +100,8 @@ def ppml(
         # in the Hessian X'diag(mu)X and deviance computation
         mu = np.clip(mu, 1e-10, 1e10)
 
-        # Newton-Raphson step
+        # Newton-Raphson step (Santos Silva & Tenreyro 2006, §2)
+        # Score: X'(y - mu), Hessian: -X'diag(mu)X
         score_resid = y - mu  # n-vector of (y_i - mu_i)
         score = X.T @ score_resid
         hessian = -X.T @ (X * mu[:, None])

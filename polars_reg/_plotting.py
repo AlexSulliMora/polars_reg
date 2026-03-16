@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import ModuleType
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -13,7 +14,7 @@ if TYPE_CHECKING:
     from polars_reg._results import RegressionResult
 
 
-def _ensure_altair():
+def _ensure_altair() -> ModuleType:
     """Lazy-import altair; raise a helpful error if not installed."""
     try:
         import altair as alt

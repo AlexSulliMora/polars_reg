@@ -165,6 +165,8 @@ Author-year references for the most numerically consequential formulas. Exact eq
 | System GMM                  | Blundell & Bond (1998)                  |
 | Swamy-Arora GLS             | Swamy & Arora (1972)                    |
 | PPML                        | Santos Silva & Tenreyro (2006)          |
+| Quantile regression         | Koenker & Bassett (1978)                |
+| Panel FE/FD                 | Wooldridge (2010)                       |
 
 ## Bibliography
 
@@ -180,8 +182,10 @@ Full citations for all referenced texts, alphabetically by first author.
 - Gibbons, M.R., S.A. Ross, and J. Shanken. "A Test of the Efficiency of a Given Portfolio." *Econometrica*, 57(5), 1121-1152, 1989.
 - Greene, W.H. *Econometric Analysis.* 8th ed., Pearson, 2018.
 - Hansen, L.P. "Large Sample Properties of Generalized Method of Moments Estimators." *Econometrica*, 50(4), 1029-1054, 1982.
+- Koenker, R. and G. Bassett. "Regression Quantiles." *Econometrica*, 46(1), 33-50, 1978.
 - Kamstra, M.J. and R. Shi. "A Note on the GRS Test." Working paper, 2021.
 - Newey, W.K. and K.D. West. "A Simple, Positive Semi-Definite, Heteroskedasticity and Autocorrelation Consistent Covariance Matrix." *Econometrica*, 55(3), 703-708, 1987.
 - Santos Silva, J.M.C. and S. Tenreyro. "The Log of Gravity." *Review of Economics and Statistics*, 88(4), 641-658, 2006.
 - Stock, J.H. and M. Yogo. "Testing for Weak Instruments in Linear IV Regression." In *Identification and Inference for Econometric Models*, ed. D.W.K. Andrews and J.H. Stock, Cambridge University Press, 2005.
 - Swamy, P.A.V.B. and S.S. Arora. "The Exact Finite Sample Properties of the Estimators of Coefficients in the Error Components Regression Models." *Econometrica*, 40(2), 261-275, 1972.
+- Wooldridge, J.M. *Econometric Analysis of Cross Section and Panel Data.* 2nd ed., MIT Press, 2010.
