@@ -12,6 +12,7 @@ from polars_reg._diagnostics import (
     kleibergen_paap_test,
     weak_instrument_test,
 )
+from polars_reg._fama_macbeth import FamaMacBethResult, fama_macbeth
 from polars_reg._gmm import gmm_iv, liml
 from polars_reg._group_by import GroupRegressionResult, group_by_reg
 from polars_reg._iv import iv2sls
@@ -57,6 +58,8 @@ __all__ = [
     "panel_sys_gmm",
     "quantreg",
     "ppml",
+    "fama_macbeth",
+    "FamaMacBethResult",
     "coefplot",
     "avplot",
     "SSC",
