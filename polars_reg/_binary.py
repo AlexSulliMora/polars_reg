@@ -7,9 +7,11 @@ Microeconometrics: Methods and Applications, ch. 14.
 from __future__ import annotations
 
 import warnings
+from typing import Callable
 
 import numpy as np
 import polars as pl
+from numpy.typing import NDArray
 from scipy import stats
 
 from polars_reg._formula import parse_formula
@@ -18,7 +20,9 @@ from polars_reg._se import _clustered_meat, _mle_multiway_clustered
 from polars_reg._utils import ensure_polars, extract_arrays, validate_vcov
 
 
-def _probit_ll_score_hess(beta, X, y):
+def _probit_ll_score_hess(
+    beta: NDArray, X: NDArray, y: NDArray
+) -> tuple[float, NDArray, NDArray, NDArray, NDArray]:
     """Probit log-likelihood, score, and Hessian."""
     xb = X @ beta
     Phi = stats.norm.cdf(xb)
@@ -41,7 +45,9 @@ def _probit_ll_score_hess(beta, X, y):
     return ll, score, H, Phi, lam
 
 
-def _logit_ll_score_hess(beta, X, y):
+def _logit_ll_score_hess(
+    beta: NDArray, X: NDArray, y: NDArray
+) -> tuple[float, NDArray, NDArray, NDArray, NDArray]:
     """Logit log-likelihood, score, and Hessian."""
     xb = X @ beta
     # Numerically stable sigmoid, clipped to (1e-15, 1-1e-15) to
@@ -62,7 +68,14 @@ def _logit_ll_score_hess(beta, X, y):
     return ll, score, H, Lambda, resid
 
 
-def _newton_raphson(ll_func, beta0, X, y, max_iter=100, tol=1e-8):
+def _newton_raphson(
+    ll_func: Callable[..., tuple[float, NDArray, NDArray, NDArray, NDArray]],
+    beta0: NDArray,
+    X: NDArray,
+    y: NDArray,
+    max_iter: int = 100,
+    tol: float = 1e-8,
+) -> tuple[NDArray, float, NDArray, NDArray, NDArray, NDArray]:
     """Newton-Raphson optimization for MLE.
 
     Convergence: max absolute Newton step < tol (default 1e-8).

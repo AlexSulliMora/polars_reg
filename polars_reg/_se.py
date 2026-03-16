@@ -384,7 +384,14 @@ def vcov_wild_bootstrap(
     return np.atleast_2d(V)
 
 
-def _mle_multiway_clustered(X, score_resid, cluster_list, H_inv, n, k):
+def _mle_multiway_clustered(
+    X: NDArray,
+    score_resid: NDArray,
+    cluster_list: list[NDArray],
+    H_inv: NDArray,
+    n: int,
+    k: int,
+) -> NDArray:
     """Multi-way clustered VCV for MLE models (CGM inclusion-exclusion)."""
     D = len(cluster_list)
     V = np.zeros((k, k))

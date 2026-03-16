@@ -44,7 +44,7 @@ All internal modules are prefixed with `_` (`_ols.py`, `_se.py`, `_utils.py`). U
 
 All public functions accept `pl.DataFrame | pl.LazyFrame` only. No pandas auto-conversion. Users with pandas DataFrames call `pl.from_pandas()` themselves. This is a Polars-native package -- pushing conversion to the caller simplifies every estimator's entry point.
 
-**Current state:** `ensure_polars()` is still called in most estimators. Target: remove these calls (separate refactor task).
+**Current state:** `ensure_polars()` validates that input is `pl.DataFrame | pl.LazyFrame` and raises `TypeError` with a helpful message if not. It is called in estimator entry points intentionally — the validation is cheap and catches a common mistake early.
 
 ### Single Data Cleaning Step
 
@@ -57,7 +57,7 @@ All public functions accept `pl.DataFrame | pl.LazyFrame` only. No pandas auto-c
 
 After `extract_arrays()`, row count is fixed and all values are finite. No downstream code should independently sanitize data.
 
-**Current state:** inf sanitization is scattered across `_ols.py` and `_iv.py` only. Target: consolidate into `extract_arrays()` (separate refactor task).
+**Current state:** `extract_arrays()` handles inf/NaN sanitization for all estimators that use it. The Rust fast-paths in `_ols.py` and `_iv.py` call `sanitize_inf()` independently because they bypass `extract_arrays()` for performance. This is an accepted exception — the Rust paths need pre-cleaned data before passing to native code.
 
 **Why this matters:** the seam between data cleaning steps (singleton drop, code reindexing, NaN-to-null conversion) was the source of the project's most critical bug cluster. See `docs/solutions/runtime-errors/fe-singleton-contiguity-and-edge-case-guards.md`.
 
@@ -94,7 +94,7 @@ Formula → parse_formula() → custom array extraction
 
 This principle exists because of a real incident: the Rust OLS path once returned zeros for fitted values while the Python path worked correctly (C6 in comprehensive code review). Dual paths create dual maintenance burden and dual failure modes.
 
-**Current state:** five modules have `try/except ImportError` with `_HAS_NATIVE` flags and Python fallbacks. `_to_codes_fast()` is duplicated in `_ols.py:76` and `_iv.py:27` with subtly different error handling. Target: remove all Python fallback paths (separate refactor task).
+**Status:** All Python fallback paths removed. Every module imports directly from `polars_reg._native` with no `try/except` guards.
 
 **Adding new Rust functions:** justify with benchmarks showing meaningful speedup on representative workloads. Functions called inside iterative convergence loops (e.g., demeaning) have their effective speedup multiplied by iteration count, so even modest per-call improvements are worthwhile.
 
@@ -110,7 +110,6 @@ This principle exists because of a real incident: the Rust OLS path once returne
 | `test_diagnostics.py`    | `_diagnostics.py`              |
 | `test_stata_parity.py`   | Stata parity (requires Stata)  |
 | `test_r_equiv.py`        | R equivalence (requires R)     |
-| `test_dual_path.py`      | Rust vs Python parity          |
 
 **Cross-cutting tests** use descriptive names: `test_bootstrap.py`, `test_hac.py`, `test_pandas_compat.py`.
 

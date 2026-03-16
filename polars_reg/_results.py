@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import numpy as np
 import polars as pl
@@ -360,13 +360,13 @@ class RegressionResult:
             "chi2": chi2_stat,
         }
 
-    def coefplot(self, **kwargs):
+    def coefplot(self, **kwargs: Any) -> Any:
         """Coefficient plot with CI whiskers (Altair). See :func:`polars_reg._plotting.coefplot`."""
         from polars_reg._plotting import coefplot
 
         return coefplot(self, **kwargs)
 
-    def avplot(self, **kwargs):
+    def avplot(self, **kwargs: Any) -> Any:
         """Added-variable plot (Altair). See :func:`polars_reg._plotting.avplot`."""
         from polars_reg._plotting import avplot
 

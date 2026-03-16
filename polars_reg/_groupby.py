@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import warnings
 from collections import OrderedDict
+from collections.abc import ItemsView, Iterator, KeysView, ValuesView
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -34,16 +35,16 @@ class GroupRegressionResult:
     def __len__(self) -> int:
         return len(self.results)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Any]:
         return iter(self.results)
 
-    def keys(self):
+    def keys(self) -> KeysView[Any]:
         return self.results.keys()
 
-    def values(self):
+    def values(self) -> ValuesView[RegressionResult]:
         return self.results.values()
 
-    def items(self):
+    def items(self) -> ItemsView[Any, RegressionResult]:
         return self.results.items()
 
     def coef_table(self) -> pl.DataFrame:
@@ -57,6 +58,51 @@ class GroupRegressionResult:
         if not tables:
             return pl.DataFrame()
         return pl.concat(tables).select(["group"] + [c for c in tables[0].columns if c != "group"])
+
+    def predict(
+        self,
+        newdata: pl.DataFrame | pl.LazyFrame,
+        group_by: str | list[str],
+    ) -> pl.DataFrame:
+        """Predict from each group's model and return combined results.
+
+        Args:
+            newdata: Data to predict on. Must contain the group column(s)
+                and all regressor columns.
+            group_by: Column name(s) identifying which group each row
+                belongs to (same as used in groupby_reg).
+
+        Returns:
+            Polars DataFrame with the original data plus a 'predicted' column.
+            Rows belonging to groups that failed or weren't estimated get null.
+        """
+        newdata = ensure_polars(newdata)
+        if isinstance(newdata, pl.LazyFrame):
+            newdata = newdata.collect()
+
+        if isinstance(group_by, str):
+            group_by = [group_by]
+
+        preds = pl.Series("predicted", [None] * len(newdata), dtype=pl.Float64)
+
+        for group_keys, group_df in newdata.group_by(group_by, maintain_order=True):
+            key = group_keys[0] if len(group_keys) == 1 else group_keys
+            if key not in self.results:
+                continue
+
+            result = self.results[key]
+            group_preds = result.predict(group_df)
+
+            # Find the row indices for this group
+            mask = pl.lit(True)
+            for col, val in zip(group_by, group_keys):
+                mask = mask & (pl.col(col) == val)
+            indices = newdata.with_row_index("__idx__").filter(mask)["__idx__"].to_list()
+
+            for i, idx in enumerate(indices):
+                preds[idx] = float(group_preds[i])
+
+        return newdata.with_columns(preds)
 
     def summary(self) -> str:
         """Compact summary across all groups."""

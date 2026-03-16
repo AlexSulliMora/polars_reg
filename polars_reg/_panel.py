@@ -35,7 +35,8 @@ def panel_fe(
     """Panel fixed effects (within) estimator.
 
     Demeans by entity (and optionally time), then OLS on demeaned data.
-    Default clusters SEs by entity.
+    Default clusters SEs by entity. See Wooldridge (2010), Econometric
+    Analysis of Cross Section and Panel Data, ch. 10.
 
     Args:
         vcov: "iid", "NW", "DK", "bootstrap", or "wildboot".
@@ -396,7 +397,7 @@ def panel_fd(
     """Panel first-difference estimator.
 
     Takes first differences within entity groups (sorted by time),
-    then runs OLS on the differenced data.
+    then runs OLS on the differenced data. See Wooldridge (2010), ch. 10.2.
 
     Args:
         formula: Formula string, e.g. "y ~ x1 + x2"

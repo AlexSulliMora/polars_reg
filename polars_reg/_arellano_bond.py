@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 import polars as pl
+from numpy.typing import NDArray
 from scipy import stats
 
 from polars_reg._formula import parse_formula
@@ -442,7 +443,15 @@ def panel_sys_gmm(
     return result
 
 
-def _ar_test(resid, entity_codes, Z, W, ZtX, A_inv, order=1):
+def _ar_test(
+    resid: NDArray,
+    entity_codes: NDArray,
+    Z: NDArray,
+    W: NDArray,
+    ZtX: NDArray,
+    A_inv: NDArray,
+    order: int = 1,
+) -> tuple[float, float]:
     """Arellano-Bond test for serial correlation of order m in Δe.
 
     Under H0 of no serial correlation of order m in levels e_it,
