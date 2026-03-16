@@ -248,6 +248,36 @@ class TestFamaMacBethOutput:
         # Should have T_total rows (including NaN periods)
         assert len(ls) == 60
 
+    def test_fm_plot_lambdas(self) -> None:
+        """plot_lambdas() returns an Altair chart object."""
+        rng = np.random.default_rng(42)
+        df, _, _ = _simulate_factor_model(rng, n_assets=20, n_periods=60)
+
+        result = fama_macbeth(
+            "ret ~ f1 + f2 + f3",
+            data=df,
+            entity="entity",
+            time="time",
+        )
+
+        chart = result.plot_lambdas()
+        assert chart is not None
+
+    def test_fm_plot_lambdas_subset(self) -> None:
+        """plot_lambdas() with variables subset."""
+        rng = np.random.default_rng(42)
+        df, _, _ = _simulate_factor_model(rng, n_assets=20, n_periods=60)
+
+        result = fama_macbeth(
+            "ret ~ f1 + f2 + f3",
+            data=df,
+            entity="entity",
+            time="time",
+        )
+
+        chart = result.plot_lambdas(variables=["f1"])
+        assert chart is not None
+
 
 class TestFamaMacBethEdgeCases:
     """Tests for edge cases and robustness."""

@@ -240,6 +240,94 @@ class FamaMacBethResult:
             cols[f"{name}_lambda"] = self.lambdas[:, j]
         return pl.DataFrame(cols)
 
+    def plot_lambdas(
+        self,
+        variables: list[str] | None = None,
+        alpha: float = 0.05,
+    ) -> Any:
+        """Altair chart of per-period risk premia with confidence bands.
+
+        Plots the time series of cross-sectional lambda estimates with
+        mean +/- critical-value * SE bands, analogous to
+        ``RollingRegressionResult.plot_coefs()``.
+
+        Args:
+            variables: Subset of factor names to plot. If ``None``,
+                all factors (excluding ``_cons``) are plotted.
+            alpha: Significance level for confidence bands (default 0.05).
+
+        Returns:
+            An Altair ``LayerChart`` object.
+
+        Raises:
+            ImportError: If ``altair`` is not installed.
+        """
+        try:
+            import altair as alt
+        except ImportError:
+            raise ImportError(
+                "altair is required for plot_lambdas(). Install it with: pip install altair"
+            )
+
+        from scipy import stats as scipy_stats
+
+        z = scipy_stats.norm.ppf(1 - alpha / 2)
+
+        rows = []
+        for t in range(self.lambdas.shape[0]):
+            for j, name in enumerate(self.names):
+                val = self.lambdas[t, j]
+                se_j = self.fm_se[j]
+                rows.append(
+                    {
+                        "time": t,
+                        "variable": name,
+                        "lambda": float(val),
+                        "ci_lower": float(self.mean_lambda[j] - z * se_j),
+                        "ci_upper": float(self.mean_lambda[j] + z * se_j),
+                        "mean": float(self.mean_lambda[j]),
+                    }
+                )
+
+        df = pl.DataFrame(rows)
+
+        if variables is None:
+            # Exclude _cons by default
+            variables = [n for n in self.names if n != "_cons"]
+        df = df.filter(pl.col("variable").is_in(variables))
+
+        df_pd = df.to_pandas()
+
+        scatter = (
+            alt.Chart(df_pd)
+            .mark_point(opacity=0.3, size=10)
+            .encode(
+                x=alt.X("time:Q", title="Period"),
+                y=alt.Y("lambda:Q", title="Risk Premium (λ)"),
+                color="variable:N",
+            )
+        )
+        mean_line = (
+            alt.Chart(df_pd)
+            .mark_rule(strokeDash=[4, 4])
+            .encode(
+                y="mean:Q",
+                color="variable:N",
+            )
+        )
+        band = (
+            alt.Chart(df_pd)
+            .mark_area(opacity=0.15)
+            .encode(
+                x="time:Q",
+                y="ci_lower:Q",
+                y2="ci_upper:Q",
+                color="variable:N",
+            )
+        )
+
+        return band + scatter + mean_line
+
     def __repr__(self) -> str:
         return (
             f"<FamaMacBethResult N={self.n_assets} T={self.n_periods} "
