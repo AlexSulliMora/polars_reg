@@ -9,7 +9,7 @@ Usage:
 
 Requires:
     - Rscript on PATH
-    - R packages: fixest, sandwich, lmtest, AER, plm
+    - R packages: fixest, sandwich, lmtest, AER, plm, quantreg
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from polars_reg._formula import parse_formula
 _R_AVAILABLE: bool | None = None
 _R_PACKAGES: set[str] | None = None
 
-_REQUIRED_PACKAGES = {"fixest", "sandwich", "lmtest", "AER", "plm"}
+_REQUIRED_PACKAGES = {"fixest", "sandwich", "lmtest", "AER", "plm", "quantreg"}
 
 
 def _check_r_packages() -> set[str]:
@@ -187,6 +187,7 @@ def to_r_script(
     cluster: list[str] | str | None = None,
     entity: str | None = None,
     time: str | None = None,
+    tau: float = 0.5,
 ) -> str:
     """Build a complete R script that reads CSV data, runs regression, writes results CSV."""
     if isinstance(cluster, str):
@@ -199,6 +200,9 @@ def to_r_script(
         f'df <- read.csv("{csv_path}")',
         "",
     ]
+
+    # Track model type for result extraction
+    model_type = "lm"  # default
 
     if estimator == "ols":
         lines += _ols_r_script(spec, formula, vcov, cluster)
@@ -215,6 +219,18 @@ def to_r_script(
         lines += _panel_r_script(spec, formula, "random", entity, time, cluster)
     elif estimator == "panel_fd":
         lines += _panel_r_script(spec, formula, "fd", entity, time, cluster)
+    elif estimator == "probit":
+        lines += _probit_r_script(spec, formula, vcov, cluster)
+        model_type = "glm"
+    elif estimator == "logit":
+        lines += _logit_r_script(spec, formula, vcov, cluster)
+        model_type = "glm"
+    elif estimator == "ppml":
+        lines += _ppml_r_script(spec, formula, vcov, cluster)
+        model_type = "glm"
+    elif estimator == "quantreg":
+        lines += _quantreg_r_script(spec, formula, tau)
+        model_type = "rq"
     else:
         raise ValueError(f"Unknown estimator: {estimator}")
 
@@ -231,14 +247,37 @@ def to_r_script(
         '  writeLines(paste0(nms[i], ",", format(b[i], digits=15),'
         ' ",", format(s[i], digits=15)), fh)',
         "}",
-        'writeLines(paste0("___N___,", nobs(model), ",0"), fh)',
-        "tryCatch({",
-        "  r2 <- summary(model)$r.squared",
-        "  if (is.null(r2)) r2 <- summary(model)$r.sq",
-        '  if (!is.null(r2)) writeLines(paste0("___r2___,", format(r2, digits=15), ",0"), fh)',
-        "}, error=function(e) {})",
-        "close(fh)",
     ]
+
+    # N extraction: nobs() doesn't work for rq objects
+    if model_type == "rq":
+        lines.append('writeLines(paste0("___N___,", length(model$residuals), ",0"), fh)')
+    else:
+        lines.append('writeLines(paste0("___N___,", nobs(model), ",0"), fh)')
+
+    # R-squared extraction depends on model type
+    if model_type == "glm":
+        # Pseudo R-squared for GLM: 1 - deviance/null.deviance
+        lines += [
+            "tryCatch({",
+            "  r2 <- 1 - model$deviance / model$null.deviance",
+            "  if (!is.null(r2) && !is.nan(r2))"
+            '    writeLines(paste0("___r2___,", format(r2, digits=15), ",0"), fh)',
+            "}, error=function(e) {})",
+        ]
+    elif model_type == "rq":
+        # No standard R-squared for quantile regression; skip
+        pass
+    else:
+        lines += [
+            "tryCatch({",
+            "  r2 <- summary(model)$r.squared",
+            "  if (is.null(r2)) r2 <- summary(model)$r.sq",
+            '  if (!is.null(r2)) writeLines(paste0("___r2___,", format(r2, digits=15), ",0"), fh)',
+            "}, error=function(e) {})",
+        ]
+
+    lines.append("close(fh)")
 
     return "\n".join(lines)
 
@@ -330,6 +369,60 @@ def _panel_r_script(
     else:
         lines.append("vcov_mat <- vcov(model)")
 
+    return lines
+
+
+def _probit_r_script(spec: Any, formula: str, vcov: str, cluster: list[str] | None) -> list[str]:
+    """Generate R script lines for probit regression."""
+    r_formula = _build_lm_formula(spec)
+    lines = [f'model <- glm({r_formula}, data=df, family=binomial(link="probit"))']
+    lines += _glm_vcov_lines(vcov, cluster)
+    return lines
+
+
+def _logit_r_script(spec: Any, formula: str, vcov: str, cluster: list[str] | None) -> list[str]:
+    """Generate R script lines for logit regression."""
+    r_formula = _build_lm_formula(spec)
+    lines = [f'model <- glm({r_formula}, data=df, family=binomial(link="logit"))']
+    lines += _glm_vcov_lines(vcov, cluster)
+    return lines
+
+
+def _ppml_r_script(spec: Any, formula: str, vcov: str, cluster: list[str] | None) -> list[str]:
+    """Generate R script lines for PPML (Poisson) regression."""
+    r_formula = _build_lm_formula(spec)
+    lines = [f"model <- glm({r_formula}, data=df, family=poisson())"]
+    lines += _glm_vcov_lines(vcov, cluster)
+    return lines
+
+
+def _glm_vcov_lines(vcov: str, cluster: list[str] | None) -> list[str]:
+    """Generate vcov extraction lines for glm() models."""
+    if cluster:
+        lines = ["library(sandwich)"]
+        if len(cluster) == 1:
+            lines.append(f"vcov_mat <- vcovCL(model, cluster=df${cluster[0]})")
+        else:
+            cluster_formula = "~" + " + ".join(f"df${c}" for c in cluster)
+            lines.append(f"vcov_mat <- vcovCL(model, cluster={cluster_formula})")
+        return lines
+    elif vcov in ("HC0", "HC1", "HC2", "HC3"):
+        return [
+            "library(sandwich)",
+            f'vcov_mat <- vcovHC(model, type="{vcov}")',
+        ]
+    else:
+        return ["vcov_mat <- vcov(model)"]
+
+
+def _quantreg_r_script(spec: Any, formula: str, tau: float) -> list[str]:
+    """Generate R script lines for quantile regression."""
+    r_formula = _build_lm_formula(spec)
+    lines = [
+        "library(quantreg)",
+        f"model <- rq({r_formula}, data=df, tau={tau})",
+        'vcov_mat <- summary(model, se="boot")$cov',
+    ]
     return lines
 
 
@@ -566,18 +659,21 @@ def assert_r_parity(
     cluster: list[str] | str | None = None,
     entity: str | None = None,
     time: str | None = None,
+    tau: float = 0.5,
     rtol: float = 1e-6,
 ) -> RComparisonResult:
     """Run a regression in both polars_reg and R, assert results match.
 
     Args:
-        estimator: One of "ols", "iv2sls", "liml", "gmm_iv", "panel_fe", "panel_re", "panel_fd"
+        estimator: One of "ols", "iv2sls", "liml", "gmm_iv", "panel_fe", "panel_re",
+            "panel_fd", "probit", "logit", "ppml", "quantreg"
         formula: polars_reg formula string
         data: Polars DataFrame (will be saved as CSV for R)
         vcov: Variance-covariance type
         cluster: Clustering variable(s)
         entity: Panel entity column
         time: Panel time column
+        tau: Quantile for quantile regression (default 0.5)
         rtol: Relative tolerance for comparisons (default 1e-6)
 
     Returns:
@@ -600,6 +696,10 @@ def assert_r_parity(
         "panel_fe": pr.panel_fe,
         "panel_re": pr.panel_re,
         "panel_fd": pr.panel_fd,
+        "probit": pr.probit,
+        "logit": pr.logit,
+        "ppml": pr.ppml,
+        "quantreg": pr.quantreg,
     }
 
     func = estimator_funcs[estimator]
@@ -612,6 +712,8 @@ def assert_r_parity(
         kwargs["entity"] = entity
     if time:
         kwargs["time"] = time
+    if estimator == "quantreg":
+        kwargs["tau"] = tau
     polars_result = func(**kwargs)
 
     # 2. Save data as CSV for R
@@ -632,6 +734,7 @@ def assert_r_parity(
             cluster=cluster,
             entity=entity,
             time=time,
+            tau=tau,
         )
 
         # 4. Run R

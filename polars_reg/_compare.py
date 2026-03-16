@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 import polars as pl
+from great_tables import GT, loc, style
 from numpy.typing import NDArray
 
 # ── Result dataclasses ────────────────────────────────────────────
@@ -38,102 +40,119 @@ class ComparisonReport:
     polars_se: NDArray
     polars_names: list[str]
     polars_n_obs: int
-    polars_r_squared: float
+    polars_r_squared: float | None
     backends: dict[str, BackendResult] = field(default_factory=dict)
     skipped: dict[str, str] = field(default_factory=dict)
     rtol: float = 1e-6
 
-    def summary(self) -> str:
-        """Formatted side-by-side comparison table."""
-        lines: list[str] = []
-        lines.append(f'compare("{self.estimator}", "{self.formula}")')
-        lines.append("")
-
-        # Column headers
+    def summary(self) -> GT:
+        """Formatted side-by-side comparison table as a GT object."""
         backend_names = ["polars_reg"] + list(self.backends.keys())
-        col_w = max(14, max(len(n) for n in backend_names) + 2)
-        name_w = max(14, max((len(n) for n in self.polars_names), default=4) + 2)
-        total_w = name_w + len(backend_names) * (col_w + 1)
-        sep = "=" * total_w
 
-        lines.append(sep)
-        hdr = f"{'':>{name_w}}"
-        for bn in backend_names:
-            hdr += f" {bn:>{col_w}}"
-        lines.append(hdr)
-        lines.append("-" * total_w)
+        rows: list[dict[str, str]] = []
 
-        # Coefficient rows
+        # Coefficient + SE rows
         for i, var in enumerate(self.polars_names):
             # Coef row
-            row = f"{var:<{name_w}}"
-            row += f" {self.polars_coefs[i]:>{col_w}.6g}"
+            row: dict[str, str] = {"var": var}
+            row["polars_reg"] = f"{self.polars_coefs[i]:.6g}"
             for br in self.backends.values():
                 idx = _find_name(br.names, var)
                 if idx is not None:
-                    row += f" {br.coefs[idx]:>{col_w}.6g}"
+                    row[br.name] = f"{br.coefs[idx]:.6g}"
                 else:
-                    row += f" {'':>{col_w}}"
-            lines.append(row)
+                    row[br.name] = ""
+            rows.append(row)
 
             # SE row
-            row = f"{'':>{name_w}}"
-            row += f" {'(' + f'{self.polars_se[i]:.6g}' + ')':>{col_w}}"
+            row = {"var": ""}
+            row["polars_reg"] = f"({self.polars_se[i]:.6g})"
             for br in self.backends.values():
                 idx = _find_name(br.names, var)
                 if idx is not None:
-                    row += f" {'(' + f'{br.se[idx]:.6g}' + ')':>{col_w}}"
+                    row[br.name] = f"({br.se[idx]:.6g})"
                 else:
-                    row += f" {'':>{col_w}}"
-            lines.append(row)
-
-        lines.append("-" * total_w)
+                    row[br.name] = ""
+            rows.append(row)
 
         # Summary stats
-        row = f"{'N':<{name_w}}"
-        row += f" {self.polars_n_obs:>{col_w}}"
+        n_row_idx = len(rows)
+        row = {"var": "N"}
+        row["polars_reg"] = str(self.polars_n_obs)
         for br in self.backends.values():
-            row += f" {br.n_obs:>{col_w}}"
-        lines.append(row)
+            row[br.name] = str(br.n_obs)
+        rows.append(row)
 
-        row = f"{'R²':<{name_w}}"
-        row += f" {self.polars_r_squared:>{col_w}.4f}"
+        row = {"var": "R\u00b2"}
+        row["polars_reg"] = (
+            f"{self.polars_r_squared:.4f}" if self.polars_r_squared is not None else ""
+        )
         for br in self.backends.values():
-            r2_str = f"{br.r_squared:.4f}" if br.r_squared is not None else ""
-            row += f" {r2_str:>{col_w}}"
-        lines.append(row)
-
-        lines.append("-" * total_w)
+            row[br.name] = f"{br.r_squared:.4f}" if br.r_squared is not None else ""
+        rows.append(row)
 
         # Diff summary
-        row = f"{'Max |Δcoef|':<{name_w}}"
-        row += f" {'':>{col_w}}"
+        diff_row_idx = len(rows)
+        row = {"var": "Max |\u0394coef|"}
+        row["polars_reg"] = ""
         for br in self.backends.values():
-            row += f" {br.max_coef_rdiff:>{col_w}.2e}"
-        lines.append(row)
+            row[br.name] = f"{br.max_coef_rdiff:.2e}"
+        rows.append(row)
 
-        row = f"{'Max |Δse|':<{name_w}}"
-        row += f" {'':>{col_w}}"
+        row = {"var": "Max |\u0394se|"}
+        row["polars_reg"] = ""
         for br in self.backends.values():
-            row += f" {br.max_se_rdiff:>{col_w}.2e}"
-        lines.append(row)
+            row[br.name] = f"{br.max_se_rdiff:.2e}"
+        rows.append(row)
 
         match_label = f"Match (rtol={self.rtol:.0e})"
-        row = f"{match_label:<{name_w}}"
-        row += f" {'':>{col_w}}"
+        row = {"var": match_label}
+        row["polars_reg"] = ""
         for br in self.backends.values():
-            symbol = "✓" if br.match else "✗"
-            row += f" {symbol:>{col_w}}"
-        lines.append(row)
+            row[br.name] = "\u2713" if br.match else "\u2717"
+        rows.append(row)
 
-        lines.append(sep)
+        # Build DataFrame
+        data_cols = backend_names
+        schema = {"var": pl.Utf8} | {col: pl.Utf8 for col in data_cols}
+        df = pl.DataFrame(rows, schema=schema)
 
-        # Skipped
+        # Build GT
+        gt = GT(df)
+        gt = gt.cols_label(var="")
+        gt = gt.cols_align(align="left", columns="var")
+        gt = gt.cols_align(align="center", columns=data_cols)
+
+        gt = gt.tab_header(
+            title=f'compare("{self.estimator}", "{self.formula}")',
+        )
+
+        # Source note for skipped backends
         if self.skipped:
             skipped_str = ", ".join(f"{k} ({v})" for k, v in self.skipped.items())
-            lines.append(f"Skipped: {skipped_str}")
+            gt = gt.tab_source_note(source_note=f"Skipped: {skipped_str}")
 
-        return "\n".join(lines)
+        # Styling
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="Styles are not yet supported")
+
+            # Border before N row
+            gt = gt.tab_style(
+                style.borders(sides="top", weight="1px", color="#D3D3D3"),
+                loc.body(rows=[n_row_idx]),
+            )
+            # Border before diff rows
+            gt = gt.tab_style(
+                style.borders(sides="top", weight="1px", color="#D3D3D3"),
+                loc.body(rows=[diff_row_idx]),
+            )
+
+        gt = gt.tab_options(
+            table_body_hlines_style="none",
+            column_labels_border_bottom_width="2px",
+        )
+
+        return gt
 
     def __repr__(self) -> str:
         n_match = sum(1 for br in self.backends.values() if br.match)
@@ -240,7 +259,7 @@ def _get_estimator_map() -> dict[str, Any]:
 
 def _run_polars_reg(
     estimator: str, formula: str, data: pl.DataFrame, **kwargs: Any
-) -> tuple[NDArray, NDArray, list[str], int, float]:
+) -> tuple[NDArray, NDArray, list[str], int, float | None]:
     """Run a polars_reg estimator and extract results."""
     emap = _get_estimator_map()
     if estimator not in emap:
@@ -341,7 +360,13 @@ def _run_pyfixest(
         se = np.array(model.se())
         names = list(model.coef().index)
         n_obs = int(model._N)
-        r2 = float(model._r2) if hasattr(model, "_r2") else None
+        # _r2 exists on all pyfixest models but is nan for GLM/fepois/quantreg
+        r2: float | None = None
+        if hasattr(model, "_r2"):
+            import math
+
+            r2_val = float(model._r2)
+            r2 = None if math.isnan(r2_val) else r2_val
     except Exception:
         return None
 
@@ -424,7 +449,21 @@ def _run_statsmodels(
     coefs = np.array(result.params)
     se = np.array(result.bse)
     n_obs = int(result.nobs)
-    r2 = float(result.rsquared) if hasattr(result, "rsquared") else None
+    # R² extraction varies by statsmodels model type
+    r2: float | None = None
+    if hasattr(result, "rsquared"):
+        # OLS, WLS, QuantReg
+        r2 = float(result.rsquared)
+    elif hasattr(result, "prsquared"):
+        # Probit, Logit (McFadden's pseudo R²)
+        r2 = float(result.prsquared)
+    elif hasattr(result, "pseudo_rsquared"):
+        # GLM (e.g. Poisson/PPML)
+        r2 = float(result.pseudo_rsquared(kind="mcf"))
+    elif hasattr(result, "deviance") and hasattr(result, "null_deviance"):
+        # GLM fallback: 1 - deviance/null_deviance
+        if result.null_deviance > 0:
+            r2 = float(1.0 - result.deviance / result.null_deviance)
 
     return BackendResult(
         name="statsmodels",
@@ -543,7 +582,10 @@ def _run_linearmodels(
     se = np.array(result.std_errors)
     names = list(result.params.index)
     n_obs = int(result.nobs)
-    r2 = float(result.rsquared) if hasattr(result, "rsquared") else None
+    try:
+        r2 = float(result.rsquared) if hasattr(result, "rsquared") else None
+    except Exception:
+        r2 = None
 
     return BackendResult(
         name="linearmodels",

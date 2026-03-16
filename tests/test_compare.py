@@ -3,6 +3,7 @@
 import numpy as np
 import polars as pl
 import pytest
+from great_tables import GT
 
 from polars_reg import compare
 from polars_reg._compare import ComparisonReport
@@ -130,12 +131,14 @@ def test_compare_all_backends(ols_data):
 
 
 def test_compare_all_summary(ols_data):
-    """summary() produces readable output."""
+    """summary() returns a GT object with expected content."""
     report = compare("ols", "y ~ x1 + x2", ols_data, vcov="HC1")
-    s = report.summary()
-    assert "polars_reg" in s
-    assert "x1" in s
-    assert "N" in s
+    gt = report.summary()
+    assert isinstance(gt, GT)
+    html = gt.as_raw_html()
+    assert "polars_reg" in html
+    assert "x1" in html
+    assert ">N<" in html or "N" in html
 
 
 # ── Graceful skipping ─────────────────────────────────────────────

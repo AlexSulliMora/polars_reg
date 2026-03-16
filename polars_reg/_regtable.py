@@ -25,7 +25,6 @@ class _GTTableSpec:
     fe_start_row: int | None = None
     summary_start_row: int | None = None
     section_header_rows: list[int] = field(default_factory=list)
-    model_type_row: int | None = None
     spanners: list[tuple[str, list[str]]] = field(default_factory=list)
     footnote: str = ""
 
@@ -135,7 +134,6 @@ def _build_table_df_normal(
     precision: int,
     stars_flag: bool,
     stat_specs: list[StatSpec],
-    model_type: bool,
     rename: dict[str, str] | None,
 ) -> _GTTableSpec:
     """Build DataFrame for normal (non-transposed, non-wide) layout."""
@@ -144,15 +142,6 @@ def _build_table_df_normal(
 
     rows: list[dict[str, str]] = []
     section_header_rows: list[int] = []
-    model_type_row: int | None = None
-
-    # Model type row
-    if model_type and any(r.model_type for r in results):
-        model_type_row = len(rows)
-        row: dict[str, str] = {"var": ""}
-        for i, lb in enumerate(labels):
-            row[lb] = results[i].model_type
-        rows.append(row)
 
     # Coefficient + sub-stat rows
     for var in all_vars:
@@ -221,7 +210,6 @@ def _build_table_df_normal(
         fe_start_row=fe_start_row,
         summary_start_row=summary_start_row,
         section_header_rows=section_header_rows,
-        model_type_row=model_type_row,
         footnote=_build_footnote(stat_specs, stars_flag),
     )
 
@@ -232,7 +220,6 @@ def _build_table_df_wide(
     precision: int,
     stars_flag: bool,
     stat_specs: list[StatSpec],
-    model_type: bool,
     rename: dict[str, str] | None,
 ) -> _GTTableSpec:
     """Build DataFrame for wide layout (stats as columns beside coefficients)."""
@@ -251,17 +238,6 @@ def _build_table_df_wide(
 
     rows: list[dict[str, str]] = []
     section_header_rows: list[int] = []
-    model_type_row: int | None = None
-
-    # Model type row
-    if model_type and any(r.model_type for r in results):
-        model_type_row = len(rows)
-        row: dict[str, str] = {"var": ""}
-        for i, (lb, sub_cols) in enumerate(col_groups):
-            row[sub_cols[0]] = results[i].model_type
-            for sc in sub_cols[1:]:
-                row[sc] = ""
-        rows.append(row)
 
     # Coefficient rows (no sub-stat rows — stats are in columns)
     for var in all_vars:
@@ -338,7 +314,6 @@ def _build_table_df_wide(
         fe_start_row=fe_start_row,
         summary_start_row=summary_start_row,
         section_header_rows=section_header_rows,
-        model_type_row=model_type_row,
         spanners=spanners,
         footnote=_build_footnote(stat_specs, stars_flag),
     )
@@ -350,7 +325,6 @@ def _build_table_df_transposed(
     precision: int,
     stars_flag: bool,
     stat_specs: list[StatSpec],
-    model_type: bool,
     rename: dict[str, str] | None,
 ) -> _GTTableSpec:
     """Build DataFrame for transposed layout (models as rows, variables as columns)."""
@@ -372,11 +346,7 @@ def _build_table_df_transposed(
 
     rows: list[dict[str, str]] = []
     for i in range(n_models):
-        # Model label with optional type suffix
-        if model_type:
-            model_label = f"{labels[i]} {results[i].model_type}".rstrip()
-        else:
-            model_label = labels[i]
+        model_label = labels[i]
 
         # Coef row
         row: dict[str, str] = {"var": model_label}
@@ -455,13 +425,6 @@ def _build_gt(spec: _GTTableSpec) -> GT:
                 loc.body(columns="var", rows=spec.section_header_rows),
             )
 
-        # Italic model type row
-        if spec.model_type_row is not None:
-            gt = gt.tab_style(
-                style.text(style="italic"),
-                loc.body(rows=[spec.model_type_row]),
-            )
-
     # Table options
     gt = gt.tab_options(
         table_body_hlines_style="none",
@@ -521,7 +484,6 @@ def regtable(
     wide: bool = False,
     transpose: bool = False,
     rename: dict[str, str] | None = None,
-    model_type: bool = True,
 ) -> GT:
     """Display multiple regressions side-by-side in a compact table.
 
@@ -552,8 +514,6 @@ def regtable(
             indicators appear as additional columns.
         rename: Dict mapping original variable names to display names.
             E.g. ``{"_cons": "Constant"}``
-        model_type: If False, suppress the model type row (e.g. "OLS")
-            in the default layout, or the type suffix in transposed layout.
 
     Returns:
         great_tables.GT: A GT table object. Use ``.as_raw_html()`` for HTML
@@ -593,16 +553,12 @@ def regtable(
 
     if transpose:
         spec = _build_table_df_transposed(
-            results_tuple, labels, precision, stars, stat_specs, model_type, rename
+            results_tuple, labels, precision, stars, stat_specs, rename
         )
     elif wide:
-        spec = _build_table_df_wide(
-            results_tuple, labels, precision, stars, stat_specs, model_type, rename
-        )
+        spec = _build_table_df_wide(results_tuple, labels, precision, stars, stat_specs, rename)
     else:
-        spec = _build_table_df_normal(
-            results_tuple, labels, precision, stars, stat_specs, model_type, rename
-        )
+        spec = _build_table_df_normal(results_tuple, labels, precision, stars, stat_specs, rename)
 
     return _build_gt(spec)
 
