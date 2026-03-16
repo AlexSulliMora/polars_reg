@@ -167,6 +167,8 @@ Author-year references for the most numerically consequential formulas. Exact eq
 | PPML                        | Santos Silva & Tenreyro (2006)          |
 | Quantile regression         | Koenker & Bassett (1978)                |
 | Panel FE/FD                 | Wooldridge (2010)                       |
+| Fama-MacBeth risk premia    | Fama & MacBeth (1973)                   |
+| Shanken correction          | Shanken (1992); Cochrane (2005) Ch. 12  |
 
 ## Bibliography
 
@@ -177,8 +179,10 @@ Full citations for all referenced texts, alphabetically by first author.
 - Blundell, R. and S. Bond. "Initial Conditions and Moment Restrictions in Dynamic Panel Data Models." *Journal of Econometrics*, 87(1), 115-143, 1998.
 - Cameron, A.C. and P.K. Trivedi. *Microeconometrics: Methods and Applications.* Cambridge University Press, 2005.
 - Cameron, A.C., J.B. Gelbach, and D.L. Miller. "Robust Inference with Multiway Clustering." *Journal of Business & Economic Statistics*, 29(2), 238-249, 2011.
+- Cochrane, J.H. *Asset Pricing*. Revised ed., Princeton University Press, 2005.
 - Correia, S. "Linear Models with High-Dimensional Fixed Effects: An Efficient and Feasible Estimator." Working paper, 2016.
 - Driscoll, J.C. and A.C. Kraay. "Consistent Covariance Matrix Estimation with Spatially Dependent Panel Data." *Review of Economics and Statistics*, 80(4), 549-560, 1998.
+- Fama, E.F. and J.D. MacBeth. "Risk, Return, and Equilibrium: Empirical Tests." *Journal of Political Economy*, 81(3), 607-636, 1973.
 - Gibbons, M.R., S.A. Ross, and J. Shanken. "A Test of the Efficiency of a Given Portfolio." *Econometrica*, 57(5), 1121-1152, 1989.
 - Greene, W.H. *Econometric Analysis.* 8th ed., Pearson, 2018.
 - Hansen, L.P. "Large Sample Properties of Generalized Method of Moments Estimators." *Econometrica*, 50(4), 1029-1054, 1982.
@@ -186,6 +190,7 @@ Full citations for all referenced texts, alphabetically by first author.
 - Kamstra, M.J. and R. Shi. "A Note on the GRS Test." Working paper, 2021.
 - Newey, W.K. and K.D. West. "A Simple, Positive Semi-Definite, Heteroskedasticity and Autocorrelation Consistent Covariance Matrix." *Econometrica*, 55(3), 703-708, 1987.
 - Santos Silva, J.M.C. and S. Tenreyro. "The Log of Gravity." *Review of Economics and Statistics*, 88(4), 641-658, 2006.
+- Shanken, J. "On the Estimation of Beta-Pricing Models." *Review of Financial Studies*, 5(1), 1-33, 1992.
 - Stock, J.H. and M. Yogo. "Testing for Weak Instruments in Linear IV Regression." In *Identification and Inference for Econometric Models*, ed. D.W.K. Andrews and J.H. Stock, Cambridge University Press, 2005.
 - Swamy, P.A.V.B. and S.S. Arora. "The Exact Finite Sample Properties of the Estimators of Coefficients in the Error Components Regression Models." *Econometrica*, 40(2), 261-275, 1972.
 - Wooldridge, J.M. *Econometric Analysis of Cross Section and Panel Data.* 2nd ed., MIT Press, 2010.

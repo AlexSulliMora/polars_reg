@@ -13,6 +13,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **`liml()`** — limited information maximum likelihood
 - **`gmm_iv()`** — two-step efficient GMM with Hansen J test
 - **`panel_fe()`** — within estimator for panel data
+- **`rolling_reg()`** — rolling window regression with any estimator
+- **`fama_macbeth()`** — two-pass Fama-MacBeth with Shanken correction
 
 ### Design principles:
 - Polars-native: accept `pl.DataFrame` / `pl.LazyFrame`, never convert to pandas
@@ -52,7 +54,7 @@ uv run pdoc polars_reg --docformat google
 
 ```
 polars_reg/
-    __init__.py      # Public API exports: ols, iv2sls, liml, gmm_iv, panel_fe, RegressionResult
+    __init__.py      # Public API exports: ols, iv2sls, liml, gmm_iv, panel_fe, rolling_reg, RollingRegressionResult, fama_macbeth, FamaMacBethResult, RegressionResult
     _formula.py      # Formula parser → FormulaSpec
     _utils.py        # Polars-to-NumPy extraction → ExtractedArrays
     _demean.py       # Symmetric Kaczmarz + CG acceleration (Correia 2016)
@@ -62,6 +64,8 @@ polars_reg/
     _panel.py        # Panel FE (within) estimator
     _se.py           # VCV: iid, HC0-3, one-way/multi-way clustered
     _results.py      # RegressionResult dataclass with .summary()
+    _rolling.py      # RollingRegressionResult + rolling_reg()
+    _fama_macbeth.py # FamaMacBethResult + fama_macbeth()
 tests/
     stata_compare.py # WSL2 batch-mode Stata execution and result comparison
     test_stata_parity.py  # 27 Stata parity tests (OLS, reghdfe, IV)

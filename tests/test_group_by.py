@@ -23,45 +23,45 @@ def grouped_data():
     return pl.concat(dfs)
 
 
-def test_groupby_basic(grouped_data):
-    result = pr.groupby_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group")
+def test_group_by_basic(grouped_data):
+    result = pr.group_by_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group")
     assert len(result) == 3
     assert "A" in result
     assert "B" in result
     assert "C" in result
 
 
-def test_groupby_keys(grouped_data):
-    result = pr.groupby_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group")
+def test_group_by_keys(grouped_data):
+    result = pr.group_by_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group")
     keys = list(result.keys())
     assert len(keys) == 3
 
 
-def test_groupby_individual_result(grouped_data):
-    result = pr.groupby_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group")
+def test_group_by_individual_result(grouped_data):
+    result = pr.group_by_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group")
     r = result["A"]
     assert isinstance(r, pr.RegressionResult)
     assert r.n_obs == 100
     assert len(r.coefficients) == 3  # x1, x2, _cons
 
 
-def test_groupby_coef_table(grouped_data):
-    result = pr.groupby_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group")
+def test_group_by_coef_table(grouped_data):
+    result = pr.group_by_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group")
     table = result.coef_table()
     assert "group" in table.columns
     assert len(table) == 9  # 3 groups * 3 coefficients each
 
 
-def test_groupby_summary(grouped_data):
-    result = pr.groupby_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group")
+def test_group_by_summary(grouped_data):
+    result = pr.group_by_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group")
     s = result.summary()
     assert "3 groups succeeded" in s
     assert "Group: A" in s
     assert "Group: B" in s
 
 
-def test_groupby_iteration(grouped_data):
-    result = pr.groupby_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group")
+def test_group_by_iteration(grouped_data):
+    result = pr.group_by_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group")
     count = 0
     for key in result:
         count += 1
@@ -69,27 +69,27 @@ def test_groupby_iteration(grouped_data):
     assert count == 3
 
 
-def test_groupby_values(grouped_data):
-    result = pr.groupby_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group")
+def test_group_by_values(grouped_data):
+    result = pr.group_by_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group")
     vals = list(result.values())
     assert len(vals) == 3
     assert all(isinstance(v, pr.RegressionResult) for v in vals)
 
 
-def test_groupby_min_obs(grouped_data):
-    result = pr.groupby_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group", min_obs=200)
+def test_group_by_min_obs(grouped_data):
+    result = pr.group_by_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group", min_obs=200)
     assert len(result) == 0
     assert len(result.failed) == 3
 
 
-def test_groupby_with_robust(grouped_data):
-    result = pr.groupby_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group", vcov="HC1")
+def test_group_by_with_robust(grouped_data):
+    result = pr.group_by_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group", vcov="HC1")
     assert len(result) == 3
     for r in result.values():
         assert r.vcov_type == "HC1"
 
 
-def test_groupby_singular_group():
+def test_group_by_singular_group():
     """Groups with singular X'X should fail gracefully."""
     df = pl.DataFrame(
         {
@@ -99,22 +99,22 @@ def test_groupby_singular_group():
             "group": ["A", "A", "A"],
         }
     )
-    result = pr.groupby_reg(pr.ols, "y ~ x1 + x2", df, group_by="group")
+    result = pr.group_by_reg(pr.ols, "y ~ x1 + x2", df, group_by="group")
     # Should fail gracefully: the singular group should fail, not succeed
     assert len(result) == 0
     assert len(result.failed) > 0
 
 
-def test_groupby_regtable_integration(grouped_data):
+def test_group_by_regtable_integration(grouped_data):
     """GroupBy results should work with regtable."""
-    result = pr.groupby_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group")
+    result = pr.group_by_reg(pr.ols, "y ~ x1 + x2", grouped_data, group_by="group")
     table = pr.regtable(*result.values(), labels=list(result.keys()))
     html = table.as_raw_html()
     assert "x1" in html
     assert "x2" in html
 
 
-def test_groupby_multikey():
+def test_group_by_multikey():
     """GroupBy with multiple key columns."""
     rng = np.random.default_rng(42)
     n = 200
@@ -126,19 +126,19 @@ def test_groupby_multikey():
             "region": np.tile(["US", "EU"], n // 2),
         }
     )
-    result = pr.groupby_reg(pr.ols, "y ~ x1", df, group_by=["sector", "region"])
+    result = pr.group_by_reg(pr.ols, "y ~ x1", df, group_by=["sector", "region"])
     assert len(result) == 4  # 2 sectors * 2 regions
 
 
-def test_groupby_rejects_pandas(grouped_data):
+def test_group_by_rejects_pandas(grouped_data):
     """GroupBy should reject pandas DataFrames with helpful error."""
     pytest.importorskip("pandas")
     pd_df = grouped_data.to_pandas()
     with pytest.raises(TypeError, match="pl.from_pandas"):
-        pr.groupby_reg(pr.ols, "y ~ x1 + x2", pd_df, group_by="group")
+        pr.group_by_reg(pr.ols, "y ~ x1 + x2", pd_df, group_by="group")
 
 
-def test_groupby_iv(grouped_data):
+def test_group_by_iv(grouped_data):
     """GroupBy should work with IV estimators."""
     rng = np.random.default_rng(99)
     n = 300
@@ -156,14 +156,14 @@ def test_groupby_iv(grouped_data):
             "group": np.repeat(["A", "B", "C"], 100),
         }
     )
-    result = pr.groupby_reg(pr.iv2sls, "y ~ 1 || x_end ~ z1 + z2", df, group_by="group")
+    result = pr.group_by_reg(pr.iv2sls, "y ~ 1 || x_end ~ z1 + z2", df, group_by="group")
     assert len(result) == 3
 
 
 # ── Additional robustness tests ───────────────────────────────────
 
 
-def test_groupby_group_fewer_obs_than_params():
+def test_group_by_group_fewer_obs_than_params():
     """Group with N < k handled gracefully (fails, not crashes)."""
     rng = np.random.default_rng(42)
     # Group A has only 1 obs but 3 params (x1, x2, _cons) -> singular
@@ -175,7 +175,54 @@ def test_groupby_group_fewer_obs_than_params():
             "group": ["A", "B", "B", "B", "B", "B", "B"],
         }
     )
-    result = pr.groupby_reg(pr.ols, "y ~ x1 + x2", df, group_by="group")
+    result = pr.group_by_reg(pr.ols, "y ~ x1 + x2", df, group_by="group")
     # Group A should fail (N=1 < k=3), group B should succeed (N=6 >= k=3)
     assert "B" in result
     assert "A" in result.failed
+
+
+def test_group_by_with_nulls():
+    """group_by_reg handles nulls in regressor within some groups."""
+    rng = np.random.default_rng(42)
+    n = 200
+    df = pl.DataFrame(
+        {
+            "group": ["A"] * 100 + ["B"] * 100,
+            "x": rng.normal(size=n),
+            "y": rng.normal(size=n),
+        }
+    )
+    # Inject nulls into group A's x column
+    x_vals = df["x"].to_numpy().copy()
+    x_vals[5] = float("nan")
+    x_vals[10] = float("nan")
+    df = df.with_columns(pl.Series("x", x_vals))
+
+    result = pr.group_by_reg(pr.ols, "y ~ x", df, group_by="group")
+    assert "A" in result
+    assert "B" in result
+    assert np.all(np.isfinite(result["A"].coefficients))
+    assert np.all(np.isfinite(result["B"].coefficients))
+
+
+def test_group_by_with_inf():
+    """group_by_reg handles inf values in data."""
+    rng = np.random.default_rng(42)
+    n = 200
+    df = pl.DataFrame(
+        {
+            "group": ["A"] * 100 + ["B"] * 100,
+            "x": rng.normal(size=n),
+            "y": rng.normal(size=n),
+        }
+    )
+    y_vals = df["y"].to_numpy().copy()
+    y_vals[0] = np.inf
+    y_vals[150] = -np.inf
+    df = df.with_columns(pl.Series("y", y_vals))
+
+    result = pr.group_by_reg(pr.ols, "y ~ x", df, group_by="group")
+    assert "A" in result
+    assert "B" in result
+    assert np.all(np.isfinite(result["A"].coefficients))
+    assert np.all(np.isfinite(result["B"].coefficients))

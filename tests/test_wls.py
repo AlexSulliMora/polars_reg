@@ -151,3 +151,41 @@ def test_wls_scaling_invariance(wls_data):
     r2 = ols("y ~ x1 + x2", data=df, weights="w_scaled")
     np.testing.assert_allclose(r1.coefficients, r2.coefficients, atol=1e-10)
     np.testing.assert_allclose(r1.se, r2.se, atol=1e-10)
+
+
+def test_wls_with_nan_in_weights():
+    """WLS handles NaN in the weight column."""
+    rng = np.random.default_rng(42)
+    n = 100
+    x = rng.standard_normal(n)
+    y = 2 * x + rng.standard_normal(n) * 0.5
+    w = (
+        np.abs(
+            rng.standard_normal(
+                n,
+            )
+        )
+        + 0.1
+    )
+    w[5] = float("nan")
+    w[50] = float("nan")
+    df = pl.DataFrame({"x": x, "y": y, "w": w})
+
+    result = ols("y ~ x", data=df, weights="w")
+    assert result.n_obs == n - 2  # 2 NaN weight rows dropped
+    assert np.all(np.isfinite(result.coefficients))
+
+
+def test_wls_with_inf_in_weights():
+    """WLS handles inf in the weight column."""
+    rng = np.random.default_rng(42)
+    n = 100
+    x = rng.standard_normal(n)
+    y = 2 * x + rng.standard_normal(n) * 0.5
+    w = np.abs(rng.standard_normal(n)) + 0.1
+    w[0] = np.inf
+    df = pl.DataFrame({"x": x, "y": y, "w": w})
+
+    result = ols("y ~ x", data=df, weights="w")
+    assert result.n_obs == n - 1
+    assert np.all(np.isfinite(result.coefficients))

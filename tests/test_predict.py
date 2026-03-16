@@ -17,7 +17,7 @@ def test_predict_continuous_roundtrip():
     result = ols("y ~ x1 + x2", data=df)
 
     # Out-of-sample predict on training data should equal X @ beta
-    pred = result.predict(newdata=df)
+    pred = result.predict(new_data=df)
     coefs = dict(zip(result.names, result.coefficients))
     expected = coefs["x1"] * x1 + coefs["x2"] * x2 + coefs["_cons"]
     np.testing.assert_allclose(pred, expected, atol=1e-12)
@@ -42,7 +42,7 @@ def test_predict_indicator_variables():
     assert "industry=3" in result.names
 
     # Predict on training data should match y - residuals
-    pred = result.predict(newdata=df)
+    pred = result.predict(new_data=df)
     expected_fitted = y - result.residuals
     np.testing.assert_allclose(pred, expected_fitted, atol=1e-10)
 
@@ -53,7 +53,7 @@ def test_predict_indicator_variables():
             "industry": [1, 2, 3],
         }
     )
-    pred_new = result.predict(newdata=new_df)
+    pred_new = result.predict(new_data=new_df)
     # For industry=1 (reference), prediction = _cons + 0*x1
     # For industry=2, prediction = _cons + coef(industry=2)
     # For industry=3, prediction = _cons + coef(industry=3)
@@ -77,7 +77,7 @@ def test_predict_interaction_continuous():
     assert "x1:x2" in result.names
 
     # Round-trip: predict on training data should match y - residuals
-    pred = result.predict(newdata=df)
+    pred = result.predict(new_data=df)
     expected_fitted = y - result.residuals
     np.testing.assert_allclose(pred, expected_fitted, atol=1e-10)
 
@@ -105,7 +105,7 @@ def test_predict_indicator_continuous_interaction():
     assert any("group=3" in nm and "x1" in nm for nm in result.names)
 
     # Round-trip: predict on training data should match y - residuals
-    pred = result.predict(newdata=df)
+    pred = result.predict(new_data=df)
     expected_fitted = y - result.residuals
     np.testing.assert_allclose(pred, expected_fitted, atol=1e-10)
 
@@ -116,7 +116,7 @@ def test_predict_indicator_continuous_interaction():
             "group": [1, 2, 3],
         }
     )
-    pred_new = result.predict(newdata=new_df)
+    pred_new = result.predict(new_data=new_df)
     assert pred_new.shape == (3,)
     # Predictions for different groups should differ
     assert not np.allclose(pred_new[0], pred_new[1])
@@ -132,7 +132,7 @@ def test_predict_interval_keys_and_shapes():
     df = pl.DataFrame({"y": y, "x1": x1})
 
     result = ols("y ~ x1", data=df)
-    pi = result.predict_interval(newdata=df)
+    pi = result.predict_interval(new_data=df)
 
     assert set(pi.keys()) == {"fit", "se", "lower", "upper"}
     for key in ("fit", "se", "lower", "upper"):
@@ -140,7 +140,7 @@ def test_predict_interval_keys_and_shapes():
         assert pi[key].shape == (n,)
 
     # fit should match predict()
-    np.testing.assert_allclose(pi["fit"], result.predict(newdata=df), atol=1e-12)
+    np.testing.assert_allclose(pi["fit"], result.predict(new_data=df), atol=1e-12)
 
     # lower < fit < upper
     assert np.all(pi["lower"] < pi["fit"])
@@ -159,8 +159,8 @@ def test_predict_interval_alpha():
     df = pl.DataFrame({"y": y, "x1": x1})
 
     result = ols("y ~ x1", data=df)
-    pi_95 = result.predict_interval(newdata=df, alpha=0.05)
-    pi_99 = result.predict_interval(newdata=df, alpha=0.01)
+    pi_95 = result.predict_interval(new_data=df, alpha=0.05)
+    pi_99 = result.predict_interval(new_data=df, alpha=0.01)
 
     # 99% interval should be wider than 95%
     width_95 = pi_95["upper"] - pi_95["lower"]
@@ -169,7 +169,7 @@ def test_predict_interval_alpha():
 
 
 def test_predict_missing_column_error():
-    """predict() should raise KeyError when newdata is missing a required column."""
+    """predict() should raise KeyError when new_data is missing a required column."""
     rng = np.random.default_rng(42)
     n = 100
     x1 = rng.standard_normal(n)
@@ -179,10 +179,10 @@ def test_predict_missing_column_error():
 
     result = ols("y ~ x1 + x2", data=df)
 
-    # newdata missing x2
+    # new_data missing x2
     bad_df = pl.DataFrame({"x1": [1.0, 2.0]})
     with pytest.raises(KeyError, match="x2"):
-        result.predict(newdata=bad_df)
+        result.predict(new_data=bad_df)
 
 
 def test_predict_missing_indicator_column_error():
@@ -196,10 +196,10 @@ def test_predict_missing_indicator_column_error():
 
     result = ols("y ~ x1 + i.industry", data=df)
 
-    # newdata missing 'industry' column
+    # new_data missing 'industry' column
     bad_df = pl.DataFrame({"x1": [1.0, 2.0]})
     with pytest.raises(KeyError, match="industry"):
-        result.predict(newdata=bad_df)
+        result.predict(new_data=bad_df)
 
 
 def test_predict_indicator_string_levels():
@@ -219,7 +219,7 @@ def test_predict_indicator_string_levels():
     result = ols("y ~ x1 + i.color", data=df)
 
     # Round-trip: predict on training data should match y - residuals
-    pred = result.predict(newdata=df)
+    pred = result.predict(new_data=df)
     expected_fitted = y - result.residuals
     np.testing.assert_allclose(pred, expected_fitted, atol=1e-10)
 
@@ -235,6 +235,39 @@ def test_predict_no_intercept():
     result = ols("y ~ x1 - 1", data=df)
     assert "_cons" not in result.names
 
-    pred = result.predict(newdata=df)
+    pred = result.predict(new_data=df)
     expected = result.coefficients[0] * x1
     np.testing.assert_allclose(pred, expected, atol=1e-12)
+
+
+def test_predict_with_nan_in_new_data():
+    """predict() handles NaN in new_data gracefully."""
+    rng = np.random.default_rng(42)
+    n = 100
+    x = rng.standard_normal(n)
+    y = 2 * x + rng.standard_normal(n) * 0.5
+    df = pl.DataFrame({"x": x, "y": y})
+    result = ols("y ~ x", data=df)
+
+    # new_data with a NaN — predict should still work (NaN propagates to prediction)
+    new_df = pl.DataFrame({"x": [1.0, float("nan"), 3.0]})
+    preds = result.predict(new_data=new_df)
+    assert len(preds) == 3
+    assert np.isfinite(preds[0])
+    assert np.isfinite(preds[2])
+
+
+def test_predict_with_inf_in_new_data():
+    """predict() handles inf in new_data gracefully."""
+    rng = np.random.default_rng(42)
+    n = 100
+    x = rng.standard_normal(n)
+    y = 2 * x + rng.standard_normal(n) * 0.5
+    df = pl.DataFrame({"x": x, "y": y})
+    result = ols("y ~ x", data=df)
+
+    # new_data with inf — predict should still work (inf propagates to prediction)
+    new_df = pl.DataFrame({"x": [1.0, np.inf, -np.inf]})
+    preds = result.predict(new_data=new_df)
+    assert len(preds) == 3
+    assert np.isfinite(preds[0])

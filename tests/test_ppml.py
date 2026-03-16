@@ -273,12 +273,12 @@ class TestPPMLPredict:
         fitted = res._y - res.residuals
         np.testing.assert_allclose(fitted, mu_from_xb, rtol=1e-6)
 
-    def test_predict_newdata(self):
-        """Out-of-sample predict() with newdata."""
+    def test_predict_new_data(self):
+        """Out-of-sample predict() with new_data."""
         df = _make_poisson_data()
         res = ppml("y ~ x1 + x2", data=df)
 
-        newdata = pl.DataFrame(
+        new_data = pl.DataFrame(
             {
                 "x1": [0.0, 1.0, -1.0],
                 "x2": [0.0, 0.0, 0.0],
@@ -286,7 +286,7 @@ class TestPPMLPredict:
         )
         # predict() returns x'beta (linear predictor), not exp(x'beta)
         # This is consistent with other models in the package
-        pred = res.predict(newdata)
+        pred = res.predict(new_data)
         assert pred.shape == (3,)
         assert np.all(np.isfinite(pred))
 
@@ -375,6 +375,45 @@ def test_ppml_nan_dropped():
     x1[0] = np.nan
     x2[10] = np.nan
     df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+    res = ppml("y ~ x1 + x2", data=df)
+    assert res.n_obs == n - 2
+    assert np.all(np.isfinite(res.coefficients))
+
+
+def test_ppml_null_dropped():
+    """Polars nulls in x columns handled by dropping those rows."""
+    rng = np.random.default_rng(42)
+    n = 500
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    mu = np.exp(0.5 + 0.5 * x1 - 0.3 * x2)
+    y = rng.poisson(mu).astype(float)
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+    # Inject Polars nulls
+    null_mask = pl.Series("m", [False] * n)
+    null_mask[0] = True
+    null_mask[10] = True
+    df = df.with_columns(pl.when(null_mask).then(None).otherwise(pl.col("x1")).alias("x1"))
+    assert df["x1"].null_count() == 2
+
+    res = ppml("y ~ x1 + x2", data=df)
+    assert res.n_obs == n - 2
+    assert np.all(np.isfinite(res.coefficients))
+
+
+def test_ppml_inf_dropped():
+    """Inf in x columns handled by dropping those rows."""
+    rng = np.random.default_rng(42)
+    n = 500
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    mu = np.exp(0.5 + 0.5 * x1 - 0.3 * x2)
+    y = rng.poisson(mu).astype(float)
+    # Inject inf
+    x1[0] = np.inf
+    x2[10] = -np.inf
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+
     res = ppml("y ~ x1 + x2", data=df)
     assert res.n_obs == n - 2
     assert np.all(np.isfinite(res.coefficients))

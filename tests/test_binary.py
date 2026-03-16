@@ -262,6 +262,49 @@ def test_logit_nan_dropped():
     assert np.all(np.isfinite(r.coefficients))
 
 
+def test_logit_null_dropped():
+    """Polars nulls in x columns handled by dropping those rows."""
+    rng = np.random.default_rng(42)
+    n = 500
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    xb = 0.5 + 1.0 * x1 - 0.5 * x2
+    prob = 1.0 / (1.0 + np.exp(-xb))
+    y = (rng.uniform(size=n) < prob).astype(float)
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+    # Inject Polars nulls
+    null_mask = pl.Series("m", [False] * n)
+    null_mask[0] = True
+    null_mask[10] = True
+    null_mask[5] = True
+    df = df.with_columns(pl.when(null_mask).then(None).otherwise(pl.col("x1")).alias("x1"))
+    assert df["x1"].null_count() == 3
+
+    r = logit("y ~ x1 + x2", data=df)
+    assert r.n_obs == n - 3
+    assert np.all(np.isfinite(r.coefficients))
+
+
+def test_logit_inf_dropped():
+    """Inf in x columns handled by dropping those rows."""
+    rng = np.random.default_rng(42)
+    n = 500
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    xb = 0.5 + 1.0 * x1 - 0.5 * x2
+    prob = 1.0 / (1.0 + np.exp(-xb))
+    y = (rng.uniform(size=n) < prob).astype(float)
+    # Inject inf
+    x1[0] = np.inf
+    x1[10] = -np.inf
+    x2[5] = np.inf
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+
+    r = logit("y ~ x1 + x2", data=df)
+    assert r.n_obs == n - 3
+    assert np.all(np.isfinite(r.coefficients))
+
+
 def test_probit_lazyframe():
     """LazyFrame input works for probit."""
     rng = np.random.default_rng(42)

@@ -12,8 +12,9 @@ from polars_reg._diagnostics import (
     kleibergen_paap_test,
     weak_instrument_test,
 )
+from polars_reg._fama_macbeth import FamaMacBethResult, fama_macbeth
 from polars_reg._gmm import gmm_iv, liml
-from polars_reg._groupby import GroupRegressionResult, groupby_reg
+from polars_reg._group_by import GroupRegressionResult, group_by_reg
 from polars_reg._iv import iv2sls
 from polars_reg._ols import ols
 from polars_reg._panel import panel_fd, panel_fe, panel_re
@@ -22,6 +23,7 @@ from polars_reg._ppml import ppml
 from polars_reg._quantile import quantreg
 from polars_reg._regtable import regtable
 from polars_reg._results import RegressionResult
+from polars_reg._rolling import RollingRegressionResult, rolling_reg
 from polars_reg._ssc import SSC, ssc
 from polars_reg.r_equiv import to_r
 from polars_reg.stata import to_stata
@@ -36,7 +38,7 @@ __all__ = [
     "panel_fd",
     "RegressionResult",
     "GroupRegressionResult",
-    "groupby_reg",
+    "group_by_reg",
     "regtable",
     "compare",
     "to_stata",
@@ -56,8 +58,12 @@ __all__ = [
     "panel_sys_gmm",
     "quantreg",
     "ppml",
+    "fama_macbeth",
+    "FamaMacBethResult",
     "coefplot",
     "avplot",
     "SSC",
     "ssc",
+    "rolling_reg",
+    "RollingRegressionResult",
 ]

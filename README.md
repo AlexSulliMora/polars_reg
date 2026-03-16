@@ -83,7 +83,7 @@ result = pr.iv2sls("y ~ x_exog || x_endog ~ z1 + z2", data=df)
 result = pr.panel_fe("y ~ x1 + x2", data=df, entity="firm_id", time="year_id")
 
 # GroupBy: run regression per industry
-grp = pr.groupby_reg(pr.ols, "y ~ x1 + x2", df, group_by="industry")
+grp = pr.group_by_reg(pr.ols, "y ~ x1 + x2", df, group_by="industry")
 grp.coef_table()  # stacked Polars DataFrame
 
 # Side-by-side comparison table (returns a Great Tables GT object)
@@ -163,7 +163,7 @@ result.avplot()          # added-variable plots
 | `quantreg()` | Quantile regression (IRLS + bootstrap) |
 | `ppml()` | Poisson pseudo-maximum likelihood |
 | `coefplot()` | Coefficient plot with CIs (Altair) |
-| `groupby_reg()` | Run any estimator per group |
+| `group_by_reg()` | Run any estimator per group |
 | `regtable()` | Side-by-side regression table |
 | `marginal_effects()` | Probit/logit marginal effects |
 | `odds_ratios()` | Logit odds ratios with delta-method SEs |

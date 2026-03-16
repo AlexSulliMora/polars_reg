@@ -4,7 +4,7 @@ How public functions should look: return types, parameter naming, error handling
 
 ## Return Type Contract
 
-**All estimator functions return `RegressionResult`.** This is what enables `groupby_reg()` and `regtable()` to work with any estimator.
+**All estimator functions return `RegressionResult`.** This is what enables `group_by_reg()` and `regtable()` to work with any estimator.
 
 **New diagnostic functions** should return a typed dataclass with a `.summary()` method, following `GRSTestResult` in `_diagnostics.py`:
 
@@ -42,6 +42,11 @@ Canonical parameter names and their types:
 | `fweights` | `str \| None`                  | Column name for frequency weights                  |
 | `n_boot`   | `int`                          | Number of bootstrap replications                   |
 | `seed`     | `int \| None`                  | RNG seed for reproducibility                       |
+| `window`      | `int \| None`                  | Rolling window size (number of periods or observations) |
+| `stride`      | `int`                          | Step size between consecutive windows                   |
+| `shanken`     | `bool`                         | Apply Shanken (1992) errors-in-variables correction     |
+| `window_type` | `str`                          | "periods" or "obs" -- how window size is measured        |
+| `store_residuals` | `bool`                     | Whether to keep per-window residuals in memory          |
 
 **Never use:** `df`, `fml`, `cl`, `se_type`, `B`, `panel_id`.
 
@@ -143,6 +148,7 @@ Current values assigned to `RegressionResult.model_type`:
 | `"Logit"`          | `logit()`      |                              |
 | `"Quantile(τ)"`    | `quantreg()`   | Parameterized (e.g., `"Quantile(0.50)"`) |
 | `"PPML"`           | `ppml()`       |                              |
+| `"Fama-MacBeth"`   | `fama_macbeth()` |                              |
 
 **Naming convention:** all-caps for acronyms (`"OLS"`, `"2SLS"`, `"PPML"`), title-case for descriptive names (`"Panel FE"`, `"Arellano-Bond"`), title-case for proper nouns (`"Probit"`, `"Logit"`).
 
@@ -179,7 +185,7 @@ A crash is a gift -- it tells you something is wrong. Silent corruption (wrong D
 
 ## Composability Contract
 
-Any estimator that meets these four conditions works automatically with `groupby_reg()` and `regtable()`:
+Any estimator that meets these four conditions works automatically with `group_by_reg()` and `regtable()`:
 
 1. Accepts `formula` as the first positional argument
 2. Accepts `data` as a keyword argument
@@ -188,6 +194,10 @@ Any estimator that meets these four conditions works automatically with `groupby
 
 `regtable()` renders from: `params`, `se`, `pvalues`, `nobs`, `r_squared`, `model_type`.
 
+`rolling_reg()` follows the same pattern but with `time` as an additional required parameter.
+
+`fama_macbeth()` returns `FamaMacBethResult` (not `RegressionResult`), but provides duck-typing properties (`.coefficients`, `.se`, `.tstat`, `.pvalue`, `.n_obs`, `.r_squared`) for `regtable()` compatibility.
+
 ## Output Formatting
 
 - `.summary()`: coefficient table with Coef / SE / t / P>|t| / [95% CI] columns
@@ -195,6 +205,22 @@ Any estimator that meets these four conditions works automatically with `groupby
 - `GRSTestResult.summary()` is the template for new diagnostic summaries
 
 **Gold-standard docstring:** `_ppml.py:46-73` -- has summary, extended description, full journal citation in `Reference:` line, complete `Args:` with types and defaults, and `Returns:` block.
+
+## Naming Conventions
+
+**Function names:** use underscores between all words. Never concatenate words.
+- Correct: `group_by_reg`, `rolling_reg`, `fama_macbeth`, `marginal_effects`
+- Wrong: `groupbyreg`, `rollingreg`, `famaMacBeth`
+
+**Parameter names:** same rule — underscores between all words.
+- Correct: `new_data`, `group_by`, `min_obs`
+- Wrong: `newdata`, `groupby`, `minobs`
+
+**Class names:** PascalCase (standard Python). Acronyms stay uppercase: `SSC`, `RegressionResult`, `GroupRegressionResult`.
+
+**Internal functions/methods:** underscore prefix + same word-separation rule: `_build_new_data_X`, `_first_difference`.
+
+**model_type strings:** see model_type Vocabulary section (all-caps for acronyms, title-case for descriptive).
 
 ## Type Annotations
 
