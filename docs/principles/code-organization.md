@@ -127,3 +127,11 @@ From `docs/solutions/runtime-errors/polars-reg-comprehensive-code-review.md`:
 - Test the formulas that differentiate this package: dfc corrections, demeaning convergence, Stata parity
 - Use deterministic RNG seeds: `np.random.default_rng(seed)`, not `np.random.randn()`
 - For bootstrap tests: either fix the seed or test weak properties that hold with overwhelming probability
+
+### Pre-PR Checklist
+
+Before creating a pull request for a new feature or significant change:
+
+1. **Tests pass:** `pytest` with no failures
+2. **Lint clean:** `ruff check .` and `ruff format --check .`
+3. **Showcase notebook:** create `notebooks/new_features/YYYY-MM-DD-<name>.ipynb` demonstrating the feature with imports, data simulation, and worked examples. Use `compare()` to show cross-package parity where applicable. See CLAUDE.md for the full convention.
