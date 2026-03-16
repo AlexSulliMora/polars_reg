@@ -1,6 +1,8 @@
 # polars_reg
 
-Fast econometric regressions for Python, built on [Polars](https://pola.rs/) and Rust. Covers OLS, IV, panel, and limited-dependent-variable models with robust and clustered standard errors — validated against Stata and R to 5+ decimal places. Also accepts pandas DataFrames.
+**Disclaimer**: This package is made almost entirely with claude code and is a continued work in progress. At this stage I highly reccomend using the built in features to compare this package's output with that of other packages or languages (`compare_stata()` / `compare_r()`). All features may be subject to change until a more stable release.
+
+Fast econometric regressions for Python, built on [Polars](https://pola.rs/) and Rust. Covers OLS, IV, panel, and limited-dependent-variable models with robust and clustered standard errors — validated against Stata and R to 5+ decimal places.
 
 The computational backend is written in Rust (via PyO3), with parallel demeaning and sandwich estimators powered by Rayon. On fixed-effects and clustered models, polars_reg matches or beats R/fixest and is 2–8× faster than statsmodels, pyfixest, and linearmodels.
 
@@ -21,7 +23,7 @@ The computational backend is written in Rust (via PyO3), with parallel demeaning
 
 ### Standard Errors
 
-- **Robust** — HC0, HC1 (Stata's `robust`), HC2, HC3
+- **Robust** — HC0, HC1, HC2, HC3
 - **Clustered** — one-way and multi-way (Cameron-Gelbach-Miller)
 - **HAC** — Newey-West for time series
 - **Driscoll-Kraay** — robust to cross-sectional dependence in panels
@@ -30,7 +32,7 @@ The computational backend is written in Rust (via PyO3), with parallel demeaning
 ### Convenience Features
 
 - **GroupBy regression** — run any estimator per group (e.g., per stock or industry)
-- **regtable** — side-by-side regression tables (estout/esttab-style) with LaTeX and HTML export
+- **regtable** — side-by-side regression tables via [Great Tables](https://posit-dev.github.io/great-tables/), with LaTeX and HTML export
 - **Coefficient plots** and **added-variable plots** via Altair
 - **Diagnostics** — Wald test, Hausman test (FE vs RE), Kleibergen-Paap, Stock-Yogo weak IV
 - **Formula API** with interaction terms (`x1*x2`, `x1:x2`) and indicator expansion (`i.group`)
@@ -84,8 +86,11 @@ result = pr.panel_fe("y ~ x1 + x2", data=df, entity="firm_id", time="year_id")
 grp = pr.groupby_reg(pr.ols, "y ~ x1 + x2", df, group_by="industry")
 grp.coef_table()  # stacked Polars DataFrame
 
-# Side-by-side comparison table
-pr.regtable(m1, m2, m3, labels=["OLS", "Robust", "FE"])
+# Side-by-side comparison table (returns a Great Tables GT object)
+table = pr.regtable(m1, m2, m3, labels=["OLS", "Robust", "FE"])
+table                    # renders in Jupyter
+table.as_latex()         # LaTeX string
+table.as_raw_html()      # HTML string
 
 # Probit / Logit
 result = pr.logit("y_binary ~ x1 + x2", data=df, cluster="firm_id")
@@ -202,5 +207,5 @@ print(pr.to_r("ols", "y ~ x1 + x2 | firm_id", cluster=["firm_id"]))
 - Polars >= 1.0
 - NumPy >= 1.24
 - SciPy >= 1.10
-- pandas (optional — for pandas DataFrame input)
+- Great Tables >= 0.15
 - Altair (optional — for plotting)
