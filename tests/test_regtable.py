@@ -1,11 +1,14 @@
 """Tests for regtable (Great Tables-based side-by-side regression table)."""
 
+from collections import OrderedDict
+
 import numpy as np
 import polars as pl
 import pytest
 from great_tables import GT
 
-from polars_reg import group_by_reg, ols, regtable
+from polars_reg import group_by_reg, ols, regtable, rolling_reg
+from polars_reg._fama_macbeth import FamaMacBethResult
 from polars_reg._regtable import _normalize_stat
 
 
@@ -433,3 +436,98 @@ def test_regtable_transpose_latex(simple_data):
     assert r"\begin{table}" in latex
     assert r"\toprule" in latex
     assert "x1" in latex
+
+
+# ── FamaMacBethResult tests ──────────────────────────────────────
+
+
+def _make_fm_result() -> FamaMacBethResult:
+    """Create a minimal FamaMacBethResult for testing."""
+    rng = np.random.default_rng(99)
+    T, k = 20, 2
+    lambdas = rng.standard_normal((T, k + 1))
+    fm_se = np.abs(rng.standard_normal(k + 1)) * 0.1 + 0.01
+    # Use a minimal GroupRegressionResult as first_pass placeholder
+    from polars_reg._group_by import GroupRegressionResult
+
+    first_pass = GroupRegressionResult(results=OrderedDict(), failed=OrderedDict())
+    return FamaMacBethResult(
+        lambdas=lambdas,
+        fm_se=fm_se,
+        shanken_se=None,
+        first_pass=first_pass,
+        names=["mkt", "smb", "_cons"],
+        n_periods=T,
+        n_assets=50,
+        avg_r_squared=0.35,
+    )
+
+
+def test_regtable_fama_macbeth():
+    """FamaMacBethResult produces a valid GT table in regtable()."""
+    fm = _make_fm_result()
+    table = regtable(fm)
+    assert isinstance(table, GT)
+    html = _html(table)
+    assert "mkt" in html
+    assert "smb" in html
+    assert "_cons" in html
+    # Summary stats should be present
+    assert "1000" in html  # n_obs = 50 * 20
+    assert "0.35" in html  # r_squared
+
+
+def test_regtable_fama_macbeth_side_by_side(simple_data):
+    """FamaMacBethResult displayed alongside an OLS result."""
+    r1 = ols("y ~ x1 + x2", data=simple_data)
+    fm = _make_fm_result()
+    table = regtable(r1, fm)
+    assert isinstance(table, GT)
+    html = _html(table)
+    # Both models should appear
+    assert "(1)" in html
+    assert "(2)" in html
+    # Variables from both models
+    assert "x1" in html
+    assert "mkt" in html
+
+
+# ── RollingRegressionResult tests ────────────────────────────────
+
+
+def test_regtable_rolling_expansion():
+    """RollingRegressionResult with few windows is expanded into columns."""
+    rng = np.random.default_rng(42)
+    n = 200
+    time = np.repeat(np.arange(20), 10)
+    x1 = rng.standard_normal(n)
+    y = 1.0 + 2.0 * x1 + rng.standard_normal(n) * 0.5
+    df = pl.DataFrame({"y": y, "x1": x1, "t": time})
+
+    rolling = rolling_reg(ols, "y ~ x1", df, time="t", window=10, stride=5)
+    n_windows = len(rolling)
+    assert n_windows > 0 and n_windows <= 30
+
+    table = regtable(rolling)
+    assert isinstance(table, GT)
+    html = _html(table)
+    assert "x1" in html
+    # Each window key should appear as a column label
+    for key in rolling.keys():
+        assert str(key) in html
+
+
+def test_regtable_rolling_too_many_windows():
+    """RollingRegressionResult with > 30 windows raises ValueError."""
+    rng = np.random.default_rng(42)
+    n = 500
+    time = np.repeat(np.arange(50), 10)
+    x1 = rng.standard_normal(n)
+    y = 1.0 + 2.0 * x1 + rng.standard_normal(n) * 0.5
+    df = pl.DataFrame({"y": y, "x1": x1, "t": time})
+
+    rolling = rolling_reg(ols, "y ~ x1", df, time="t", window=10, stride=1)
+    assert len(rolling) > 30
+
+    with pytest.raises(ValueError, match="RollingRegressionResult has"):
+        regtable(rolling)

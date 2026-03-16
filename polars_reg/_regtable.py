@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import polars as pl
 from great_tables import GT, loc, style
 
 from polars_reg._group_by import GroupRegressionResult
 from polars_reg._results import RegressionResult
+
+if TYPE_CHECKING:
+    from polars_reg._fama_macbeth import FamaMacBethResult
+    from polars_reg._rolling import RollingRegressionResult
 
 # A stat spec is (stat_key, open_bracket, close_bracket)
 # e.g. ("t", "(", ")") or ("se", "[", "]")
@@ -475,7 +480,10 @@ def _normalize_stat(
 
 
 def regtable(
-    *results: RegressionResult | GroupRegressionResult,
+    *results: RegressionResult
+    | GroupRegressionResult
+    | RollingRegressionResult
+    | FamaMacBethResult,
     labels: list[str] | None = None,
     precision: int = 4,
     stars: bool = True,
@@ -491,9 +499,11 @@ def regtable(
     notebooks and can be exported to HTML or LaTeX.
 
     Args:
-        *results: RegressionResult or GroupRegressionResult objects.
-            GroupRegressionResult is automatically expanded, using group
-            keys as column labels.
+        *results: RegressionResult, GroupRegressionResult,
+            RollingRegressionResult, or FamaMacBethResult objects.
+            GroupRegressionResult and RollingRegressionResult are
+            automatically expanded, using group/window keys as column
+            labels.  FamaMacBethResult is treated as a single column.
         labels: Column labels. Defaults to group keys for GroupRegressionResult,
             (1), (2), ... for individual results.
         precision: Significant figures for coefficients/stats (default 4).
@@ -527,12 +537,16 @@ def regtable(
         >>> table.as_raw_html()            # HTML string
         >>> table.tab_header(title="Table 1")  # further GT customization
     """
+    from polars_reg._fama_macbeth import FamaMacBethResult
+    from polars_reg._rolling import RollingRegressionResult
+
     if not results:
         raise ValueError("At least one RegressionResult is required.")
 
     stat_specs = _normalize_stat(stat, brackets)
 
-    # Expand GroupRegressionResult into individual results
+    # Expand GroupRegressionResult and RollingRegressionResult into individual results.
+    # FamaMacBethResult is treated as a single column (duck-typed).
     expanded: list[RegressionResult] = []
     auto_labels: list[str] = []
     for r in results:
@@ -540,6 +554,22 @@ def regtable(
             for key, val in r.items():
                 expanded.append(val)
                 auto_labels.append(str(key))
+        elif isinstance(r, RollingRegressionResult):
+            n_windows = len(r)
+            if n_windows > 30:
+                raise ValueError(
+                    f"RollingRegressionResult has {n_windows} windows, which would "
+                    f"create {n_windows} columns. Select specific windows via dict "
+                    f"access (e.g., result[key]) and pass individual RegressionResult "
+                    f"objects."
+                )
+            for key, val in r.items():
+                expanded.append(val)
+                auto_labels.append(str(key))
+        elif isinstance(r, FamaMacBethResult):
+            # FamaMacBethResult duck-types as RegressionResult
+            expanded.append(r)  # type: ignore[arg-type]
+            auto_labels.append("")
         else:
             expanded.append(r)
             auto_labels.append("")

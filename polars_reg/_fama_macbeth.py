@@ -120,6 +120,21 @@ class FamaMacBethResult:
         """Average cross-sectional R-squared."""
         return self.avg_r_squared
 
+    @property
+    def r_squared_adj(self) -> float:
+        """Adjusted R-squared (same as R-squared for FM -- no natural dof adjustment)."""
+        return self.avg_r_squared
+
+    @property
+    def fe_absorbed(self) -> list[str] | None:
+        """No absorbed FE in Fama-MacBeth (regtable compatibility)."""
+        return None
+
+    @property
+    def n_clusters(self) -> dict[str, int] | None:
+        """No clustering in Fama-MacBeth (regtable compatibility)."""
+        return None
+
     # ── Output methods ───────────────────────────────────────────────
 
     def summary(self, precision: int = 4) -> str:
