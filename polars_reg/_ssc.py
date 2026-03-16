@@ -79,3 +79,25 @@ def _compute_k_eff(k: int, k_fixef: str, df_abs: int, df_a_non_nested: int) -> i
     elif k_fixef == "full":
         return k + df_abs
     return k  # fallback
+
+
+def _backend_ssc(backend: str, estimator: str) -> SSC:
+    """Return the SSC that matches a given backend's conventions.
+
+    Args:
+        backend: "pyfixest", "statsmodels", "linearmodels", "r", "stata"
+        estimator: "ols", "iv2sls", "liml", "gmm_iv", "probit", "logit", "ppml", etc.
+    """
+    if backend == "stata":
+        if estimator in ("iv2sls", "liml"):
+            return SSC(k_adj=False, G_adj=False)  # Stata ivregress: asymptotic
+        return SSC(k_fixef="nonnested", G_df="min")  # Stata reghdfe
+    elif backend == "r":
+        return SSC(k_fixef="nonnested")  # R fixest default
+    elif backend == "pyfixest":
+        return SSC()  # Same as our defaults
+    elif backend == "statsmodels":
+        return SSC()  # Needs further validation
+    elif backend == "linearmodels":
+        return SSC()  # Needs further validation
+    return SSC()
