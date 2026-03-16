@@ -53,6 +53,51 @@ def _non_nested_fe_dof(
     return non_nested_dof
 
 
+def _apply_k_fixef_correction(
+    result: RegressionResult,
+    data: pl.DataFrame | pl.LazyFrame,
+    spec,
+    cluster: list[str],
+    ssc_obj: SSC,
+) -> RegressionResult:
+    """Post-correct Rust VCV for k_fixef mismatch.
+
+    Rust always uses k_fixef="nonnested" internally (N/(N-d-k) where d =
+    non-nested FE dof). When the user requests k_fixef="none", we rescale
+    to undo the non-nested correction. When k_fixef="full", we rescale to
+    include ALL FE dof, not just non-nested.
+    """
+    from polars_reg._utils import _to_codes
+
+    if isinstance(data, pl.LazyFrame):
+        data = data.collect()
+
+    fe_dict = {fe: _to_codes(data[fe]) for fe in spec.fe}
+    cl_dict = {c: _to_codes(data[c]) for c in cluster}
+    nn_dof = _non_nested_fe_dof(fe_dict, cl_dict, cluster)
+
+    n, k = result.n_obs, result.k
+    # Rust used: N/(N - nn_dof - k) when has_fe and k_adj
+    rust_k_eff = k + nn_dof
+
+    if ssc_obj.k_fixef == "none":
+        target_k_eff = k  # exclude all FE from k
+    elif ssc_obj.k_fixef == "full":
+        df_abs = absorbed_dof(fe_dict)
+        target_k_eff = k + df_abs
+    else:
+        # "nonnested" — matches Rust behavior, no correction needed
+        return result
+
+    if rust_k_eff != target_k_eff:
+        rust_factor = n / (n - rust_k_eff)
+        correct_factor = n / (n - target_k_eff)
+        rescale = correct_factor / rust_factor
+        result.vcov = result.vcov * rescale
+
+    return result
+
+
 def _ols_nofe_rust(
     data: pl.DataFrame | pl.LazyFrame,
     spec,
@@ -387,6 +432,9 @@ def ols(
     # Path 1: FE present — use rust_ols_from_arrays (demean + solve + all SE types)
     if _rust_eligible and spec.fe and (cluster or vcov in ("iid", "HC0", "HC1", "HC2", "HC3")):
         result = _ols_direct_rust(data, spec, cluster, vcov, ssc=ssc)
+        # Rust always uses k_fixef="nonnested" internally. Rescale if user wants different.
+        if ssc.k_adj and ssc.k_fixef != "nonnested" and cluster:
+            result = _apply_k_fixef_correction(result, data, spec, cluster, ssc)
         result.ssc = ssc
         return result
 
@@ -420,6 +468,20 @@ def ols(
             vcov,
             ssc=ssc,
         )
+        # Rust always uses k_fixef="nonnested" internally. Rescale if user wants different.
+        if ssc.k_adj and ssc.k_fixef != "nonnested" and cluster:
+            nn_dof = _non_nested_fe_dof(fe_dict, arrays.cluster_arrays, cluster)
+            n, k = result.n_obs, result.k
+            rust_k_eff = k + nn_dof
+            if ssc.k_fixef == "none":
+                target_k_eff = k
+            elif ssc.k_fixef == "full":
+                target_k_eff = k + absorbed_dof(fe_dict)
+            else:
+                target_k_eff = rust_k_eff
+            if rust_k_eff != target_k_eff:
+                rescale = (n / (n - target_k_eff)) / (n / (n - rust_k_eff))
+                result.vcov = result.vcov * rescale
         result.ssc = ssc
         return result
 
