@@ -5,7 +5,7 @@ import polars as pl
 import pytest
 from great_tables import GT
 
-from polars_reg import groupby_reg, ols, regtable
+from polars_reg import group_by_reg, ols, regtable
 from polars_reg._regtable import _normalize_stat
 
 
@@ -226,7 +226,7 @@ def test_regtable_precision(simple_data):
     assert len(html6) > 0
 
 
-def test_regtable_groupby_expansion():
+def test_regtable_group_by_expansion():
     """GroupRegressionResult is auto-expanded with group keys as labels."""
     rng = np.random.default_rng(42)
     n = 300
@@ -234,7 +234,7 @@ def test_regtable_groupby_expansion():
     x1 = rng.standard_normal(n)
     y = 1.0 + 2.0 * x1 + rng.standard_normal(n) * 0.5
     df = pl.DataFrame({"y": y, "x1": x1, "group": group})
-    grp = groupby_reg(ols, "y ~ x1", df, group_by="group")
+    grp = group_by_reg(ols, "y ~ x1", df, group_by="group")
     html = _html(regtable(grp))
     assert "A" in html
     assert "B" in html
@@ -242,7 +242,7 @@ def test_regtable_groupby_expansion():
     assert "x1" in html
 
 
-def test_regtable_groupby_mixed(simple_data):
+def test_regtable_group_by_mixed(simple_data):
     """Mix of RegressionResult and GroupRegressionResult works."""
     rng = np.random.default_rng(42)
     n = 200
@@ -250,7 +250,7 @@ def test_regtable_groupby_mixed(simple_data):
     x1 = rng.standard_normal(n)
     y = 1.0 + 2.0 * x1 + rng.standard_normal(n) * 0.5
     df = pl.DataFrame({"y": y, "x1": x1, "group": group})
-    grp = groupby_reg(ols, "y ~ x1", df, group_by="group")
+    grp = group_by_reg(ols, "y ~ x1", df, group_by="group")
     r_all = ols("y ~ x1", data=df)
     html = _html(regtable(r_all, grp))
     assert "(1)" in html

@@ -13,7 +13,7 @@ from polars_reg._diagnostics import (
     weak_instrument_test,
 )
 from polars_reg._gmm import gmm_iv, liml
-from polars_reg._groupby import GroupRegressionResult, groupby_reg
+from polars_reg._group_by import GroupRegressionResult, group_by_reg
 from polars_reg._iv import iv2sls
 from polars_reg._ols import ols
 from polars_reg._panel import panel_fd, panel_fe, panel_re
@@ -36,7 +36,7 @@ __all__ = [
     "panel_fd",
     "RegressionResult",
     "GroupRegressionResult",
-    "groupby_reg",
+    "group_by_reg",
     "regtable",
     "compare",
     "to_stata",

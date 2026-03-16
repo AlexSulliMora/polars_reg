@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 import polars as pl
 from great_tables import GT, loc, style
 
-from polars_reg._groupby import GroupRegressionResult
+from polars_reg._group_by import GroupRegressionResult
 from polars_reg._results import RegressionResult
 
 # A stat spec is (stat_key, open_bracket, close_bracket)

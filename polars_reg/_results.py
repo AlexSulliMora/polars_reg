@@ -166,7 +166,7 @@ class RegressionResult:
             raise ValueError("Fitted values not available (model was not stored).")
         return self._y - self.residuals
 
-    def _resolve_term(self, term: str, newdata: pl.DataFrame) -> NDArray:
+    def _resolve_term(self, term: str, new_data: pl.DataFrame) -> NDArray:
         """Resolve a single term (column name or indicator dummy) to a float array.
 
         Handles:
@@ -174,30 +174,30 @@ class RegressionResult:
         - ``col=level`` indicator dummies -> binary 0/1
         - plain column names -> column values
         """
-        n = len(newdata)
+        n = len(new_data)
         if term == "_cons":
             return np.ones(n, dtype=np.float64)
         if "=" in term:
             # Indicator dummy: format is col_name=level_value
             col_name, level_value = term.split("=", 1)
-            if col_name not in newdata.columns:
+            if col_name not in new_data.columns:
                 raise KeyError(
-                    f"Column '{col_name}' (from indicator '{term}') not found in newdata. "
-                    f"Available columns: {newdata.columns}"
+                    f"Column '{col_name}' (from indicator '{term}') not found in new_data. "
+                    f"Available columns: {new_data.columns}"
                 )
-            return (newdata[col_name].cast(pl.Utf8).to_numpy().astype(str) == level_value).astype(
+            return (new_data[col_name].cast(pl.Utf8).to_numpy().astype(str) == level_value).astype(
                 np.float64
             )
         # Plain column
-        if term not in newdata.columns:
+        if term not in new_data.columns:
             raise KeyError(
-                f"Column '{term}' not found in newdata. Available columns: {newdata.columns}"
+                f"Column '{term}' not found in new_data. Available columns: {new_data.columns}"
             )
-        return newdata[term].to_numpy().astype(np.float64)
+        return new_data[term].to_numpy().astype(np.float64)
 
-    def _build_newdata_X(self, newdata: pl.DataFrame) -> NDArray:
-        """Build the design matrix from *newdata* using ``self.names``."""
-        n = len(newdata)
+    def _build_new_data_X(self, new_data: pl.DataFrame) -> NDArray:
+        """Build the design matrix from *new_data* using ``self.names``."""
+        n = len(new_data)
         x_cols: list[NDArray] = []
         for name in self.names:
             if ":" in name:
@@ -206,38 +206,40 @@ class RegressionResult:
                 parts = name.split(":")
                 arr = np.ones(n, dtype=np.float64)
                 for p in parts:
-                    arr = arr * self._resolve_term(p, newdata)
+                    arr = arr * self._resolve_term(p, new_data)
                 x_cols.append(arr)
             else:
-                x_cols.append(self._resolve_term(name, newdata))
+                x_cols.append(self._resolve_term(name, new_data))
         return np.column_stack(x_cols) if x_cols else np.empty((n, 0), dtype=np.float64)
 
-    def predict(self, newdata: pl.DataFrame | None = None) -> NDArray:
-        """Return predictions. Without newdata, returns in-sample fitted values.
+    def predict(self, new_data: pl.DataFrame | None = None) -> NDArray:
+        """Return predictions. Without new_data, returns in-sample fitted values.
 
         Handles plain columns, ``_cons``, indicator dummies (``col=level``),
         continuous interactions (``x1:x2``), and indicator-continuous
         interactions (``col=level:x``).
         """
-        if newdata is not None:
-            X_new = self._build_newdata_X(newdata)
+        if new_data is not None:
+            X_new = self._build_new_data_X(new_data)
             return X_new @ self.coefficients
         return self.fitted()
 
-    def predict_interval(self, newdata: pl.DataFrame, alpha: float = 0.05) -> PredictIntervalResult:
+    def predict_interval(
+        self, new_data: pl.DataFrame, alpha: float = 0.05
+    ) -> PredictIntervalResult:
         """Return point predictions with prediction intervals.
 
         Uses ``Var(pred_i) = x_i' V x_i`` where *V* is the estimated VCV of
         the coefficients.
 
         Args:
-            newdata: Polars DataFrame with the same columns as the training data.
+            new_data: Polars DataFrame with the same columns as the training data.
             alpha: Significance level (default 0.05 for 95 % intervals).
 
         Returns:
             dict with keys ``fit``, ``se``, ``lower``, ``upper`` as 1-D NumPy arrays.
         """
-        X_new = self._build_newdata_X(newdata)
+        X_new = self._build_new_data_X(new_data)
         fit = X_new @ self.coefficients
 
         # Var(x_i' beta) = x_i' V x_i  for each row i

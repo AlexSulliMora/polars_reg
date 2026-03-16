@@ -13,7 +13,7 @@ from scipy import stats
 from polars_reg._results import RegressionResult
 
 if TYPE_CHECKING:
-    from polars_reg._groupby import GroupRegressionResult
+    from polars_reg._group_by import GroupRegressionResult
 
 
 class HausmanResult(TypedDict):
@@ -634,7 +634,7 @@ def grs_test_from_group(
     guarantee cross-asset alignment.
 
     Args:
-        group_result: Result from groupby_reg().
+        group_result: Result from group_by_reg().
         formula: Formula string used for the regressions.
         data: Original data (needed for factor moments and residual alignment).
         assets: Column name identifying test assets/portfolios.
@@ -644,7 +644,7 @@ def grs_test_from_group(
         GRSTestResult with F-statistic, p-value, Wald test, and diagnostics.
     """
     from polars_reg._formula import parse_formula
-    from polars_reg._groupby import GroupRegressionResult
+    from polars_reg._group_by import GroupRegressionResult
     from polars_reg._utils import ensure_polars
 
     if not isinstance(group_result, GroupRegressionResult):

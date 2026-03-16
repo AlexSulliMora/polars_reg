@@ -119,7 +119,7 @@ def test_grs_from_group_matches_raw(grs_panel_nonzero):
     raw = pr.grs_test(formula, data=df, assets="portfolio", time="date")
 
     # Group path
-    grp = pr.groupby_reg(pr.ols, formula, data=df, group_by="portfolio")
+    grp = pr.group_by_reg(pr.ols, formula, data=df, group_by="portfolio")
     from_grp = pr.grs_test_from_group(grp, formula, data=df, assets="portfolio", time="date")
 
     np.testing.assert_allclose(raw.statistic, from_grp.statistic, rtol=1e-10)
@@ -256,7 +256,7 @@ def test_grs_rejects_pandas(grs_panel_nonzero):
 
 def test_grs_failed_groups_error(grs_panel_nonzero):
     """Should raise if GroupRegressionResult has failures."""
-    from polars_reg._groupby import GroupRegressionResult
+    from polars_reg._group_by import GroupRegressionResult
 
     grp = GroupRegressionResult()
     grp.failed["bad_group"] = "some error"

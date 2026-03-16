@@ -273,12 +273,12 @@ class TestPPMLPredict:
         fitted = res._y - res.residuals
         np.testing.assert_allclose(fitted, mu_from_xb, rtol=1e-6)
 
-    def test_predict_newdata(self):
-        """Out-of-sample predict() with newdata."""
+    def test_predict_new_data(self):
+        """Out-of-sample predict() with new_data."""
         df = _make_poisson_data()
         res = ppml("y ~ x1 + x2", data=df)
 
-        newdata = pl.DataFrame(
+        new_data = pl.DataFrame(
             {
                 "x1": [0.0, 1.0, -1.0],
                 "x2": [0.0, 0.0, 0.0],
@@ -286,7 +286,7 @@ class TestPPMLPredict:
         )
         # predict() returns x'beta (linear predictor), not exp(x'beta)
         # This is consistent with other models in the package
-        pred = res.predict(newdata)
+        pred = res.predict(new_data)
         assert pred.shape == (3,)
         assert np.all(np.isfinite(pred))
 
