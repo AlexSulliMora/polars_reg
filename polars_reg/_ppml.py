@@ -165,19 +165,27 @@ def ppml(
         cluster_arrays_list = [arrays.cluster_arrays[c] for c in cluster]
 
         if len(cluster_arrays_list) == 1:
+            from polars_reg._ssc import _compute_k_eff
+
             codes, G = _recode_to_contiguous(cluster_arrays_list[0])
             meat = _clustered_meat(X, score_resid, codes, G)
-            dfc = (G / (G - 1)) * ((n - 1) / (n - k))
+            k_eff = _compute_k_eff(k, ssc.k_fixef, 0, 0)
+            k_adj_factor = (n - 1) / (n - k_eff) if ssc.k_adj else 1.0
+            G_adj_factor = G / (G - 1) if ssc.G_adj else 1.0
+            dfc = k_adj_factor * G_adj_factor
             V = dfc * H_inv @ meat @ H_inv
         else:
-            V = _mle_multiway_clustered(X, score_resid, cluster_arrays_list, H_inv, n, k)
+            V = _mle_multiway_clustered(X, score_resid, cluster_arrays_list, H_inv, n, k, ssc=ssc)
         vcov_type_out = "cluster"
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1
     elif vcov == "HC1":
         # Robust sandwich: H^{-1} M H^{-1} with n/(n-k) scaling
+        from polars_reg._ssc import _compute_k_eff
+
         meat = X.T @ (X * (score_resid**2)[:, None])
-        dfc = n / (n - k)
+        k_eff = _compute_k_eff(k, ssc.k_fixef, 0, 0)
+        dfc = n / (n - k_eff) if ssc.k_adj else 1.0
         V = dfc * H_inv @ meat @ H_inv
         vcov_type_out = "HC1"
         n_clusters = None

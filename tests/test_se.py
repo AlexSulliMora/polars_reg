@@ -102,10 +102,10 @@ def test_vcov_twoway_clustered():
 
     V = vcov_multiway_clustered(X, resid, [firm, year])
 
-    V_firm = vcov_clustered(X, resid, firm, df_correction=True)
-    V_year = vcov_clustered(X, resid, year, df_correction=True)
+    V_firm = vcov_clustered(X, resid, firm)
+    V_year = vcov_clustered(X, resid, year)
     interaction, _ = _interaction_codes(firm, year)
-    V_inter = vcov_clustered(X, resid, interaction, df_correction=True)
+    V_inter = vcov_clustered(X, resid, interaction)
     expected = V_firm + V_year - V_inter
 
     np.testing.assert_allclose(V, expected, rtol=1e-10)

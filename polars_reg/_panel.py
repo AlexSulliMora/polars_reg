@@ -106,14 +106,14 @@ def panel_fe(
 
     n_clusters_dict = None
     if vcov == "bootstrap":
-        V = vcov_pairs_bootstrap(X_dm, y_dm, n_boot=n_boot, seed=seed)
+        V = vcov_pairs_bootstrap(X_dm, y_dm, n_boot=n_boot, seed=seed, ssc=ssc)
         vcov_type_str = "bootstrap"
         df_r = n - k - df_abs
     elif vcov == "wildboot":
         if not cluster:
             raise ValueError("vcov='wildboot' requires cluster= parameter")
         cl_arr = arrays.cluster_arrays[cluster[0]]
-        V = vcov_wild_bootstrap(X_dm, resid, cl_arr, n_boot=n_boot, seed=seed)
+        V = vcov_wild_bootstrap(X_dm, resid, cl_arr, n_boot=n_boot, seed=seed, ssc=ssc)
         vcov_type_str = "wildboot"
         n_clusters_dict = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters_dict.values()) - 1
@@ -121,22 +121,26 @@ def panel_fe(
         if arrays.time_array is None:
             raise ValueError(f"vcov='{vcov}' requires time= parameter")
         if vcov == "NW":
-            V = vcov_hac(X_dm, resid, arrays.time_array, bandwidth=bandwidth)
+            V = vcov_hac(
+                X_dm, resid, arrays.time_array, bandwidth=bandwidth, ssc=ssc, df_abs=df_abs
+            )
         else:
-            V = vcov_driscoll_kraay(X_dm, resid, arrays.time_array, bandwidth=bandwidth)
+            V = vcov_driscoll_kraay(
+                X_dm, resid, arrays.time_array, bandwidth=bandwidth, ssc=ssc, df_abs=df_abs
+            )
         vcov_type_str = vcov
         df_r = n - k - df_abs
     elif cluster:
         cluster_arrays_list = [arrays.cluster_arrays[c] for c in cluster]
         if len(cluster_arrays_list) == 1:
-            V = vcov_clustered(X_dm, resid, cluster_arrays_list[0])
+            V = vcov_clustered(X_dm, resid, cluster_arrays_list[0], ssc=ssc)
         else:
-            V = vcov_multiway_clustered(X_dm, resid, cluster_arrays_list)
+            V = vcov_multiway_clustered(X_dm, resid, cluster_arrays_list, ssc=ssc)
         n_clusters_dict = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters_dict.values()) - 1
         vcov_type_str = "cluster"
     else:
-        V = vcov_iid(X_dm, resid, df_abs=df_abs)
+        V = vcov_iid(X_dm, resid, ssc=ssc, df_abs=df_abs)
         df_r = n - k - df_abs
         vcov_type_str = "iid"
 
@@ -299,7 +303,7 @@ def panel_re(
 
     n_clusters_dict = None
     if vcov == "bootstrap":
-        V = vcov_pairs_bootstrap(X_re, y_re, n_boot=n_boot, seed=seed)
+        V = vcov_pairs_bootstrap(X_re, y_re, n_boot=n_boot, seed=seed, ssc=ssc)
         vcov_type_str = "bootstrap"
         df_r = n - k
     elif vcov == "wildboot":
@@ -317,7 +321,7 @@ def panel_re(
                 .astype(np.int32)
             )
         )
-        V = vcov_wild_bootstrap(X_re, resid_re, cl_codes, n_boot=n_boot, seed=seed)
+        V = vcov_wild_bootstrap(X_re, resid_re, cl_codes, n_boot=n_boot, seed=seed, ssc=ssc)
         vcov_type_str = "wildboot"
         n_clusters_dict = {cluster[0]: len(np.unique(cl_codes))}
         df_r = n_clusters_dict[cluster[0]] - 1
@@ -329,12 +333,16 @@ def panel_re(
         except np.linalg.LinAlgError:
             raise ValueError("GLS design matrix is singular for HAC VCV.")
         score = X_re * resid_re[:, None]
+        from polars_reg._ssc import _compute_k_eff
+
+        k_eff = _compute_k_eff(k, ssc.k_fixef, 0, 0)
         if vcov == "NW":
             S = _hac_meat(score, arrays.time_array, bandwidth)
-            dfc = n / (n - k)
+            dfc = n / (n - k_eff) if ssc.k_adj else 1.0
         else:
             S = _dk_meat(score, arrays.time_array, bandwidth)
             T_unique = len(np.unique(arrays.time_array))
+            # T/(T-1) is intrinsic to DK, always applied
             dfc = T_unique / (T_unique - 1)
         V = dfc * XtX_inv @ S @ XtX_inv
         vcov_type_str = vcov
@@ -361,11 +369,11 @@ def panel_re(
                 cluster_arrays_list.append(cl)
 
         if vcov in ("HC0", "HC1"):
-            V = vcov_robust(X_re, resid_re, kind=vcov)
+            V = vcov_robust(X_re, resid_re, kind=vcov, ssc=ssc)
         elif len(cluster_arrays_list) == 1:
-            V = vcov_clustered(X_re, resid_re, cluster_arrays_list[0])
+            V = vcov_clustered(X_re, resid_re, cluster_arrays_list[0], ssc=ssc)
         else:
-            V = vcov_multiway_clustered(X_re, resid_re, cluster_arrays_list)
+            V = vcov_multiway_clustered(X_re, resid_re, cluster_arrays_list, ssc=ssc)
         if vcov in ("HC0", "HC1"):
             n_clusters_dict = None  # HC0/HC1 is robust, not clustered
             vcov_type_str = vcov
@@ -375,7 +383,7 @@ def panel_re(
             vcov_type_str = "cluster"
             df_r = min(n_clusters_dict.values()) - 1
     else:
-        V = vcov_iid(X_re, resid_re)
+        V = vcov_iid(X_re, resid_re, ssc=ssc)
         vcov_type_str = "iid"
         df_r = n - k
 
@@ -498,32 +506,32 @@ def panel_fd(
     n_clusters_dict = {c: len(np.unique(cluster_arrays[c])) for c in cluster}
 
     if vcov == "bootstrap":
-        V = vcov_pairs_bootstrap(X_d, y_d, n_boot=n_boot, seed=seed)
+        V = vcov_pairs_bootstrap(X_d, y_d, n_boot=n_boot, seed=seed, ssc=ssc)
         vcov_type_str = "bootstrap"
         df_r = n - k
     elif vcov == "wildboot":
         cl_arr = cluster_arrays[cluster[0]]
-        V = vcov_wild_bootstrap(X_d, resid, cl_arr, n_boot=n_boot, seed=seed)
+        V = vcov_wild_bootstrap(X_d, resid, cl_arr, n_boot=n_boot, seed=seed, ssc=ssc)
         vcov_type_str = "wildboot"
         df_r = min(n_clusters_dict.values()) - 1
     elif cluster:
         cluster_list = [cluster_arrays[c] for c in cluster]
         if len(cluster_list) == 1:
-            V = vcov_clustered(X_d, resid, cluster_list[0])
+            V = vcov_clustered(X_d, resid, cluster_list[0], ssc=ssc)
         else:
-            V = vcov_multiway_clustered(X_d, resid, cluster_list)
+            V = vcov_multiway_clustered(X_d, resid, cluster_list, ssc=ssc)
         vcov_type_str = "cluster"
         df_r = min(n_clusters_dict.values()) - 1
     elif vcov == "iid":
-        V = vcov_iid(X_d, resid)
+        V = vcov_iid(X_d, resid, ssc=ssc)
         vcov_type_str = "iid"
         df_r = n - k
     elif vcov in ("HC1", "HC0", "HC2", "HC3"):
-        V = vcov_robust(X_d, resid, kind=vcov)
+        V = vcov_robust(X_d, resid, kind=vcov, ssc=ssc)
         vcov_type_str = vcov
         df_r = n - k
     else:
-        V = vcov_iid(X_d, resid)
+        V = vcov_iid(X_d, resid, ssc=ssc)
         vcov_type_str = "iid"
         df_r = n - k
 

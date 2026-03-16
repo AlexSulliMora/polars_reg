@@ -61,3 +61,21 @@ def ssc(
 def _default_ssc() -> SSC:
     """Return default SSC (pyfixest convention)."""
     return SSC()
+
+
+def _compute_k_eff(k: int, k_fixef: str, df_abs: int, df_a_non_nested: int) -> int:
+    """Compute effective k for SSC adjustment.
+
+    Args:
+        k: Number of estimated coefficients (excluding absorbed FE).
+        k_fixef: How FE count in k ("none", "nonnested", "full").
+        df_abs: Total absorbed FE degrees of freedom.
+        df_a_non_nested: Non-nested FE degrees of freedom.
+    """
+    if k_fixef == "none":
+        return k
+    elif k_fixef == "nonnested":
+        return k + max(df_a_non_nested, 0)
+    elif k_fixef == "full":
+        return k + df_abs
+    return k  # fallback

@@ -8,6 +8,7 @@ import polars as pl
 import pytest
 
 import polars_reg as pr
+from polars_reg import ssc
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "stata"
 DATA_PATH = Path(__file__).parent / "fixtures" / "parity_data.csv"
@@ -128,25 +129,42 @@ def test_parity_ols_2fe_cluster(parity_data):
 
 
 def test_parity_iv_iid(parity_data):
-    result = pr.iv2sls("y ~ x1 || x_endog ~ z1 + z2", data=parity_data)
+    # Stata ivregress uses asymptotic VCV: sigma^2 = e'e/n, no dfc
+    result = pr.iv2sls(
+        "y ~ x1 || x_endog ~ z1 + z2", data=parity_data, ssc=ssc(k_adj=False, G_adj=False)
+    )
     compare_coefs(result, load_fixture("iv_iid"))
 
 
 def test_parity_iv_robust(parity_data):
-    result = pr.iv2sls("y ~ x1 || x_endog ~ z1 + z2", data=parity_data, vcov="HC1")
+    # Stata ivregress uses HC0 (no small-sample correction)
+    result = pr.iv2sls(
+        "y ~ x1 || x_endog ~ z1 + z2",
+        data=parity_data,
+        vcov="HC1",
+        ssc=ssc(k_adj=False, G_adj=False),
+    )
     compare_coefs(result, load_fixture("iv_robust"))
 
 
 def test_parity_iv_cluster(parity_data):
-    result = pr.iv2sls("y ~ x1 || x_endog ~ z1 + z2", data=parity_data, cluster=["firm_id"])
+    # Stata ivregress uses no dfc for clustered SEs
+    result = pr.iv2sls(
+        "y ~ x1 || x_endog ~ z1 + z2",
+        data=parity_data,
+        cluster=["firm_id"],
+        ssc=ssc(k_adj=False, G_adj=False),
+    )
     compare_coefs(result, load_fixture("iv_cluster"))
 
 
 def test_parity_iv_fe_cluster(parity_data):
+    # Stata ivregress uses no dfc for clustered SEs
     result = pr.iv2sls(
         "y ~ x1 | firm_id | x_endog ~ z1 + z2",
         data=parity_data,
         cluster=["firm_id"],
+        ssc=ssc(k_adj=False, G_adj=False),
     )
     compare_coefs(result, load_fixture("iv_fe_cluster"))
 

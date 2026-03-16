@@ -516,23 +516,25 @@ def ols(
     if cluster and vcov != "wildboot":
         cluster_arrays = [arrays.cluster_arrays[c] for c in cluster]
         # Compute non-nested FE DoF for reghdfe-style dfc adjustment
-        df_a_nn = _non_nested_fe_dof(fe_dict, arrays.cluster_arrays, cluster) if has_fe else -1
+        df_a_nn = _non_nested_fe_dof(fe_dict, arrays.cluster_arrays, cluster) if has_fe else 0
         if len(cluster_arrays) == 1:
-            V = vcov_clustered(Xw, resid_w, cluster_arrays[0], df_a_non_nested=df_a_nn)
+            V = vcov_clustered(Xw, resid_w, cluster_arrays[0], ssc=ssc, df_a_non_nested=df_a_nn)
         else:
-            V = vcov_multiway_clustered(Xw, resid_w, cluster_arrays, df_a_non_nested=df_a_nn)
+            V = vcov_multiway_clustered(
+                Xw, resid_w, cluster_arrays, ssc=ssc, df_a_non_nested=df_a_nn
+            )
         vcov_type = "cluster"
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1
     elif vcov == "bootstrap":
-        V = vcov_pairs_bootstrap(Xw, yw, n_boot=n_boot, seed=seed)
+        V = vcov_pairs_bootstrap(Xw, yw, n_boot=n_boot, seed=seed, ssc=ssc)
         vcov_type = "bootstrap"
         df_r = n_eff - k - df_abs
     elif vcov == "wildboot":
         if not cluster:
             raise ValueError("vcov='wildboot' requires cluster= parameter")
         cl_arr = arrays.cluster_arrays[cluster[0]]
-        V = vcov_wild_bootstrap(Xw, resid_w, cl_arr, n_boot=n_boot, seed=seed)
+        V = vcov_wild_bootstrap(Xw, resid_w, cl_arr, n_boot=n_boot, seed=seed, ssc=ssc)
         vcov_type = "wildboot"
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1
@@ -540,17 +542,21 @@ def ols(
         if arrays.time_array is None:
             raise ValueError(f"vcov='{vcov}' requires time= parameter")
         if vcov == "NW":
-            V = vcov_hac(Xw, resid_w, arrays.time_array, bandwidth=bandwidth)
+            V = vcov_hac(
+                Xw, resid_w, arrays.time_array, bandwidth=bandwidth, ssc=ssc, df_abs=df_abs
+            )
         else:
-            V = vcov_driscoll_kraay(Xw, resid_w, arrays.time_array, bandwidth=bandwidth)
+            V = vcov_driscoll_kraay(
+                Xw, resid_w, arrays.time_array, bandwidth=bandwidth, ssc=ssc, df_abs=df_abs
+            )
         vcov_type = vcov
         df_r = n_eff - k - df_abs
     elif vcov == "iid":
-        V = vcov_iid(Xw, resid_w, df_abs=df_abs)
+        V = vcov_iid(Xw, resid_w, ssc=ssc, df_abs=df_abs)
         vcov_type = "iid"
         df_r = n_eff - k - df_abs
     else:
-        V = vcov_robust(Xw, resid_w, kind=vcov, df_abs=df_abs)
+        V = vcov_robust(Xw, resid_w, kind=vcov, ssc=ssc, df_abs=df_abs)
         vcov_type = vcov
         df_r = n_eff - k - df_abs
 
