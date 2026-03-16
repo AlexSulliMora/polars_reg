@@ -539,3 +539,133 @@ class TestFamaMacBethRepr:
         assert "FamaMacBethResult" in r
         assert "N=20" in r
         assert "T=60" in r
+
+
+class TestFamaMacBethDataQuality:
+    """Tests for data quality edge cases (nulls, NaN, inf, gaps)."""
+
+    def test_fm_with_nulls_in_returns(self) -> None:
+        """Polars nulls in returns should be transparently dropped."""
+        rng = np.random.default_rng(42)
+        df, _, _ = _simulate_factor_model(rng, n_assets=30, n_periods=60)
+
+        # Inject Polars nulls into ~5% of the "ret" column
+        n_total = len(df)
+        n_null = int(n_total * 0.05)
+        null_indices = set(rng.choice(n_total, size=n_null, replace=False).tolist())
+        null_mask = pl.Series("m", [i in null_indices for i in range(n_total)])
+        df = df.with_columns(pl.when(null_mask).then(None).otherwise(pl.col("ret")).alias("ret"))
+        assert df["ret"].null_count() > 0
+
+        result = fama_macbeth(
+            "ret ~ f1 + f2 + f3",
+            data=df,
+            entity="entity",
+            time="time",
+        )
+
+        assert isinstance(result, FamaMacBethResult)
+        assert result.n_periods > 0
+        assert np.all(np.isfinite(result.mean_lambda))
+        assert np.all(np.isfinite(result.fm_se))
+
+    def test_fm_with_nan_in_factors(self) -> None:
+        """Float NaN in a factor column should be handled gracefully."""
+        rng = np.random.default_rng(42)
+        df, _, _ = _simulate_factor_model(rng, n_assets=30, n_periods=60)
+
+        # Inject float NaN into ~5% of f1 via numpy then reconstruct column
+        f1_vals = df["f1"].to_numpy().copy()
+        n_total = len(f1_vals)
+        n_nan = int(n_total * 0.05)
+        nan_indices = rng.choice(n_total, size=n_nan, replace=False)
+        f1_vals[nan_indices] = float("nan")
+        df = df.with_columns(pl.Series("f1", f1_vals))
+
+        result = fama_macbeth(
+            "ret ~ f1 + f2 + f3",
+            data=df,
+            entity="entity",
+            time="time",
+        )
+
+        assert isinstance(result, FamaMacBethResult)
+        assert result.n_periods > 0
+        assert np.all(np.isfinite(result.mean_lambda))
+        assert np.all(np.isfinite(result.fm_se))
+
+    def test_fm_with_inf_in_returns(self) -> None:
+        """Inf values in returns should be converted to null and dropped."""
+        rng = np.random.default_rng(42)
+        df, _, _ = _simulate_factor_model(rng, n_assets=30, n_periods=60)
+
+        # Inject np.inf into a few return values via numpy
+        ret_vals = df["ret"].to_numpy().copy()
+        ret_vals[10] = np.inf
+        ret_vals[100] = -np.inf
+        ret_vals[500] = np.inf
+        df = df.with_columns(pl.Series("ret", ret_vals))
+
+        result = fama_macbeth(
+            "ret ~ f1 + f2 + f3",
+            data=df,
+            entity="entity",
+            time="time",
+        )
+
+        assert isinstance(result, FamaMacBethResult)
+        assert result.n_periods > 0
+        assert np.all(np.isfinite(result.mean_lambda))
+        assert np.all(np.isfinite(result.fm_se))
+
+    def test_fm_with_time_gaps(self) -> None:
+        """Missing time periods (gaps) should be handled gracefully."""
+        rng = np.random.default_rng(42)
+        df, _, _ = _simulate_factor_model(rng, n_assets=30, n_periods=80)
+
+        # Remove all data for periods 50-55 (creating a gap)
+        df_gapped = df.filter(~pl.col("time").is_between(50, 55))
+
+        result = fama_macbeth(
+            "ret ~ f1 + f2 + f3",
+            data=df_gapped,
+            entity="entity",
+            time="time",
+        )
+
+        assert isinstance(result, FamaMacBethResult)
+        # The gap periods should simply not contribute valid cross-sections
+        assert result.n_periods > 0
+
+        # Lambda series should have rows for all periods that exist in data
+        ls = result.lambda_series()
+        # Periods 50-55 were removed, so total unique times = 80 - 6 = 74
+        assert len(ls) == 74
+
+        assert np.all(np.isfinite(result.mean_lambda))
+        assert np.all(np.isfinite(result.fm_se))
+
+    def test_fm_systematic_missing_periods(self) -> None:
+        """Assets missing specific time ranges should still produce valid results."""
+        rng = np.random.default_rng(42)
+        df, _, _ = _simulate_factor_model(rng, n_assets=30, n_periods=80)
+
+        # asset_0 missing periods 20-30, asset_1 missing periods 40-50
+        mask = ~(
+            ((df["entity"] == "asset_0") & pl.col("time").is_between(20, 30))
+            | ((df["entity"] == "asset_1") & pl.col("time").is_between(40, 50))
+        )
+        df_missing = df.filter(mask)
+
+        result = fama_macbeth(
+            "ret ~ f1 + f2 + f3",
+            data=df_missing,
+            entity="entity",
+            time="time",
+        )
+
+        assert isinstance(result, FamaMacBethResult)
+        assert result.n_periods > 0
+        assert result.n_assets > 0
+        assert np.all(np.isfinite(result.mean_lambda))
+        assert np.all(np.isfinite(result.fm_se))

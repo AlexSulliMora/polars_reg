@@ -554,6 +554,9 @@ def _fm_from_group(
             if ev in entity_to_idx:
                 Y[t_idx, entity_to_idx[ev]] = ret_vals[j]
 
+    # Convert inf/-inf to NaN so they are treated as missing
+    Y[~np.isfinite(Y)] = np.nan
+
     # Vectorized cross-sectional OLS for all periods at once
     # lambdas[t] = (X'X)^{-1} X' Y[t]'
     XtX = X_cs.T @ X_cs
@@ -718,6 +721,9 @@ def _fm_from_rolling(
         for j, ev in enumerate(ent_vals):
             if ev in entity_to_idx:
                 Y[t_idx, entity_to_idx[ev]] = ret_vals[j]
+
+    # Convert inf/-inf to NaN so they are treated as missing
+    Y[~np.isfinite(Y)] = np.nan
 
     # Per-period cross-sectional OLS with time-varying betas
     # For each period t, find the most recent window ending STRICTLY before t

@@ -405,3 +405,161 @@ def test_rolling_window_type_obs():
     # the same end-time key, so fewer unique keys are stored.
     assert len(result_obs_multi) < 25
     assert len(result_obs_multi) != len(result_periods)
+
+
+# ── Data quality edge cases ──────────────────────────────────────
+
+
+def test_rolling_with_nulls_in_data():
+    """Polars nulls in y should be transparently dropped per window."""
+    rng = np.random.default_rng(42)
+    n = 100
+    t = np.arange(n)
+    x = rng.standard_normal(n)
+    y = 1.5 * x + rng.standard_normal(n) * 0.5
+
+    df = pl.DataFrame({"y": y, "x": x, "t": t})
+
+    # Inject Polars nulls into ~10 rows of y
+    null_mask = pl.Series("m", [i in {5, 15, 25, 35, 45, 55, 65, 75, 85, 95} for i in range(n)])
+    df = df.with_columns(pl.when(null_mask).then(None).otherwise(pl.col("y")).alias("y"))
+    assert df["y"].null_count() == 10
+
+    result = pr.rolling_reg(pr.ols, "y ~ x", df, time="t", window=20)
+
+    assert len(result) > 0
+    for r in result.values():
+        assert np.all(np.isfinite(r.coefficients))
+        assert np.all(np.isfinite(r.se))
+
+
+def test_rolling_with_nan_in_data():
+    """NaN values in x should be converted to null and dropped by extract_arrays."""
+    rng = np.random.default_rng(42)
+    n = 100
+    t = np.arange(n)
+    x = rng.standard_normal(n)
+    y = 1.5 * x + rng.standard_normal(n) * 0.5
+
+    # Inject float NaN into x via numpy before converting to Polars
+    x_with_nan = x.copy()
+    nan_indices = [7, 17, 27, 37, 47, 57, 67, 77, 87, 97]
+    x_with_nan[nan_indices] = float("nan")
+
+    df = pl.DataFrame({"y": y, "x": x_with_nan, "t": t})
+
+    result = pr.rolling_reg(pr.ols, "y ~ x", df, time="t", window=20)
+
+    assert len(result) > 0
+    for r in result.values():
+        assert np.all(np.isfinite(r.coefficients))
+        assert np.all(np.isfinite(r.se))
+
+
+def test_rolling_with_inf_in_data():
+    """Inf/-inf values should be converted to null and dropped by extract_arrays."""
+    rng = np.random.default_rng(42)
+    n = 100
+    t = np.arange(n)
+    x = rng.standard_normal(n)
+    y = 1.5 * x + rng.standard_normal(n) * 0.5
+
+    # Inject inf and -inf into a few rows
+    x_with_inf = x.copy()
+    x_with_inf[10] = np.inf
+    x_with_inf[30] = -np.inf
+    x_with_inf[50] = np.inf
+
+    df = pl.DataFrame({"y": y, "x": x_with_inf, "t": t})
+
+    result = pr.rolling_reg(pr.ols, "y ~ x", df, time="t", window=20)
+
+    assert len(result) > 0
+    for r in result.values():
+        assert np.all(np.isfinite(r.coefficients))
+        assert np.all(np.isfinite(r.se))
+
+
+def test_rolling_with_time_gaps():
+    """Non-consecutive time values: windows should span distinct time values."""
+    rng = np.random.default_rng(42)
+    # Periods [0,1,2,3,4,10,11,12,13,14] — gap at 5-9
+    time_vals = [0, 1, 2, 3, 4, 10, 11, 12, 13, 14]
+    n = len(time_vals)
+    x = rng.standard_normal(n)
+    y = 2.0 * x + rng.standard_normal(n) * 0.3
+
+    df = pl.DataFrame({"y": y, "x": x, "t": time_vals})
+
+    result = pr.rolling_reg(pr.ols, "y ~ x", df, time="t", window=5, window_type="periods")
+
+    # 10 distinct time values, window=5 => 10 - 5 + 1 = 6 windows
+    assert len(result) == 6
+
+    # Keys should be actual time period values (not indices)
+    keys = list(result.keys())
+    # The window ends at positions [4, 5, 6, 7, 8, 9] in the sorted unique times
+    expected_keys = [time_vals[i] for i in range(4, 10)]
+    assert keys == expected_keys
+
+    # Verify all results are finite
+    for r in result.values():
+        assert np.all(np.isfinite(r.coefficients))
+
+
+def test_rolling_unbalanced_panel():
+    """Panel where entities have different numbers of time periods."""
+    rng = np.random.default_rng(42)
+
+    # Entity A: 50 time periods
+    t_a = np.arange(50)
+    x_a = rng.standard_normal(50)
+    y_a = 1.0 * x_a + rng.standard_normal(50) * 0.5
+    df_a = pl.DataFrame(
+        {
+            "y": y_a,
+            "x": x_a,
+            "entity": ["A"] * 50,
+            "t": t_a,
+        }
+    )
+
+    # Entity B: 30 time periods
+    t_b = np.arange(30)
+    x_b = rng.standard_normal(30)
+    y_b = 2.0 * x_b + rng.standard_normal(30) * 0.5
+    df_b = pl.DataFrame(
+        {
+            "y": y_b,
+            "x": x_b,
+            "entity": ["B"] * 30,
+            "t": t_b,
+        }
+    )
+
+    df = pl.concat([df_a, df_b])
+
+    result = pr.rolling_reg(
+        pr.ols,
+        "y ~ x",
+        df,
+        time="t",
+        window=20,
+        group_by="entity",
+    )
+
+    by_ent = result.by_entity()
+    assert "A" in by_ent
+    assert "B" in by_ent
+
+    # A has more windows than B since it has more periods
+    # A: uses global unique times (50 periods), windows where entity has data
+    # B: only has data for 30 periods, windows beyond that will fail or be empty
+    assert len(by_ent["A"]) > 0
+    assert len(by_ent["B"]) > 0
+    assert len(by_ent["A"]) > len(by_ent["B"])
+
+    # All successful results should have finite coefficients
+    for ent_result in by_ent.values():
+        for r in ent_result.values():
+            assert np.all(np.isfinite(r.coefficients))
