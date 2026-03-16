@@ -2,6 +2,7 @@
 
 from polars_reg._arellano_bond import panel_ab, panel_sys_gmm
 from polars_reg._binary import logit, marginal_effects, odds_ratios, probit
+from polars_reg._compare import compare
 from polars_reg._diagnostics import (
     GRSTestResult,
     grs_test,
@@ -21,8 +22,8 @@ from polars_reg._ppml import ppml
 from polars_reg._quantile import quantreg
 from polars_reg._regtable import regtable
 from polars_reg._results import RegressionResult
-from polars_reg.r_equiv import compare_r, to_r
-from polars_reg.stata import compare_stata, to_stata
+from polars_reg.r_equiv import to_r
+from polars_reg.stata import to_stata
 
 __all__ = [
     "ols",
@@ -36,10 +37,9 @@ __all__ = [
     "GroupRegressionResult",
     "groupby_reg",
     "regtable",
+    "compare",
     "to_stata",
-    "compare_stata",
     "to_r",
-    "compare_r",
     "hausman_test",
     "weak_instrument_test",
     "kleibergen_paap_test",
