@@ -41,7 +41,7 @@ The computational backend is written in Rust (via PyO3), with parallel demeaning
 
 - **Stata equivalence** — `to_stata()` generates the matching Stata command for any specification
 - **R equivalence** — `to_r()` generates the matching fixest/lm call
-- **Automated comparison** — `compare_stata()` and `compare_r()` run the command and diff coefficients
+- **Cross-package comparison** — `compare()` runs the same regression in pyfixest, statsmodels, linearmodels, R, and Stata, then diffs coefficients and SEs
 
 ## Performance
 
@@ -181,16 +181,23 @@ result.avplot()          # added-variable plots
 - `vcov="bootstrap"` — pairs bootstrap
 - `vcov="wildboot"` — wild cluster bootstrap (requires `cluster=`)
 
-## Stata / R Equivalence
+## Cross-Package Comparison
 
-Generate equivalent code to verify results in Stata or R:
+Compare results against other packages with a single call:
 
 ```python
-# Stata code
+# Compare against all available backends (pyfixest, statsmodels, linearmodels, R, Stata)
+report = pr.compare("ols", "y ~ x1 + x2", df, vcov="HC1")
+print(report.summary())
+# Shows side-by-side coefficients, SEs, and max relative differences
+
+# Compare a specific backend
+report = pr.compare("probit", "y ~ x1 + x2", df, backend="statsmodels")
+
+# Generate equivalent Stata/R code for manual verification
 print(pr.to_stata("ols", "y ~ x1 + x2 | firm_id", cluster=["firm_id"]))
 # → reghdfe y x1 x2, absorb(firm_id) vce(cluster firm_id)
 
-# R code
 print(pr.to_r("ols", "y ~ x1 + x2 | firm_id", cluster=["firm_id"]))
 # → library(fixest)
 #   model <- feols(y ~ x1 + x2 | firm_id, data=df, vcov=~firm_id)
