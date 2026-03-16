@@ -84,7 +84,7 @@ Input vocabulary:
 
 `"robust"` is **not** a valid input value. Stata's `robust` maps to HC1, but R's `sandwich` package defaults to HC0 — the ambiguity invites mistakes. Use the explicit HC variant instead.
 
-**SSC interaction:** The `ssc` parameter (`SSC | None`) controls the degrees-of-freedom correction applied to each vcov type. Different backends use different SSC conventions (e.g., Stata `reghdfe` uses `k_fixef="nonnested", G_df="min"`, while pyfixest uses the default). The `_backend_ssc()` function in `_ssc.py` maps backend names to their SSC conventions, and `compare(match_ssc=True)` uses this to run polars_reg with each backend's SSC for apples-to-apples SE comparison.
+**SSC interaction:** The `ssc` parameter (`SSC | None`) controls the degrees-of-freedom correction applied to each vcov type. The default SSC (`k_fixef="nonnested", G_df="min"`) matches pyfixest, Stata `reghdfe`, and R `fixest`. Different backends may use different SSC conventions for specific estimators (e.g., Stata `ivregress` uses `k_adj=False, G_adj=False`). The `_backend_ssc()` function in `_ssc.py` maps backend names to their SSC conventions, and `compare(match_ssc=True)` uses this to run polars_reg with each backend's SSC for apples-to-apples SE comparison.
 
 **Minimum set for new estimators:**
 - *vcov strings:* `{iid, HC1}`

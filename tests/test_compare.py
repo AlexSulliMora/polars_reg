@@ -241,15 +241,16 @@ def test_compare_match_ssc_pyfixest_no_duplicate(ols_data):
     assert len(report.polars_matched) == 0
 
 
-def test_compare_match_ssc_stata_adds_column(ols_data):
-    """match_ssc=True with stata backend adds a polars_reg (stata ssc) column."""
+def test_compare_match_ssc_stata_ols_no_extra_column(ols_data):
+    """match_ssc=True with stata OLS backend does NOT add an extra column.
+
+    Stata reghdfe SSC now matches the default (k_fixef='nonnested', G_df='min'),
+    so no separate matched run is produced for OLS.
+    """
     report = compare("ols", "y ~ x1 + x2", ols_data, backend="stata", match_ssc=True, vcov="HC1")
     assert isinstance(report, ComparisonReport)
-    # Stata SSC differs from default → matched run should exist
-    assert "polars_reg_stata_ssc" in report.polars_matched
-    run = report.polars_matched["polars_reg_stata_ssc"]
-    assert run.label == "polars_reg (stata ssc)"
-    assert len(run.coefs) > 0
+    # Stata OLS SSC matches default → no matched run
+    assert "polars_reg_stata_ssc" not in report.polars_matched
 
 
 def test_compare_match_ssc_summary_renders(ols_data):
@@ -272,10 +273,14 @@ def test_compare_match_ssc_code_output(ols_data):
 
 
 def test_compare_match_ssc_repr(ols_data):
-    """repr includes ssc-matched count when match_ssc=True."""
+    """repr works with match_ssc=True.
+
+    For OLS with Stata backend, SSC matches default so no ssc-matched
+    column is produced. The repr should still be valid.
+    """
     report = compare("ols", "y ~ x1 + x2", ols_data, backend="stata", match_ssc=True, vcov="HC1")
     r = repr(report)
-    assert "ssc-matched" in r
+    assert "ComparisonReport" in r
 
 
 def test_compare_ssc_parameter(ols_data):

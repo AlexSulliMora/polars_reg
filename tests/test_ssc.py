@@ -26,9 +26,9 @@ class TestSSCConstruction:
     def test_defaults(self):
         s = SSC()
         assert s.k_adj is True
-        assert s.k_fixef == "none"
+        assert s.k_fixef == "nonnested"
         assert s.G_adj is True
-        assert s.G_df == "conventional"
+        assert s.G_df == "min"
 
     def test_custom_values(self):
         s = SSC(k_adj=False, k_fixef="nonnested", G_adj=False, G_df="min")
@@ -101,7 +101,8 @@ class TestSscFunction:
         assert result == SSC(k_adj=False, k_fixef="nonnested", G_adj=False, G_df="min")
 
     def test_stata_preset(self):
-        result = ssc(k_fixef="nonnested", G_df="min")
+        # Stata reghdfe convention is now the default
+        result = ssc()
         assert result.k_fixef == "nonnested"
         assert result.G_df == "min"
         assert result.k_adj is True

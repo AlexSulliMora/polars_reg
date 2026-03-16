@@ -16,18 +16,20 @@ class SSC:
         k_adj: If True, apply (N-1)/(N-k) residual df scaling for clustered,
             N/(N-k) for heteroskedastic. If False, no residual df scaling.
         k_fixef: How absorbed fixed effects count in k.
-            "none": FE excluded from k (default, matches pyfixest).
-            "nonnested": FE not nested in any cluster dimension count in k.
+            "nonnested": FE not nested in any cluster dimension count in k
+            (default, matches pyfixest).
+            "none": FE excluded from k.
             "full": all FE parameters count in k.
         G_adj: If True, apply G/(G-1) cluster scaling. If False, no cluster scaling.
-        G_df: For multiway clustering: "conventional" applies G_i/(G_i-1) per term,
-            "min" applies min(G)/(min(G)-1) to all terms.
+        G_df: For multiway clustering: "min" applies min(G)/(min(G)-1) to all
+            terms (default, matches pyfixest). "conventional" applies
+            G_i/(G_i-1) per term.
     """
 
     k_adj: bool = True
-    k_fixef: str = "none"
+    k_fixef: str = "nonnested"
     G_adj: bool = True
-    G_df: str = "conventional"
+    G_df: str = "min"
 
     def __post_init__(self):
         if self.k_fixef not in ("none", "nonnested", "full"):
@@ -40,17 +42,19 @@ class SSC:
 
 def ssc(
     k_adj: bool = True,
-    k_fixef: str = "none",
+    k_fixef: str = "nonnested",
     G_adj: bool = True,
-    G_df: str = "conventional",
+    G_df: str = "min",
 ) -> SSC:
     """Configure small-sample corrections. Matches pyfixest conventions.
 
     Common presets:
-        Default (pyfixest):    ssc()
-        Stata reghdfe:         ssc(k_fixef="nonnested", G_df="min")
+        Default (pyfixest):    ssc()  # k_fixef="nonnested", G_df="min"
+        Stata reghdfe:         ssc()  # same as default
         Stata ivregress:       ssc(k_adj=False, G_adj=False)
-        R fixest:              ssc(k_fixef="nonnested")
+        R fixest:              ssc()  # same as default
+        Exclude FE from k:     ssc(k_fixef="none")
+        Per-term G correction: ssc(G_df="conventional")
         No corrections:        ssc(k_adj=False, G_adj=False)
 
     See https://pyfixest.org/ssc.html for details.
@@ -91,9 +95,9 @@ def _backend_ssc(backend: str, estimator: str) -> SSC:
     if backend == "stata":
         if estimator in ("iv2sls", "liml"):
             return SSC(k_adj=False, G_adj=False)  # Stata ivregress: asymptotic
-        return SSC(k_fixef="nonnested", G_df="min")  # Stata reghdfe
+        return SSC()  # Stata reghdfe: same as default
     elif backend == "r":
-        return SSC(k_fixef="nonnested")  # R fixest default
+        return SSC()  # R fixest: same as default
     elif backend == "pyfixest":
         return SSC()  # Same as our defaults
     elif backend == "statsmodels":

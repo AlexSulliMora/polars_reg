@@ -92,7 +92,13 @@ def test_vcov_clustered_oneway():
 
 
 def test_vcov_twoway_clustered():
-    """Two-way clustering: V = V_A + V_B - V_{A*B}."""
+    """Two-way clustering: V = V_A + V_B - V_{A*B}.
+
+    Uses G_df="conventional" so that each term gets its own G/(G-1) factor,
+    matching manual decomposition via individual vcov_clustered calls.
+    """
+    from polars_reg._ssc import SSC
+
     rng = np.random.default_rng(42)
     n = 200
     X = np.column_stack([rng.standard_normal(n), np.ones(n)])
@@ -100,7 +106,8 @@ def test_vcov_twoway_clustered():
     firm = np.repeat(np.arange(10), 20)
     year = np.tile(np.arange(20), 10)
 
-    V = vcov_multiway_clustered(X, resid, [firm, year])
+    conv_ssc = SSC(G_df="conventional")
+    V = vcov_multiway_clustered(X, resid, [firm, year], ssc=conv_ssc)
 
     V_firm = vcov_clustered(X, resid, firm)
     V_year = vcov_clustered(X, resid, year)
