@@ -14,11 +14,28 @@ import warnings
 import numpy as np
 import polars as pl
 
+from polars_reg._binary import _newton_raphson
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
 from polars_reg._se import compute_vcov
 from polars_reg._ssc import SSC, _default_ssc
 from polars_reg._utils import ensure_polars, extract_arrays, validate_vcov
+
+
+def _ppml_score_hess(
+    beta: np.ndarray, X: np.ndarray, y: np.ndarray
+) -> tuple[float, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Poisson score, Hessian, and auxiliary data for Newton-Raphson.
+
+    Returns (ll, score, H, mu, score_resid) matching the _newton_raphson
+    callable interface: (ll, score, H, aux1, aux2).
+    """
+    mu = np.clip(np.exp(X @ beta), 1e-10, 1e10)
+    score_resid = y - mu
+    score = X.T @ score_resid
+    H = -X.T @ (X * mu[:, None])
+    ll = float(np.sum(y * np.log(np.maximum(mu, 1e-300)) - mu))
+    return ll, score, H, mu, score_resid
 
 
 def _ppml_deviance(y: np.ndarray, mu: np.ndarray) -> float:
@@ -95,45 +112,12 @@ def ppml(
 
     # Initialize with OLS on log(y), replacing y=0 with 0.5 to avoid log(0)
     y_safe = np.where(y > 0, y, 0.5)
-    beta = np.linalg.lstsq(X, np.log(y_safe), rcond=None)[0]
+    beta0 = np.linalg.lstsq(X, np.log(y_safe), rcond=None)[0]
 
-    converged = False
-    for iteration in range(max_iter):
-        mu = np.exp(X @ beta)
-        # Clip conditional mean to (1e-10, 1e10): prevents underflow/overflow
-        # in the Hessian X'diag(mu)X and deviance computation
-        mu = np.clip(mu, 1e-10, 1e10)
-
-        # Newton-Raphson step (Santos Silva & Tenreyro 2006, §2)
-        # Score: X'(y - mu), Hessian: -X'diag(mu)X
-        score_resid = y - mu  # n-vector of (y_i - mu_i)
-        score = X.T @ score_resid
-        hessian = -X.T @ (X * mu[:, None])
-
-        try:
-            step = np.linalg.solve(hessian, score)
-        except np.linalg.LinAlgError:
-            warnings.warn(
-                "Singular Hessian in PPML Newton-Raphson; using pseudoinverse",
-                stacklevel=2,
-            )
-            step = np.linalg.lstsq(hessian, score, rcond=None)[0]
-
-        beta = beta - step
-        if np.max(np.abs(step)) < tol:
-            converged = True
-            break
-
-    if not converged:
-        warnings.warn(
-            f"PPML did not converge after {max_iter} iterations",
-            stacklevel=2,
-        )
-
-    # Final mu
-    mu = np.exp(X @ beta)
-    mu = np.clip(mu, 1e-10, 1e10)
-    score_resid = y - mu
+    # Newton-Raphson using shared solver from _binary.py
+    beta, _ll, H, mu, score_resid, _score = _newton_raphson(
+        _ppml_score_hess, beta0, X, y, max_iter=max_iter, tol=tol
+    )
 
     # Separation detection: |beta| > 10 suggests quasi-complete separation
     # (coefficient diverging because a regressor perfectly predicts y=0)
@@ -151,8 +135,7 @@ def ppml(
             stacklevel=2,
         )
 
-    # Hessian at convergence (information matrix)
-    H = -X.T @ (X * mu[:, None])
+    # Hessian at convergence (information matrix) — H is returned from NR solver
     H_inv = np.linalg.inv(-H)  # (X'WX)^{-1} where W = diag(mu)
 
     # Goodness of fit: Pseudo R-squared based on deviance
