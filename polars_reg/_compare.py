@@ -464,6 +464,10 @@ def _run_statsmodels(
         fit_kwargs["cov_type"] = vcov
     # else iid (default)
 
+    # statsmodels cannot absorb fixed effects — skip if FE present
+    if spec.fe and estimator in ("ols", "panel_fe", "panel_fd"):
+        return None
+
     code = ""
     try:
         if estimator in ("ols", "panel_fe", "panel_fd"):
