@@ -30,7 +30,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-          pip install pandas pyarrow
+          pip install pandas pyarrow pyfixest statsmodels linearmodels
 
       - name: Lint
         run: ruff check .
