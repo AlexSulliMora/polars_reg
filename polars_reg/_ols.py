@@ -9,16 +9,8 @@ from polars_reg._native import rust_ols_core as _rust_ols_core
 from polars_reg._native import rust_ols_from_arrays as _rust_ols_from_arrays
 from polars_reg._native import rust_ols_nofe as _rust_ols_nofe
 from polars_reg._results import RegressionResult
-from polars_reg._se import (
-    vcov_clustered,
-    vcov_driscoll_kraay,
-    vcov_hac,
-    vcov_iid,
-    vcov_multiway_clustered,
-    vcov_pairs_bootstrap,
-    vcov_robust,
-    vcov_wild_bootstrap,
-)
+from polars_reg._se import compute_vcov
+from polars_reg._ssc import SSC, _default_ssc
 from polars_reg._utils import _to_codes, ensure_polars, extract_arrays, sanitize_inf, validate_vcov
 
 
@@ -61,13 +53,61 @@ def _non_nested_fe_dof(
     return non_nested_dof
 
 
+def _apply_k_fixef_correction(
+    result: RegressionResult,
+    data: pl.DataFrame | pl.LazyFrame,
+    spec,
+    cluster: list[str],
+    ssc_obj: SSC,
+) -> RegressionResult:
+    """Post-correct Rust VCV for k_fixef mismatch.
+
+    Rust always uses k_fixef="nonnested" internally (N/(N-d-k) where d =
+    non-nested FE dof). When the user requests k_fixef="none", we rescale
+    to undo the non-nested correction. When k_fixef="full", we rescale to
+    include ALL FE dof, not just non-nested.
+    """
+    from polars_reg._utils import _to_codes
+
+    if isinstance(data, pl.LazyFrame):
+        data = data.collect()
+
+    fe_dict = {fe: _to_codes(data[fe]) for fe in spec.fe}
+    cl_dict = {c: _to_codes(data[c]) for c in cluster}
+    nn_dof = _non_nested_fe_dof(fe_dict, cl_dict, cluster)
+
+    n, k = result.n_obs, result.k
+    # Rust used: N/(N - nn_dof - k) when has_fe and k_adj
+    rust_k_eff = k + nn_dof
+
+    if ssc_obj.k_fixef == "none":
+        target_k_eff = k  # exclude all FE from k
+    elif ssc_obj.k_fixef == "full":
+        df_abs = absorbed_dof(fe_dict)
+        target_k_eff = k + df_abs
+    else:
+        # "nonnested" — matches Rust behavior, no correction needed
+        return result
+
+    if rust_k_eff != target_k_eff:
+        rust_factor = n / (n - rust_k_eff)
+        correct_factor = n / (n - target_k_eff)
+        rescale = correct_factor / rust_factor
+        result.vcov = result.vcov * rescale
+
+    return result
+
+
 def _ols_nofe_rust(
     data: pl.DataFrame | pl.LazyFrame,
     spec,
     cluster: list[str] | None,
     vcov: str,
+    ssc: SSC | None = None,
 ) -> RegressionResult:
     """Rust path for plain OLS (no FE) with all SE types."""
+    if ssc is None:
+        ssc = _default_ssc()
     if isinstance(data, pl.LazyFrame):
         all_cols = [spec.depvar] + list(spec.exog)
         if cluster:
@@ -114,6 +154,8 @@ def _ols_nofe_rust(
         [np.ascontiguousarray(a, dtype=np.int32) for a in cl_arrays],
         cl_names,
         vcov if not cluster else "cluster",
+        ssc.k_adj,
+        ssc.G_adj,
     )
 
     beta = np.asarray(beta)
@@ -151,11 +193,14 @@ def _ols_direct_rust(
     spec,
     cluster: list[str] | None,
     vcov: str,
+    ssc: SSC | None = None,
 ) -> RegressionResult:
     """Ultra-fast path: extract columns and run OLS entirely in Rust.
 
     Skips extract_arrays, column_stack, and astype overhead.
     """
+    if ssc is None:
+        ssc = _default_ssc()
     if isinstance(data, pl.LazyFrame):
         all_cols = [spec.depvar] + list(spec.exog) + list(spec.fe)
         if cluster:
@@ -223,6 +268,8 @@ def _ols_direct_rust(
         1e-8,
         100_000,
         vcov if not cluster else "cluster",
+        ssc.k_adj,
+        ssc.G_adj,
     )
 
     beta = np.asarray(beta)
@@ -263,8 +310,11 @@ def _ols_rust_path(
     fe_dict: dict[str, np.ndarray],
     cluster: list[str] | None,
     vcov: str,
+    ssc: SSC | None = None,
 ) -> RegressionResult:
     """Fast Rust path for OLS with FE + optional clustering."""
+    if ssc is None:
+        ssc = _default_ssc()
     X, y = arrays.X, arrays.y
 
     # Remove intercept (absorbed by FE)
@@ -289,6 +339,8 @@ def _ols_rust_path(
         cl_codes_list,
         1e-8,  # tol
         100_000,  # max_iter
+        ssc.k_adj,
+        ssc.G_adj,
     )
 
     beta = np.asarray(beta)
@@ -302,13 +354,6 @@ def _ols_rust_path(
         vcov_type = "cluster"
     else:
         n_clusters = None
-        # Rust computed iid VCV with sigma^2/(n-k), adjust for df_abs
-        rss = resid @ resid
-        sigma2 = rss / (n - k - df_abs) if (n - k - df_abs) > 0 else 0.0
-        if (n - k) > 0 and rss > 0:
-            XtX_inv = V / (rss / (n - k))
-            V = sigma2 * XtX_inv
-        # else: V stays as the Rust-computed value (or zero for perfect fit)
         df_r = n - k - df_abs
         vcov_type = "iid"
 
@@ -338,6 +383,7 @@ def ols(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    ssc: SSC | None = None,
     time: str | None = None,
     bandwidth: int | None = None,
     weights: str | None = None,
@@ -352,6 +398,7 @@ def ols(
         data: Polars DataFrame or LazyFrame
         vcov: "iid", "HC0"-"HC3", "NW", "DK", "bootstrap", or "wildboot"
         cluster: Column name(s) for clustered SEs. Overrides vcov (except wildboot).
+        ssc: Small-sample correction configuration. Default: pyfixest conventions.
         time: Column name for time ordering (required for NW/DK).
         bandwidth: Number of lags for HAC/DK. Default: Newey-West rule of thumb.
         weights: Column name for analytic weights (WLS). Minimizes sum w_i*(y_i - x_i'b)^2.
@@ -359,6 +406,8 @@ def ols(
         n_boot: Bootstrap replications (default 999). For vcov="bootstrap"/"wildboot".
         seed: Random seed for bootstrap reproducibility.
     """
+    if ssc is None:
+        ssc = _default_ssc()
     if isinstance(cluster, str):
         cluster = [cluster]
     if weights and fweights:
@@ -382,11 +431,18 @@ def ols(
 
     # Path 1: FE present — use rust_ols_from_arrays (demean + solve + all SE types)
     if _rust_eligible and spec.fe and (cluster or vcov in ("iid", "HC0", "HC1", "HC2", "HC3")):
-        return _ols_direct_rust(data, spec, cluster, vcov)
+        result = _ols_direct_rust(data, spec, cluster, vcov, ssc=ssc)
+        # Rust always uses k_fixef="nonnested" internally. Rescale if user wants different.
+        if ssc.k_adj and ssc.k_fixef != "nonnested" and cluster:
+            result = _apply_k_fixef_correction(result, data, spec, cluster, ssc)
+        result.ssc = ssc
+        return result
 
     # Path 2: No FE — use rust_ols_nofe (solve + iid/HC0-HC3/cluster SE)
     if _rust_eligible and not spec.fe and (cluster or vcov in ("iid", "HC0", "HC1", "HC2", "HC3")):
-        return _ols_nofe_rust(data, spec, cluster, vcov)
+        result = _ols_nofe_rust(data, spec, cluster, vcov, ssc=ssc)
+        result.ssc = ssc
+        return result
 
     weight_col = weights or fweights
     arrays = extract_arrays(data, spec, cluster=cluster, time=time, weights=weight_col)
@@ -404,13 +460,30 @@ def ols(
         and (cluster or vcov == "iid")
     )
     if use_rust:
-        return _ols_rust_path(
+        result = _ols_rust_path(
             arrays,
             spec,
             fe_dict,
             cluster,
             vcov,
+            ssc=ssc,
         )
+        # Rust always uses k_fixef="nonnested" internally. Rescale if user wants different.
+        if ssc.k_adj and ssc.k_fixef != "nonnested" and cluster:
+            nn_dof = _non_nested_fe_dof(fe_dict, arrays.cluster_arrays, cluster)
+            n, k = result.n_obs, result.k
+            rust_k_eff = k + nn_dof
+            if ssc.k_fixef == "none":
+                target_k_eff = k
+            elif ssc.k_fixef == "full":
+                target_k_eff = k + absorbed_dof(fe_dict)
+            else:
+                target_k_eff = rust_k_eff
+            if rust_k_eff != target_k_eff:
+                rescale = (n / (n - target_k_eff)) / (n / (n - rust_k_eff))
+                result.vcov = result.vcov * rescale
+        result.ssc = ssc
+        return result
 
     # Handle frequency weights: expand effective sample size
     fw = None
@@ -503,43 +576,48 @@ def ols(
     # Variance-covariance (uses weighted X and residuals for sandwich)
     n_clusters = None
     if cluster and vcov != "wildboot":
-        cluster_arrays = [arrays.cluster_arrays[c] for c in cluster]
-        # Compute non-nested FE DoF for reghdfe-style dfc adjustment
-        df_a_nn = _non_nested_fe_dof(fe_dict, arrays.cluster_arrays, cluster) if has_fe else -1
-        if len(cluster_arrays) == 1:
-            V = vcov_clustered(Xw, resid_w, cluster_arrays[0], df_a_non_nested=df_a_nn)
-        else:
-            V = vcov_multiway_clustered(Xw, resid_w, cluster_arrays, df_a_non_nested=df_a_nn)
+        cl_list = [arrays.cluster_arrays[c] for c in cluster]
+        df_a_nn = _non_nested_fe_dof(fe_dict, arrays.cluster_arrays, cluster) if has_fe else 0
+        V = compute_vcov(
+            Xw,
+            resid_w,
+            vcov,
+            ssc,
+            cluster_arrays=cl_list,
+            df_a_non_nested=df_a_nn,
+        )
         vcov_type = "cluster"
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1
-    elif vcov == "bootstrap":
-        V = vcov_pairs_bootstrap(Xw, yw, n_boot=n_boot, seed=seed)
-        vcov_type = "bootstrap"
-        df_r = n_eff - k - df_abs
     elif vcov == "wildboot":
         if not cluster:
             raise ValueError("vcov='wildboot' requires cluster= parameter")
-        cl_arr = arrays.cluster_arrays[cluster[0]]
-        V = vcov_wild_bootstrap(Xw, resid_w, cl_arr, n_boot=n_boot, seed=seed)
+        cl_list = [arrays.cluster_arrays[c] for c in cluster]
+        V = compute_vcov(
+            Xw,
+            resid_w,
+            vcov,
+            ssc,
+            cluster_arrays=cl_list,
+            n_boot=n_boot,
+            seed=seed,
+        )
         vcov_type = "wildboot"
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1
-    elif vcov in ("NW", "DK"):
-        if arrays.time_array is None:
-            raise ValueError(f"vcov='{vcov}' requires time= parameter")
-        if vcov == "NW":
-            V = vcov_hac(Xw, resid_w, arrays.time_array, bandwidth=bandwidth)
-        else:
-            V = vcov_driscoll_kraay(Xw, resid_w, arrays.time_array, bandwidth=bandwidth)
-        vcov_type = vcov
-        df_r = n_eff - k - df_abs
-    elif vcov == "iid":
-        V = vcov_iid(Xw, resid_w, df_abs=df_abs)
-        vcov_type = "iid"
-        df_r = n_eff - k - df_abs
     else:
-        V = vcov_robust(Xw, resid_w, kind=vcov, df_abs=df_abs)
+        V = compute_vcov(
+            Xw,
+            resid_w,
+            vcov,
+            ssc,
+            time_array=arrays.time_array,
+            bandwidth=bandwidth,
+            df_abs=df_abs,
+            n_boot=n_boot,
+            seed=seed,
+            y=yw,
+        )
         vcov_type = vcov
         df_r = n_eff - k - df_abs
 
@@ -567,4 +645,5 @@ def ols(
     )
     result._X = X
     result._y = y
+    result.ssc = ssc
     return result

@@ -36,6 +36,7 @@ Canonical parameter names and their types:
 | `time`     | `str \| None`                  | Panel time column / HAC ordering column            |
 | `vcov`     | `str`                          | One of the vcov vocabulary strings (see below)     |
 | `cluster`  | `str \| list[str] \| None`     | Column name(s) for clustered SEs                   |
+| `ssc`      | `SSC \| None`                  | Small-sample correction configuration              |
 | `bandwidth`| `int \| None`                  | Number of lags for HAC/DK                          |
 | `weights`  | `str \| None`                  | Column name for analytic weights                   |
 | `fweights` | `str \| None`                  | Column name for frequency weights                  |
@@ -51,13 +52,14 @@ Canonical parameter names and their types:
 For **estimator functions only**, parameters follow this order:
 
 ```
-(formula, data, [entity, time], vcov, cluster, [time, bandwidth], [weights, fweights], [n_boot, seed])
+(formula, data, [entity, time], vcov, cluster, ssc, [time, bandwidth], [weights, fweights], [n_boot, seed])
 ```
 
 - `formula` and `data` are always first and second
 - Estimator-specific required params (`entity`, `time` for panel; `tau` for quantile; `lags` for Arellano-Bond) come after `data` but before `vcov`
 - `vcov` and `cluster` are the first optional/keyword params
-- HAC/DK params (`time`, `bandwidth`) follow clustering
+- `ssc` follows `cluster` — controls the degrees-of-freedom correction applied to each vcov type
+- HAC/DK params (`time`, `bandwidth`) follow `ssc`
 - Weight params follow HAC
 - Bootstrap params are last
 
@@ -81,6 +83,8 @@ Input vocabulary:
 ```
 
 `"robust"` is **not** a valid input value. Stata's `robust` maps to HC1, but R's `sandwich` package defaults to HC0 — the ambiguity invites mistakes. Use the explicit HC variant instead.
+
+**SSC interaction:** The `ssc` parameter (`SSC | None`) controls the degrees-of-freedom correction applied to each vcov type. The default SSC (`k_fixef="nonnested", G_df="min"`) matches pyfixest, Stata `reghdfe`, and R `fixest`. Different backends may use different SSC conventions for specific estimators (e.g., Stata `ivregress` uses `k_adj=False, G_adj=False`). The `_backend_ssc()` function in `_ssc.py` maps backend names to their SSC conventions, and `compare(match_ssc=True)` uses this to run polars_reg with each backend's SSC for apples-to-apples SE comparison.
 
 **Minimum set for new estimators:**
 - *vcov strings:* `{iid, HC1}`

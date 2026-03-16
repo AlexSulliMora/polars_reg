@@ -15,6 +15,7 @@ from polars_reg._se import (
     _recode_to_contiguous,
     vcov_wild_bootstrap,
 )
+from polars_reg._ssc import SSC, _default_ssc
 from polars_reg._utils import _to_codes, ensure_polars, extract_arrays, sanitize_inf, validate_vcov
 
 
@@ -23,8 +24,11 @@ def _iv2sls_rust(
     spec,
     cluster: list[str] | None,
     vcov: str,
+    ssc: SSC | None = None,
 ) -> RegressionResult:
     """Rust fast path for 2SLS IV regression."""
+    if ssc is None:
+        ssc = _default_ssc()
     if isinstance(data, pl.LazyFrame):
         all_cols = (
             [spec.depvar]
@@ -92,6 +96,8 @@ def _iv2sls_rust(
         100_000,
         vcov if not cluster else "cluster",
         spec.add_intercept and not spec.fe,
+        ssc.k_adj,
+        ssc.G_adj,
     )
 
     beta = np.asarray(beta)
@@ -151,6 +157,7 @@ def iv2sls(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    ssc: SSC | None = None,
     time: str | None = None,
     bandwidth: int | None = None,
     n_boot: int = 999,
@@ -165,11 +172,14 @@ def iv2sls(
         data: Polars DataFrame or LazyFrame
         vcov: "iid", "HC0", "HC1", "NW", "DK", "bootstrap", or "wildboot"
         cluster: Column name(s) for clustered SEs. Overrides vcov.
+        ssc: Small-sample correction configuration. Default: pyfixest conventions.
         time: Column name for time dimension (required for NW/DK).
         bandwidth: Kernel bandwidth for NW/DK (default: auto).
         n_boot: Bootstrap replications (default 999).
         seed: Random seed for bootstrap reproducibility.
     """
+    if ssc is None:
+        ssc = _default_ssc()
     if isinstance(cluster, str):
         cluster = [cluster]
     _iv_vcov = {"iid", "HC0", "HC1", "NW", "DK", "bootstrap", "wildboot"}
@@ -192,7 +202,9 @@ def iv2sls(
         and (cluster or vcov in ("iid", "HC0", "HC1"))
     )
     if _rust_eligible:
-        return _iv2sls_rust(data, spec, cluster, vcov)
+        result = _iv2sls_rust(data, spec, cluster, vcov, ssc=ssc)
+        result.ssc = ssc
+        return result
 
     arrays = extract_arrays(data, spec, cluster=cluster, time=time)
 
@@ -290,9 +302,9 @@ def iv2sls(
     if cluster and vcov != "wildboot":
         cluster_arrays_list = [arrays.cluster_arrays[c] for c in cluster]
         if len(cluster_arrays_list) == 1:
-            V = _iv_vcov_clustered(X_hat, resid, cluster_arrays_list[0], XhX_inv)
+            V = _iv_vcov_clustered(X_hat, resid, cluster_arrays_list[0], XhX_inv, ssc=ssc)
         else:
-            V = _iv_vcov_multiway(X_hat, resid, cluster_arrays_list, XhX_inv)
+            V = _iv_vcov_multiway(X_hat, resid, cluster_arrays_list, XhX_inv, ssc=ssc)
         vcov_type = "cluster"
         n_clusters_dict = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters_dict.values()) - 1
@@ -300,12 +312,16 @@ def iv2sls(
         if arrays.time_array is None:
             raise ValueError(f"vcov='{vcov}' requires time= parameter")
         score = X_hat * resid[:, None]
+        from polars_reg._ssc import _compute_k_eff
+
+        k_eff = _compute_k_eff(k, ssc.k_fixef, df_abs, 0)
         if vcov == "NW":
             S = _hac_meat(score, arrays.time_array, bandwidth)
-            dfc = n / (n - k)
+            dfc = n / (n - k_eff) if ssc.k_adj else 1.0
         else:
             S = _dk_meat(score, arrays.time_array, bandwidth)
             T = len(np.unique(arrays.time_array))
+            # T/(T-1) is intrinsic to DK, always applied
             dfc = T / (T - 1)
         V = dfc * XhX_inv @ S @ XhX_inv
         vcov_type = vcov
@@ -348,11 +364,11 @@ def iv2sls(
         n_clusters_dict = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters_dict.values()) - 1
     elif vcov == "iid":
-        V = _iv_vcov_iid(X_hat, X, resid, XhX_inv, df_abs=df_abs)
+        V = _iv_vcov_iid(X_hat, X, resid, XhX_inv, df_abs=df_abs, ssc=ssc)
         vcov_type = "iid"
         df_r = n - k - df_abs
     else:
-        V = _iv_vcov_robust(X_hat, resid, XhX_inv, kind=vcov)
+        V = _iv_vcov_robust(X_hat, resid, XhX_inv, kind=vcov, ssc=ssc)
         vcov_type = vcov
         df_r = n - k - df_abs
 
@@ -382,6 +398,7 @@ def iv2sls(
     result._iv_X_endog = X_endog
     result._iv_Z_excl = Z_excl
     result._iv_cluster_arrays = [arrays.cluster_arrays[c] for c in cluster] if cluster else None
+    result.ssc = ssc
     return result
 
 
@@ -435,16 +452,21 @@ def _iv_vcov_iid(
     resid: np.ndarray,
     XhX_inv: np.ndarray,
     df_abs: int = 0,
+    ssc: SSC | None = None,
 ) -> np.ndarray:
     """Homoskedastic VCV for 2SLS: sigma^2 * (X_hat'X)^{-1}.
 
-    Uses sigma^2 = e'e/n (asymptotic, matching Stata ivregress).
-    Note: LIML in _gmm.py uses e'e/(n-k) (finite-sample correction).
-    Both are valid; we match Stata's convention per estimator.
+    With default SSC (k_adj=True): sigma^2 = e'e/(n-k).
+    With ssc(k_adj=False): sigma^2 = e'e/n (asymptotic, matching Stata ivregress).
     """
+    if ssc is None:
+        ssc = _default_ssc()
     n = X.shape[0]
-    # 2SLS iid VCV: e'e/n (asymptotic), matches Stata ivregress
-    sigma2 = (resid @ resid) / n
+    k = X.shape[1]
+    from polars_reg._ssc import _compute_k_eff
+
+    k_eff = _compute_k_eff(k, ssc.k_fixef, df_abs, 0)
+    sigma2 = (resid @ resid) / (n - k_eff) if ssc.k_adj else (resid @ resid) / n
     return sigma2 * XhX_inv
 
 
@@ -453,19 +475,26 @@ def _iv_vcov_robust(
     resid: np.ndarray,
     XhX_inv: np.ndarray,
     kind: str = "HC1",
+    ssc: SSC | None = None,
 ) -> np.ndarray:
     """Heteroskedasticity-robust VCV for 2SLS.
 
     Sandwich: (X_hat'X)^{-1} meat (X_hat'X)^{-1}
     where meat = X_hat' diag(e^2) X_hat.
 
-    Note: Stata ivregress uses HC0 (no small-sample correction) for all
-    robust variants. The ``kind`` parameter is accepted for API consistency
-    but all variants produce HC0.
+    With default SSC (k_adj=True): applies n/(n-k) scaling.
+    With ssc(k_adj=False): HC0 (no small-sample correction, matching Stata ivregress).
     """
+    if ssc is None:
+        ssc = _default_ssc()
+    n, k = X_hat.shape
     e2 = resid**2
     meat = X_hat.T @ (X_hat * e2[:, None])
-    return XhX_inv @ meat @ XhX_inv
+    from polars_reg._ssc import _compute_k_eff
+
+    k_eff = _compute_k_eff(k, ssc.k_fixef, 0, 0)
+    scale = (n / (n - k_eff)) if ssc.k_adj else 1.0
+    return scale * XhX_inv @ meat @ XhX_inv
 
 
 def _iv_vcov_clustered(
@@ -473,15 +502,26 @@ def _iv_vcov_clustered(
     resid: np.ndarray,
     clusters: np.ndarray,
     XhX_inv: np.ndarray,
+    ssc: SSC | None = None,
 ) -> np.ndarray:
     """One-way cluster-robust VCV for 2SLS.
 
     Uses score vector X_hat * resid and bread (X_hat'X)^{-1}.
-    No small-sample correction (asymptotic, matching Stata ivregress).
+    With default SSC: applies G/(G-1) * (N-1)/(N-k) correction.
+    With ssc(k_adj=False, G_adj=False): no correction (matching Stata ivregress).
     """
+    if ssc is None:
+        ssc = _default_ssc()
+    n, k = X_hat.shape
     codes, G = _recode_to_contiguous(clusters)
     meat = _clustered_meat(X_hat, resid, codes, G)
-    return XhX_inv @ meat @ XhX_inv
+    from polars_reg._ssc import _compute_k_eff
+
+    k_eff = _compute_k_eff(k, ssc.k_fixef, 0, 0)
+    k_adj_factor = (n - 1) / (n - k_eff) if ssc.k_adj else 1.0
+    G_adj_factor = G / (G - 1) if ssc.G_adj else 1.0
+    dfc = k_adj_factor * G_adj_factor
+    return dfc * XhX_inv @ meat @ XhX_inv
 
 
 def _iv_vcov_multiway(
@@ -489,21 +529,46 @@ def _iv_vcov_multiway(
     resid: np.ndarray,
     cluster_list: list[np.ndarray],
     XhX_inv: np.ndarray,
+    ssc: SSC | None = None,
 ) -> np.ndarray:
     """Multi-way clustered VCV for 2SLS via Cameron-Gelbach-Miller."""
     from itertools import combinations
 
+    from polars_reg._ssc import _compute_k_eff
+
+    if ssc is None:
+        ssc = _default_ssc()
     D = len(cluster_list)
     n, k = X_hat.shape
     V = np.zeros((k, k))
     dims = list(range(D))
 
+    k_eff = _compute_k_eff(k, ssc.k_fixef, 0, 0)
+    k_adj_factor = (n - 1) / (n - k_eff) if ssc.k_adj else 1.0
+
+    # Precompute for min-G
+    precomputed: list[tuple[np.ndarray, int]] = []
+    for cl in cluster_list:
+        precomputed.append(_recode_to_contiguous(cl))
+
+    if ssc.G_df == "min":
+        G_min = min(g for _, g in precomputed)
+        G_adj_global = G_min / (G_min - 1) if ssc.G_adj else 1.0
+
     for size in range(1, D + 1):
         sign = (-1) ** (size + 1)
         for subset in combinations(dims, size):
-            subset_arrays = [cluster_list[d] for d in subset]
-            interaction, G = _interaction_codes(*subset_arrays)
-            meat = _clustered_meat(X_hat, resid, interaction, G)
-            V += sign * XhX_inv @ meat @ XhX_inv
+            if len(subset) == 1:
+                codes, G = precomputed[subset[0]]
+            else:
+                subset_arrays = [cluster_list[d] for d in subset]
+                codes, G = _interaction_codes(*subset_arrays)
+            meat = _clustered_meat(X_hat, resid, codes, G)
+            if ssc.G_df == "min":
+                G_adj_factor = G_adj_global
+            else:
+                G_adj_factor = G / (G - 1) if ssc.G_adj else 1.0
+            dfc = k_adj_factor * G_adj_factor
+            V += sign * dfc * XhX_inv @ meat @ XhX_inv
 
     return V

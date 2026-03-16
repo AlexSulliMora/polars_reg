@@ -16,7 +16,8 @@ from scipy import stats
 
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
-from polars_reg._se import _clustered_meat, _mle_multiway_clustered
+from polars_reg._se import compute_vcov
+from polars_reg._ssc import SSC, _default_ssc
 from polars_reg._utils import ensure_polars, extract_arrays, validate_vcov
 
 
@@ -104,8 +105,11 @@ def _binary_model(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    ssc: SSC | None = None,
 ) -> RegressionResult:
     """Common implementation for probit and logit."""
+    if ssc is None:
+        ssc = _default_ssc()
     if isinstance(cluster, str):
         cluster = [cluster]
     _binary_vcov = {"iid", "HC1"}
@@ -148,35 +152,14 @@ def _binary_model(
     H_inv = np.linalg.inv(-H)  # default: inverse of information matrix
 
     if cluster:
-        cluster_arrays_list = [arrays.cluster_arrays[c] for c in cluster]
-
-        if len(cluster_arrays_list) == 1:
-            from polars_reg._se import _recode_to_contiguous
-
-            codes, G = _recode_to_contiguous(cluster_arrays_list[0])
-            meat = _clustered_meat(X, score_resid, codes, G)
-            dfc = (G / (G - 1)) * ((n - 1) / (n - k))
-            V = dfc * H_inv @ meat @ H_inv
-        else:
-            # Use sandwich with H_inv instead of (X'X)^{-1}
-            # For MLE: V = H^{-1} M H^{-1} with clustered M
-            V = _mle_multiway_clustered(X, score_resid, cluster_arrays_list, H_inv, n, k)
+        cl_list = [arrays.cluster_arrays[c] for c in cluster]
+        V = compute_vcov(X, score_resid, vcov, ssc, cluster_arrays=cl_list, bread=H_inv)
         vcov_type_out = "cluster"
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1
-    elif vcov == "HC1":
-        # Robust (sandwich): H^{-1} (sum s_i s_i') H^{-1}
-        scores = X * score_resid[:, None]
-        meat = scores.T @ scores
-        dfc = n / (n - k)
-        V = dfc * H_inv @ meat @ H_inv
-        vcov_type_out = "HC1"
-        n_clusters = None
-        df_r = n - k
     else:
-        # Default: information matrix (Hessian-based)
-        V = H_inv
-        vcov_type_out = "iid"
+        V = compute_vcov(X, score_resid, vcov, ssc, bread=H_inv)
+        vcov_type_out = vcov
         n_clusters = None
         df_r = n - k
 
@@ -202,6 +185,7 @@ def _binary_model(
     result._prob = prob
     result._ll = ll
     result._ll_null = ll_null
+    result.ssc = ssc
     return result
 
 
@@ -210,6 +194,7 @@ def probit(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    ssc: SSC | None = None,
 ) -> RegressionResult:
     """Probit regression (binary choice, normal link) via MLE.
 
@@ -218,8 +203,9 @@ def probit(
         data: Polars DataFrame or LazyFrame
         vcov: "iid" (information matrix) or "HC1" (sandwich)
         cluster: Column name(s) for clustered SEs.
+        ssc: Small-sample correction configuration. Default: pyfixest conventions.
     """
-    return _binary_model("Probit", formula, data, vcov=vcov, cluster=cluster)
+    return _binary_model("Probit", formula, data, vcov=vcov, cluster=cluster, ssc=ssc)
 
 
 def logit(
@@ -227,6 +213,7 @@ def logit(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    ssc: SSC | None = None,
 ) -> RegressionResult:
     """Logit regression (binary choice, logistic link) via MLE.
 
@@ -235,8 +222,9 @@ def logit(
         data: Polars DataFrame or LazyFrame
         vcov: "iid" (information matrix) or "HC1" (sandwich)
         cluster: Column name(s) for clustered SEs.
+        ssc: Small-sample correction configuration. Default: pyfixest conventions.
     """
-    return _binary_model("Logit", formula, data, vcov=vcov, cluster=cluster)
+    return _binary_model("Logit", formula, data, vcov=vcov, cluster=cluster, ssc=ssc)
 
 
 def marginal_effects(

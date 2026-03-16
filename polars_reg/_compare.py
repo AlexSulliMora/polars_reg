@@ -11,6 +11,8 @@ import polars as pl
 from great_tables import GT, loc, style
 from numpy.typing import NDArray
 
+from polars_reg._ssc import SSC, _backend_ssc, _default_ssc
+
 # ── Result dataclasses ────────────────────────────────────────────
 
 
@@ -31,6 +33,20 @@ class BackendResult:
 
 
 @dataclass
+class _PolarsRegRun:
+    """A single polars_reg run (possibly with a backend-specific SSC)."""
+
+    label: str
+    coefs: NDArray
+    se: NDArray
+    names: list[str]
+    n_obs: int
+    r_squared: float | None
+    code: str
+    ssc_label: str | None = None  # e.g. "stata ssc", None for default
+
+
+@dataclass
 class ComparisonReport:
     """Multi-backend comparison report."""
 
@@ -45,17 +61,29 @@ class ComparisonReport:
     skipped: dict[str, str] = field(default_factory=dict)
     rtol: float = 1e-6
     polars_code: str = ""
+    # Additional polars_reg runs with backend-specific SSC (match_ssc=True)
+    polars_matched: dict[str, _PolarsRegRun] = field(default_factory=dict)
 
     def code(self) -> str:
         """Return formatted equivalent code for polars_reg and each backend."""
         sections = [f"--- polars_reg ---\n{self.polars_code}"]
+        for run in self.polars_matched.values():
+            sections.append(f"--- {run.label} ---\n{run.code}")
         for br in self.backends.values():
             sections.append(f"--- {br.name} ---\n{br.code}")
         return "\n\n".join(sections)
 
     def summary(self) -> GT:
         """Formatted side-by-side comparison table as a GT object."""
-        backend_names = ["polars_reg"] + [br.name for br in self.backends.values()]
+        # Build column list: polars_reg default, then matched runs, then backends
+        col_keys: list[str] = ["polars_reg"]
+        col_labels: dict[str, str] = {"polars_reg": "polars_reg"}
+        for key, run in self.polars_matched.items():
+            col_keys.append(key)
+            col_labels[key] = run.label
+        for br in self.backends.values():
+            col_keys.append(br.name)
+            col_labels[br.name] = br.name
 
         rows: list[dict[str, str]] = []
 
@@ -64,29 +92,31 @@ class ComparisonReport:
             # Coef row
             row: dict[str, str] = {"var": var}
             row["polars_reg"] = f"{self.polars_coefs[i]:.6g}"
+            for key, run in self.polars_matched.items():
+                idx = _find_name(run.names, var)
+                row[key] = f"{run.coefs[idx]:.6g}" if idx is not None else ""
             for br in self.backends.values():
                 idx = _find_name(br.names, var)
-                if idx is not None:
-                    row[br.name] = f"{br.coefs[idx]:.6g}"
-                else:
-                    row[br.name] = ""
+                row[br.name] = f"{br.coefs[idx]:.6g}" if idx is not None else ""
             rows.append(row)
 
             # SE row
             row = {"var": ""}
             row["polars_reg"] = f"({self.polars_se[i]:.6g})"
+            for key, run in self.polars_matched.items():
+                idx = _find_name(run.names, var)
+                row[key] = f"({run.se[idx]:.6g})" if idx is not None else ""
             for br in self.backends.values():
                 idx = _find_name(br.names, var)
-                if idx is not None:
-                    row[br.name] = f"({br.se[idx]:.6g})"
-                else:
-                    row[br.name] = ""
+                row[br.name] = f"({br.se[idx]:.6g})" if idx is not None else ""
             rows.append(row)
 
         # Summary stats
         n_row_idx = len(rows)
         row = {"var": "N"}
         row["polars_reg"] = str(self.polars_n_obs)
+        for key, run in self.polars_matched.items():
+            row[key] = str(run.n_obs)
         for br in self.backends.values():
             row[br.name] = str(br.n_obs)
         rows.append(row)
@@ -95,20 +125,26 @@ class ComparisonReport:
         row["polars_reg"] = (
             f"{self.polars_r_squared:.4f}" if self.polars_r_squared is not None else ""
         )
+        for key, run in self.polars_matched.items():
+            row[key] = f"{run.r_squared:.4f}" if run.r_squared is not None else ""
         for br in self.backends.values():
             row[br.name] = f"{br.r_squared:.4f}" if br.r_squared is not None else ""
         rows.append(row)
 
-        # Diff summary
+        # Diff summary — diffs are computed against the appropriate polars_reg run
         diff_row_idx = len(rows)
         row = {"var": "Max |\u0394coef|"}
         row["polars_reg"] = ""
+        for key in self.polars_matched:
+            row[key] = ""
         for br in self.backends.values():
             row[br.name] = f"{br.max_coef_rdiff:.2e}"
         rows.append(row)
 
         row = {"var": "Max |\u0394se|"}
         row["polars_reg"] = ""
+        for key in self.polars_matched:
+            row[key] = ""
         for br in self.backends.values():
             row[br.name] = f"{br.max_se_rdiff:.2e}"
         rows.append(row)
@@ -116,20 +152,21 @@ class ComparisonReport:
         match_label = f"Match (rtol={self.rtol:.0e})"
         row = {"var": match_label}
         row["polars_reg"] = ""
+        for key in self.polars_matched:
+            row[key] = ""
         for br in self.backends.values():
             row[br.name] = "\u2713" if br.match else "\u2717"
         rows.append(row)
 
         # Build DataFrame
-        data_cols = backend_names
-        schema = {"var": pl.Utf8} | {col: pl.Utf8 for col in data_cols}
+        schema = {"var": pl.Utf8} | {col: pl.Utf8 for col in col_keys}
         df = pl.DataFrame(rows, schema=schema)
 
         # Build GT
         gt = GT(df)
-        gt = gt.cols_label(var="")
+        gt = gt.cols_label(var="", **{k: col_labels[k] for k in col_keys})
         gt = gt.cols_align(align="left", columns="var")
-        gt = gt.cols_align(align="center", columns=data_cols)
+        gt = gt.cols_align(align="center", columns=col_keys)
 
         gt = gt.tab_header(
             title=f'compare("{self.estimator}", "{self.formula}")',
@@ -165,10 +202,11 @@ class ComparisonReport:
     def __repr__(self) -> str:
         n_match = sum(1 for br in self.backends.values() if br.match)
         n_total = len(self.backends)
+        matched_str = f", {len(self.polars_matched)} ssc-matched" if self.polars_matched else ""
         return (
             f"<ComparisonReport {self.estimator} "
             f"{n_match}/{n_total} backends match, "
-            f"{len(self.skipped)} skipped>"
+            f"{len(self.skipped)} skipped{matched_str}>"
         )
 
 
@@ -425,6 +463,10 @@ def _run_statsmodels(
     elif vcov in ("HC0", "HC1", "HC2", "HC3"):
         fit_kwargs["cov_type"] = vcov
     # else iid (default)
+
+    # statsmodels cannot absorb fixed effects — skip if FE present
+    if spec.fe and estimator in ("ols", "panel_fe", "panel_fd"):
+        return None
 
     code = ""
     try:
@@ -769,6 +811,8 @@ def compare(
     cluster: list[str] | str | None = None,
     entity: str | None = None,
     time: str | None = None,
+    ssc: SSC | None = None,
+    match_ssc: bool = False,
     backend: str | list[str] = "all",
     rtol: float = 1e-6,
     **kwargs: Any,
@@ -786,6 +830,11 @@ def compare(
         cluster: Clustering variable(s).
         entity: Panel entity column (for panel estimators).
         time: Panel time column.
+        ssc: Small-sample correction configuration for the polars_reg run.
+            If None, uses the default SSC (pyfixest convention).
+        match_ssc: If True, run polars_reg once per backend with that
+            backend's SSC conventions, producing additional columns in the
+            comparison table. Default False preserves existing behavior.
         backend: Backend(s) to compare against. "all" runs every available
             backend. Can also be a single name ("pyfixest") or a list
             (["pyfixest", "statsmodels"]).
@@ -815,8 +864,12 @@ def compare(
         pr_kwargs["time"] = time
     pr_kwargs.update(kwargs)
 
+    # Use user-provided SSC or default
+    user_ssc = ssc if ssc is not None else _default_ssc()
+    pr_kwargs_with_ssc = {**pr_kwargs, "ssc": user_ssc}
+
     polars_coefs, polars_se, polars_names, polars_n, polars_r2 = _run_polars_reg(
-        estimator, formula, data, **pr_kwargs
+        estimator, formula, data, **pr_kwargs_with_ssc
     )
 
     # Determine backends to run
@@ -837,6 +890,8 @@ def compare(
         polars_code += f', entity="{entity}"'
     if time:
         polars_code += f', time="{time}"'
+    if ssc is not None:
+        polars_code += f", ssc={ssc!r}"
     for k, v in kwargs.items():
         polars_code += f", {k}={v!r}"
     polars_code += ")"
@@ -852,6 +907,48 @@ def compare(
         rtol=rtol,
         polars_code=polars_code,
     )
+
+    # match_ssc: run polars_reg with each backend's SSC conventions
+    if match_ssc:
+        default_ssc = _default_ssc()
+        for bn in backends_to_run:
+            if bn not in _BACKEND_RUNNERS:
+                continue
+            backend_ssc_val = _backend_ssc(bn, estimator)
+            # Skip if this backend's SSC matches the default (avoid duplicate columns)
+            if backend_ssc_val == default_ssc:
+                continue
+            matched_kwargs = {**pr_kwargs, "ssc": backend_ssc_val}
+            try:
+                m_coefs, m_se, m_names, m_n, m_r2 = _run_polars_reg(
+                    estimator, formula, data, **matched_kwargs
+                )
+            except Exception:
+                continue  # skip if SSC combo fails for this estimator
+            col_key = f"polars_reg_{bn}_ssc"
+            ssc_code = f'pr.{estimator}("{formula}", data=df'
+            if vcov != "iid" and estimator not in _no_vcov:
+                ssc_code += f', vcov="{vcov}"'
+            if cluster and estimator not in _no_vcov:
+                ssc_code += f", cluster={cluster!r}"
+            if entity:
+                ssc_code += f', entity="{entity}"'
+            if time:
+                ssc_code += f', time="{time}"'
+            ssc_code += f", ssc={backend_ssc_val!r}"
+            for k, v in kwargs.items():
+                ssc_code += f", {k}={v!r}"
+            ssc_code += ")"
+            report.polars_matched[col_key] = _PolarsRegRun(
+                label=f"polars_reg ({bn} ssc)",
+                coefs=m_coefs,
+                se=m_se,
+                names=m_names,
+                n_obs=m_n,
+                r_squared=m_r2,
+                code=ssc_code,
+                ssc_label=f"{bn} ssc",
+            )
 
     # Run each backend
     for bn in backends_to_run:
@@ -874,7 +971,13 @@ def compare(
         if result is None:
             report.skipped[bn] = "not available or estimator unsupported"
         else:
-            _compute_diffs(polars_coefs, polars_se, polars_names, result, rtol)
+            # When match_ssc is active, compute diffs against the matched run
+            matched_key = f"polars_reg_{bn}_ssc"
+            if match_ssc and matched_key in report.polars_matched:
+                matched_run = report.polars_matched[matched_key]
+                _compute_diffs(matched_run.coefs, matched_run.se, matched_run.names, result, rtol)
+            else:
+                _compute_diffs(polars_coefs, polars_se, polars_names, result, rtol)
             report.backends[bn] = result
 
     return report

@@ -228,3 +228,75 @@ def test_compare_repr(ols_data):
     r = repr(report)
     assert "ComparisonReport" in r
     assert "ols" in r
+
+
+# ── match_ssc ──────────────────────────────────────────────────────
+
+
+def test_compare_match_ssc_pyfixest_no_duplicate(ols_data):
+    """match_ssc=True with pyfixest does not add a duplicate column (same SSC)."""
+    report = compare("ols", "y ~ x1 + x2", ols_data, backend="pyfixest", match_ssc=True)
+    assert isinstance(report, ComparisonReport)
+    # pyfixest SSC matches polars_reg default — no extra matched run
+    assert len(report.polars_matched) == 0
+
+
+def test_compare_match_ssc_stata_ols_no_extra_column(ols_data):
+    """match_ssc=True with stata OLS backend does NOT add an extra column.
+
+    Stata reghdfe SSC now matches the default (k_fixef='nonnested', G_df='min'),
+    so no separate matched run is produced for OLS.
+    """
+    report = compare("ols", "y ~ x1 + x2", ols_data, backend="stata", match_ssc=True, vcov="HC1")
+    assert isinstance(report, ComparisonReport)
+    # Stata OLS SSC matches default → no matched run
+    assert "polars_reg_stata_ssc" not in report.polars_matched
+
+
+def test_compare_match_ssc_summary_renders(ols_data):
+    """summary() works with match_ssc columns."""
+    report = compare("ols", "y ~ x1 + x2", ols_data, backend="stata", match_ssc=True, vcov="HC1")
+    gt = report.summary()
+    assert isinstance(gt, GT)
+    html = gt.as_raw_html()
+    assert "polars_reg" in html
+
+
+def test_compare_match_ssc_code_output(ols_data):
+    """code() includes matched SSC sections."""
+    report = compare("ols", "y ~ x1 + x2", ols_data, backend="stata", match_ssc=True, vcov="HC1")
+    code = report.code()
+    assert "polars_reg" in code
+    # Should have the matched SSC code section
+    if report.polars_matched:
+        assert "stata ssc" in code
+
+
+def test_compare_match_ssc_repr(ols_data):
+    """repr works with match_ssc=True.
+
+    For OLS with Stata backend, SSC matches default so no ssc-matched
+    column is produced. The repr should still be valid.
+    """
+    report = compare("ols", "y ~ x1 + x2", ols_data, backend="stata", match_ssc=True, vcov="HC1")
+    r = repr(report)
+    assert "ComparisonReport" in r
+
+
+def test_compare_ssc_parameter(ols_data):
+    """User-provided ssc is used for polars_reg."""
+    from polars_reg import ssc
+
+    report = compare("ols", "y ~ x1 + x2", ols_data, ssc=ssc(k_adj=False), backend="pyfixest")
+    assert isinstance(report, ComparisonReport)
+    # The code string should include the SSC
+    assert "ssc=" in report.polars_code
+
+
+def test_compare_ssc_parameter_no_match_ssc(ols_data):
+    """User-provided ssc works without match_ssc."""
+    from polars_reg import ssc
+
+    report = compare("ols", "y ~ x1 + x2", ols_data, ssc=ssc(k_adj=False), backend="pyfixest")
+    # No matched runs when match_ssc is False (default)
+    assert len(report.polars_matched) == 0

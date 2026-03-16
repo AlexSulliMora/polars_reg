@@ -14,10 +14,28 @@ import warnings
 import numpy as np
 import polars as pl
 
+from polars_reg._binary import _newton_raphson
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
-from polars_reg._se import _clustered_meat, _mle_multiway_clustered, _recode_to_contiguous
+from polars_reg._se import compute_vcov
+from polars_reg._ssc import SSC, _default_ssc
 from polars_reg._utils import ensure_polars, extract_arrays, validate_vcov
+
+
+def _ppml_score_hess(
+    beta: np.ndarray, X: np.ndarray, y: np.ndarray
+) -> tuple[float, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Poisson score, Hessian, and auxiliary data for Newton-Raphson.
+
+    Returns (ll, score, H, mu, score_resid) matching the _newton_raphson
+    callable interface: (ll, score, H, aux1, aux2).
+    """
+    mu = np.clip(np.exp(X @ beta), 1e-10, 1e10)
+    score_resid = y - mu
+    score = X.T @ score_resid
+    H = -X.T @ (X * mu[:, None])
+    ll = float(np.sum(y * np.log(np.maximum(mu, 1e-300)) - mu))
+    return ll, score, H, mu, score_resid
 
 
 def _ppml_deviance(y: np.ndarray, mu: np.ndarray) -> float:
@@ -40,6 +58,7 @@ def ppml(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "HC1",
     cluster: list[str] | str | None = None,
+    ssc: SSC | None = None,
     max_iter: int = 250,
     tol: float = 1e-8,
 ) -> RegressionResult:
@@ -71,6 +90,8 @@ def ppml(
         returns X @ beta (the linear predictor). Apply np.exp() to obtain
         the conditional mean on the response scale.
     """
+    if ssc is None:
+        ssc = _default_ssc()
     if isinstance(cluster, str):
         cluster = [cluster]
     _ppml_vcov = {"iid", "HC1"}
@@ -91,45 +112,12 @@ def ppml(
 
     # Initialize with OLS on log(y), replacing y=0 with 0.5 to avoid log(0)
     y_safe = np.where(y > 0, y, 0.5)
-    beta = np.linalg.lstsq(X, np.log(y_safe), rcond=None)[0]
+    beta0 = np.linalg.lstsq(X, np.log(y_safe), rcond=None)[0]
 
-    converged = False
-    for iteration in range(max_iter):
-        mu = np.exp(X @ beta)
-        # Clip conditional mean to (1e-10, 1e10): prevents underflow/overflow
-        # in the Hessian X'diag(mu)X and deviance computation
-        mu = np.clip(mu, 1e-10, 1e10)
-
-        # Newton-Raphson step (Santos Silva & Tenreyro 2006, §2)
-        # Score: X'(y - mu), Hessian: -X'diag(mu)X
-        score_resid = y - mu  # n-vector of (y_i - mu_i)
-        score = X.T @ score_resid
-        hessian = -X.T @ (X * mu[:, None])
-
-        try:
-            step = np.linalg.solve(hessian, score)
-        except np.linalg.LinAlgError:
-            warnings.warn(
-                "Singular Hessian in PPML Newton-Raphson; using pseudoinverse",
-                stacklevel=2,
-            )
-            step = np.linalg.lstsq(hessian, score, rcond=None)[0]
-
-        beta = beta - step
-        if np.max(np.abs(step)) < tol:
-            converged = True
-            break
-
-    if not converged:
-        warnings.warn(
-            f"PPML did not converge after {max_iter} iterations",
-            stacklevel=2,
-        )
-
-    # Final mu
-    mu = np.exp(X @ beta)
-    mu = np.clip(mu, 1e-10, 1e10)
-    score_resid = y - mu
+    # Newton-Raphson using shared solver from _binary.py
+    beta, _ll, H, mu, score_resid, _score = _newton_raphson(
+        _ppml_score_hess, beta0, X, y, max_iter=max_iter, tol=tol
+    )
 
     # Separation detection: |beta| > 10 suggests quasi-complete separation
     # (coefficient diverging because a regressor perfectly predicts y=0)
@@ -147,8 +135,7 @@ def ppml(
             stacklevel=2,
         )
 
-    # Hessian at convergence (information matrix)
-    H = -X.T @ (X * mu[:, None])
+    # Hessian at convergence (information matrix) — H is returned from NR solver
     H_inv = np.linalg.inv(-H)  # (X'WX)^{-1} where W = diag(mu)
 
     # Goodness of fit: Pseudo R-squared based on deviance
@@ -158,30 +145,14 @@ def ppml(
 
     # VCV computation
     if cluster:
-        cluster_arrays_list = [arrays.cluster_arrays[c] for c in cluster]
-
-        if len(cluster_arrays_list) == 1:
-            codes, G = _recode_to_contiguous(cluster_arrays_list[0])
-            meat = _clustered_meat(X, score_resid, codes, G)
-            dfc = (G / (G - 1)) * ((n - 1) / (n - k))
-            V = dfc * H_inv @ meat @ H_inv
-        else:
-            V = _mle_multiway_clustered(X, score_resid, cluster_arrays_list, H_inv, n, k)
+        cl_list = [arrays.cluster_arrays[c] for c in cluster]
+        V = compute_vcov(X, score_resid, vcov, ssc, cluster_arrays=cl_list, bread=H_inv)
         vcov_type_out = "cluster"
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1
-    elif vcov == "HC1":
-        # Robust sandwich: H^{-1} M H^{-1} with n/(n-k) scaling
-        meat = X.T @ (X * (score_resid**2)[:, None])
-        dfc = n / (n - k)
-        V = dfc * H_inv @ meat @ H_inv
-        vcov_type_out = "HC1"
-        n_clusters = None
-        df_r = n - k
     else:
-        # Hessian-based (assumes Poisson variance)
-        V = H_inv
-        vcov_type_out = "iid"
+        V = compute_vcov(X, score_resid, vcov, ssc, bread=H_inv)
+        vcov_type_out = vcov
         n_clusters = None
         df_r = n - k
 
@@ -207,4 +178,5 @@ def ppml(
     result._mu = mu
     result._deviance = deviance
     result._null_deviance = null_deviance
+    result.ssc = ssc
     return result

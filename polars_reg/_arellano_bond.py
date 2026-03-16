@@ -15,7 +15,77 @@ from scipy import stats
 
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
+from polars_reg._ssc import SSC, _default_ssc
 from polars_reg._utils import ensure_polars, sanitize_inf
+
+
+def _gmm_solve(
+    X: NDArray,
+    y: NDArray,
+    Z: NDArray,
+    twostep: bool = True,
+) -> tuple[NDArray, NDArray, NDArray, NDArray, NDArray]:
+    """One-step or two-step GMM estimation.
+
+    Args:
+        X: Regressor matrix (n x k)
+        y: Dependent variable (n,)
+        Z: Instrument matrix (n x q)
+        twostep: If True, compute two-step efficient GMM
+
+    Returns:
+        beta: Coefficient estimates (k,)
+        resid: Residuals (n,)
+        V: Variance-covariance matrix (k x k)
+        A_inv: Inverse of X'Z W Z'X
+        W: Weight matrix (q x q)
+    """
+    ZtZ = Z.T @ Z
+    W = np.linalg.inv(ZtZ)
+    ZtX = Z.T @ X
+    Zty = Z.T @ y
+
+    A = ZtX.T @ W @ ZtX
+    b = ZtX.T @ W @ Zty
+    beta = np.linalg.solve(A, b)
+    resid = y - X @ beta
+
+    if twostep:
+        scores = Z * resid[:, None]
+        S = scores.T @ scores
+        W = np.linalg.inv(S)
+        A = ZtX.T @ W @ ZtX
+        b = ZtX.T @ W @ Zty
+        beta = np.linalg.solve(A, b)
+        resid = y - X @ beta
+
+    # Robust VCV: sandwich
+    A_inv = np.linalg.inv(A)
+    scores = Z * resid[:, None]
+    meat = ZtX.T @ W @ (scores.T @ scores) @ W @ ZtX
+    V = A_inv @ meat @ A_inv
+
+    return beta, resid, V, A_inv, W
+
+
+def _j_test(Z: NDArray, resid: NDArray, W: NDArray, n_iv: int, k: int) -> tuple[float, float]:
+    """Sargan/Hansen J test for overidentifying restrictions.
+
+    Args:
+        Z: Instrument matrix (n x q)
+        resid: Residuals (n,)
+        W: Weight matrix (q x q)
+        n_iv: Number of instruments
+        k: Number of regressors
+
+    Returns:
+        (j_stat, j_pvalue)
+    """
+    Zte = Z.T @ resid
+    j_stat = float(Zte @ W @ Zte)
+    j_df = n_iv - k
+    j_pvalue = float(1.0 - stats.chi2.cdf(j_stat, j_df)) if j_df > 0 else np.nan
+    return j_stat, j_pvalue
 
 
 def panel_ab(
@@ -26,6 +96,7 @@ def panel_ab(
     lags: int = 2,
     maxlags: int | None = None,
     twostep: bool = False,
+    ssc: SSC | None = None,
 ) -> RegressionResult:
     """Arellano-Bond dynamic panel GMM estimator.
 
@@ -43,7 +114,10 @@ def panel_ab(
         lags: Minimum instrument lag depth (default 2)
         maxlags: Maximum instrument lag depth (None = all available)
         twostep: If True, use two-step efficient GMM
+        ssc: Small-sample correction configuration. Default: pyfixest conventions.
     """
+    if ssc is None:
+        ssc = _default_ssc()
     data = ensure_polars(data)
 
     spec = parse_formula(formula)
@@ -148,45 +222,16 @@ def panel_ab(
             "Increase maxlags or add exogenous variables."
         )
 
-    # One-step GMM: W = (Z'Z)^{-1}
-    ZtZ = Z.T @ Z
-    W = np.linalg.inv(ZtZ)
-    ZtX = Z.T @ X
-    Zty = Z.T @ y
-
-    # β = (X'Z W Z'X)^{-1} X'Z W Z'y
-    A = ZtX.T @ W @ ZtX
-    b = ZtX.T @ W @ Zty
-    beta = np.linalg.solve(A, b)
-    resid = y - X @ beta
-
-    if twostep:
-        # Two-step: W = inv(Z' ê ê' Z) using first-step residuals
-        scores = Z * resid[:, None]  # (n x n_iv)
-        S = scores.T @ scores  # (n_iv x n_iv)
-        W = np.linalg.inv(S)
-        A = ZtX.T @ W @ ZtX
-        b = ZtX.T @ W @ Zty
-        beta = np.linalg.solve(A, b)
-        resid = y - X @ beta
-
-    # VCV: (X'Z W Z'X)^{-1} * (X'Z W Z'ê ê'Z W Z'X) * (X'Z W Z'X)^{-1}
-    # For one-step with homoskedastic W: simplifies to sigma² (X'Z W Z'X)^{-1}
-    # For robust: full sandwich
-    A_inv = np.linalg.inv(A)
-    scores = Z * resid[:, None]
-    meat = ZtX.T @ W @ (scores.T @ scores) @ W @ ZtX
-    V = A_inv @ meat @ A_inv
+    # GMM estimation (shared solver)
+    beta, resid, V, A_inv, W = _gmm_solve(X, y, Z, twostep=twostep)
 
     # Sargan/Hansen J test
-    Zte = Z.T @ resid
-    j_stat = float(Zte @ W @ Zte)
-    j_df = n_iv - k
-    j_pvalue = float(1.0 - stats.chi2.cdf(j_stat, j_df)) if j_df > 0 else np.nan
+    j_stat, j_pvalue = _j_test(Z, resid, W, n_iv, k)
 
     # AR(1) and AR(2) tests (Arellano-Bond)
     # AR(m): test for m-th order serial correlation in first-differenced residuals
     entity_arr = df_clean[entity].cast(pl.Utf8).cast(pl.Categorical).to_physical().to_numpy()
+    ZtX = Z.T @ X
     ar1_stat, ar1_p = _ar_test(resid, entity_arr, Z, W, ZtX, A_inv, order=1)
     ar2_stat, ar2_p = _ar_test(resid, entity_arr, Z, W, ZtX, A_inv, order=2)
 
@@ -214,6 +259,7 @@ def panel_ab(
     result._ar1 = (ar1_stat, ar1_p)
     result._ar2 = (ar2_stat, ar2_p)
     result._n_instruments = n_iv
+    result.ssc = ssc
     return result
 
 
@@ -225,6 +271,7 @@ def panel_sys_gmm(
     lags: int = 2,
     maxlags: int | None = None,
     twostep: bool = False,
+    ssc: SSC | None = None,
 ) -> RegressionResult:
     """Blundell-Bond system GMM estimator.
 
@@ -241,7 +288,10 @@ def panel_sys_gmm(
         lags: Minimum instrument lag depth (default 2)
         maxlags: Maximum instrument lag depth (None = all available)
         twostep: If True, use two-step efficient GMM
+        ssc: Small-sample correction configuration. Default: pyfixest conventions.
     """
+    if ssc is None:
+        ssc = _default_ssc()
     data = ensure_polars(data)
 
     spec = parse_formula(formula)
@@ -373,37 +423,11 @@ def panel_sys_gmm(
             "Increase maxlags or add exogenous variables."
         )
 
-    # One-step GMM: W = (Z'Z)^{-1}
-    ZtZ = Z.T @ Z
-    W = np.linalg.inv(ZtZ)
-    ZtX = Z.T @ X
-    Zty = Z.T @ y
-
-    A = ZtX.T @ W @ ZtX
-    b = ZtX.T @ W @ Zty
-    beta = np.linalg.solve(A, b)
-    resid = y - X @ beta
-
-    if twostep:
-        scores = Z * resid[:, None]
-        S = scores.T @ scores
-        W = np.linalg.inv(S)
-        A = ZtX.T @ W @ ZtX
-        b = ZtX.T @ W @ Zty
-        beta = np.linalg.solve(A, b)
-        resid = y - X @ beta
-
-    # Robust VCV
-    A_inv = np.linalg.inv(A)
-    scores = Z * resid[:, None]
-    meat = ZtX.T @ W @ (scores.T @ scores) @ W @ ZtX
-    V = A_inv @ meat @ A_inv
+    # GMM estimation (shared solver)
+    beta, resid, V, A_inv, W = _gmm_solve(X, y, Z, twostep=twostep)
 
     # Sargan/Hansen J test
-    Zte = Z.T @ resid
-    j_stat = float(Zte @ W @ Zte)
-    j_df = n_iv - k
-    j_pvalue = float(1.0 - stats.chi2.cdf(j_stat, j_df)) if j_df > 0 else np.nan
+    j_stat, j_pvalue = _j_test(Z, resid, W, n_iv, k)
 
     # AR tests on differenced residuals only
     entity_arr = df_diff[entity].cast(pl.Utf8).cast(pl.Categorical).to_physical().to_numpy()
@@ -440,6 +464,7 @@ def panel_sys_gmm(
     result._ar1 = (ar1_stat, ar1_p)
     result._ar2 = (ar2_stat, ar2_p)
     result._n_instruments = n_iv
+    result.ssc = ssc
     return result
 
 

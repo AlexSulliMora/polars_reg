@@ -11,6 +11,7 @@ import polars as pl
 
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
+from polars_reg._ssc import SSC, _default_ssc
 from polars_reg._utils import ensure_polars, extract_arrays
 
 
@@ -77,6 +78,7 @@ def quantreg(
     formula: str,
     data: pl.DataFrame | pl.LazyFrame,
     tau: float | list[float] = 0.5,
+    ssc: SSC | None = None,
     n_boot: int = 200,
     seed: int | None = None,
 ) -> RegressionResult | list[RegressionResult]:
@@ -90,14 +92,17 @@ def quantreg(
         data: Polars DataFrame or LazyFrame
         tau: Quantile(s) to estimate. Float for single, list for multiple.
             Default 0.5 (median regression).
+        ssc: Small-sample correction configuration. Default: pyfixest conventions.
         n_boot: Number of bootstrap replications for SE estimation.
         seed: Random seed for bootstrap reproducibility.
 
     Returns:
         Single RegressionResult for scalar tau, list for multiple quantiles.
     """
+    if ssc is None:
+        ssc = _default_ssc()
     if isinstance(tau, (list, tuple)):
-        return [quantreg(formula, data, t, n_boot=n_boot, seed=seed) for t in tau]
+        return [quantreg(formula, data, t, ssc=ssc, n_boot=n_boot, seed=seed) for t in tau]
 
     if not 0 < tau < 1:
         raise ValueError(f"tau must be between 0 and 1, got {tau}")
@@ -147,4 +152,5 @@ def quantreg(
     result._X = X
     result._y = y
     result._tau = tau
+    result.ssc = ssc
     return result

@@ -15,8 +15,12 @@ import numpy as np
 import polars as pl
 import pytest
 
+from polars_reg._ssc import SSC
 from tests.r_compare import assert_r_parity, r_available, r_has_package
 from tests.stata_compare import assert_stata_parity, stata_available
+
+# Stata ivregress uses asymptotic VCV (no small-sample correction)
+STATA_IV_SSC = SSC(k_adj=False, G_adj=False)
 
 # ---------------------------------------------------------------------------
 # Tolerance tiers
@@ -281,7 +285,9 @@ def test_fe2_iid_r(cross_data):
 
 @skip_no_stata
 def test_iv2sls_iid_stata(cross_data):
-    assert_stata_parity("iv2sls", "y ~ x1 || x_endog ~ z1 + z2", cross_data, rtol=MEDIUM)
+    assert_stata_parity(
+        "iv2sls", "y ~ x1 || x_endog ~ z1 + z2", cross_data, rtol=MEDIUM, ssc=STATA_IV_SSC
+    )
 
 
 @skip_no_r
@@ -297,7 +303,12 @@ def test_iv2sls_iid_r(cross_data):
 @skip_no_stata
 def test_iv2sls_hc1_stata(cross_data):
     assert_stata_parity(
-        "iv2sls", "y ~ x1 || x_endog ~ z1 + z2", cross_data, vcov="HC1", rtol=MEDIUM
+        "iv2sls",
+        "y ~ x1 || x_endog ~ z1 + z2",
+        cross_data,
+        vcov="HC1",
+        rtol=MEDIUM,
+        ssc=STATA_IV_SSC,
     )
 
 

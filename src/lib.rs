@@ -742,6 +742,8 @@ fn rust_ols_core<'py>(
     cluster_codes_list: Vec<PyReadonlyArray1<'py, i32>>,
     tol: f64,
     max_iter: usize,
+    k_adj: bool,
+    g_adj: bool,
 ) -> PyResult<(
     Bound<'py, PyArray1<f64>>,   // beta
     Bound<'py, PyArray2<f64>>,   // vcov
@@ -983,11 +985,25 @@ fn rust_ols_core<'py>(
 
                 let meat = clustered_meat_raw(&x_flat, n, k, &resid, &codes, g);
 
-                let dfc = if has_fe {
-                    (g_min as f64 / (g_min as f64 - 1.0)) * (n as f64 / (n as f64 - non_nested_dof as f64 - k as f64))
+                let g_adj_factor = if g_adj {
+                    if has_fe {
+                        g_min as f64 / (g_min as f64 - 1.0)
+                    } else {
+                        g as f64 / (g as f64 - 1.0)
+                    }
                 } else {
-                    (g as f64 / (g as f64 - 1.0)) * ((n as f64 - 1.0) / (n as f64 - k as f64))
+                    1.0
                 };
+                let k_adj_factor = if k_adj {
+                    if has_fe {
+                        n as f64 / (n as f64 - non_nested_dof as f64 - k as f64)
+                    } else {
+                        (n as f64 - 1.0) / (n as f64 - k as f64)
+                    }
+                } else {
+                    1.0
+                };
+                let dfc = g_adj_factor * k_adj_factor;
 
                 let tmp = matmul(&xtx_inv, &meat, k, k, k);
                 let term = matmul(&tmp, &xtx_inv, k, k, k);
@@ -998,7 +1014,13 @@ fn rust_ols_core<'py>(
         }
         vcov = v_total;
     } else {
-        let sigma2 = ss_res / (n - k) as f64;
+        // iid VCV: sigma² = e'e/(n-k-df_abs) when k_adj=true, e'e/n when k_adj=false
+        let sigma2 = if k_adj {
+            let denom = n as f64 - k as f64 - df_abs as f64;
+            if denom > 0.0 { ss_res / denom } else { 0.0 }
+        } else {
+            ss_res / n as f64
+        };
         vcov = xtx_inv.iter().map(|v| v * sigma2).collect();
     }
 
@@ -1055,6 +1077,8 @@ fn rust_ols_from_arrays<'py>(
     tol: f64,
     max_iter: usize,
     vcov_type: String,
+    k_adj: bool,
+    g_adj: bool,
 ) -> PyResult<(
     Bound<'py, PyArray1<f64>>,   // beta
     Bound<'py, PyArray2<f64>>,   // vcov
@@ -1264,11 +1288,25 @@ fn rust_ols_from_arrays<'py>(
 
                 let meat = clustered_meat_raw(&x_flat, n, k, &resid, &codes, g);
 
-                let dfc = if has_fe {
-                    (g_min as f64 / (g_min as f64 - 1.0)) * (n as f64 / (n as f64 - non_nested_dof as f64 - k as f64))
+                let g_adj_factor = if g_adj {
+                    if has_fe {
+                        g_min as f64 / (g_min as f64 - 1.0)
+                    } else {
+                        g as f64 / (g as f64 - 1.0)
+                    }
                 } else {
-                    (g as f64 / (g as f64 - 1.0)) * ((n as f64 - 1.0) / (n as f64 - k as f64))
+                    1.0
                 };
+                let k_adj_factor = if k_adj {
+                    if has_fe {
+                        n as f64 / (n as f64 - non_nested_dof as f64 - k as f64)
+                    } else {
+                        (n as f64 - 1.0) / (n as f64 - k as f64)
+                    }
+                } else {
+                    1.0
+                };
+                let dfc = g_adj_factor * k_adj_factor;
 
                 let tmp = matmul(&xtx_inv, &meat, k, k, k);
                 let term = matmul(&tmp, &xtx_inv, k, k, k);
@@ -1279,11 +1317,15 @@ fn rust_ols_from_arrays<'py>(
         }
         vcov = v_total;
     } else if vcov_type == "iid" {
-        let sigma2 = ss_res / (n as f64 - k as f64 - df_abs as f64);
+        let sigma2 = if k_adj {
+            ss_res / (n as f64 - k as f64 - df_abs as f64)
+        } else {
+            ss_res / n as f64
+        };
         vcov = xtx_inv.iter().map(|v| v * sigma2).collect();
     } else {
         // HC0, HC1, HC2, HC3
-        vcov = sandwich_vcov(&x_flat, &resid, &xtx_inv, n, k, &vcov_type, df_abs);
+        vcov = sandwich_vcov(&x_flat, &resid, &xtx_inv, n, k, &vcov_type, df_abs, k_adj);
     }
 
     let beta_arr = Array1::from_vec(beta);
@@ -1337,6 +1379,8 @@ fn rust_iv2sls<'py>(
     max_iter: usize,
     vcov_type: String,
     add_intercept: bool,
+    k_adj: bool,
+    g_adj: bool,
 ) -> PyResult<(
     Bound<'py, PyArray1<f64>>,   // beta
     Bound<'py, PyArray2<f64>>,   // vcov
@@ -1707,23 +1751,29 @@ fn rust_iv2sls<'py>(
                     interaction_codes(&arrays)
                 };
                 // Use X_hat for clustered meat in IV
-                // No small-sample correction (asymptotic, matching Stata ivregress)
                 let meat = clustered_meat_raw(&xhat_flat, n, k, &resid, &codes, g);
+                let g_adj_factor = if g_adj { g as f64 / (g as f64 - 1.0) } else { 1.0 };
+                let k_adj_factor = if k_adj { (n as f64 - 1.0) / (n as f64 - k as f64) } else { 1.0 };
+                let dfc = g_adj_factor * k_adj_factor;
                 let tmp = matmul(&xhx_inv, &meat, k, k, k);
                 let term = matmul(&tmp, &xhx_inv, k, k, k);
                 for idx in 0..(k * k) {
-                    v_total[idx] += sign * term[idx];
+                    v_total[idx] += sign * dfc * term[idx];
                 }
             }
         }
         vcov = v_total;
     } else if vcov_type == "iid" {
-        // IV uses asymptotic sigma² = e'e/n (matching Stata ivregress)
-        let sigma2 = ss_res / n as f64;
+        // IV iid: sigma² = e'e/(n-k) when k_adj=true, e'e/n when k_adj=false
+        let sigma2 = if k_adj {
+            ss_res / (n as f64 - k as f64 - df_abs as f64)
+        } else {
+            ss_res / n as f64
+        };
         vcov = xhx_inv.iter().map(|v| v * sigma2).collect();
     } else {
-        // IV uses HC0 (no small-sample correction), matching Stata ivregress
-        vcov = sandwich_vcov(&xhat_flat, &resid, &xhx_inv, n, k, "HC0", 0);
+        // HC0 or HC1 — k_adj controls HC1 scaling
+        vcov = sandwich_vcov(&xhat_flat, &resid, &xhx_inv, n, k, &vcov_type, df_abs, k_adj);
     }
 
     // Build final names
@@ -1760,6 +1810,7 @@ fn rust_iv2sls<'py>(
 /// Compute sandwich VCV: (X'X)^{-1} meat (X'X)^{-1} where meat depends on vcov_type.
 /// x_flat is row-major (n, k). Returns flat k*k VCV.
 /// df_abs: additional absorbed degrees of freedom (e.g., from fixed effects).
+/// k_adj: if true, apply n/(n-k-df_abs) scaling for HC1; if false, HC1 == HC0.
 fn sandwich_vcov(
     x_flat: &[f64],
     resid: &[f64],
@@ -1768,6 +1819,7 @@ fn sandwich_vcov(
     k: usize,
     vcov_type: &str,
     df_abs: usize,
+    k_adj: bool,
 ) -> Vec<f64> {
     match vcov_type {
         "HC0" | "HC1" => {
@@ -1789,7 +1841,7 @@ fn sandwich_vcov(
             }
             let tmp = matmul(xtx_inv, &meat, k, k, k);
             let mut v = matmul(&tmp, xtx_inv, k, k, k);
-            if vcov_type == "HC1" {
+            if vcov_type == "HC1" && k_adj {
                 let scale = n as f64 / (n as f64 - k as f64 - df_abs as f64);
                 for val in v.iter_mut() {
                     *val *= scale;
@@ -1852,6 +1904,8 @@ fn rust_ols_nofe<'py>(
     cl_cols: Vec<PyReadonlyArray1<'py, i32>>,
     cl_names: Vec<String>,
     vcov_type: String,
+    k_adj: bool,
+    g_adj: bool,
 ) -> PyResult<(
     Bound<'py, PyArray1<f64>>,   // beta
     Bound<'py, PyArray2<f64>>,   // vcov
@@ -1969,7 +2023,9 @@ fn rust_ols_nofe<'py>(
                 };
 
                 let meat = clustered_meat_raw(&x_flat, n, k, &resid, &codes, g);
-                let dfc = (g as f64 / (g as f64 - 1.0)) * ((n as f64 - 1.0) / (n as f64 - k as f64));
+                let g_adj_factor = if g_adj { g as f64 / (g as f64 - 1.0) } else { 1.0 };
+                let k_adj_factor = if k_adj { (n as f64 - 1.0) / (n as f64 - k as f64) } else { 1.0 };
+                let dfc = g_adj_factor * k_adj_factor;
 
                 let tmp = matmul(&xtx_inv, &meat, k, k, k);
                 let term = matmul(&tmp, &xtx_inv, k, k, k);
@@ -1980,11 +2036,15 @@ fn rust_ols_nofe<'py>(
         }
         vcov = v_total;
     } else if vcov_type == "iid" {
-        let sigma2 = ss_res / (n - k) as f64;
+        let sigma2 = if k_adj {
+            ss_res / (n - k) as f64
+        } else {
+            ss_res / n as f64
+        };
         vcov = xtx_inv.iter().map(|v| v * sigma2).collect();
     } else {
         // HC0, HC1, HC2, HC3 (no FE in this path, so df_abs = 0)
-        vcov = sandwich_vcov(&x_flat, &resid, &xtx_inv, n, k, &vcov_type, 0);
+        vcov = sandwich_vcov(&x_flat, &resid, &xtx_inv, n, k, &vcov_type, 0, k_adj);
     }
 
     // Build final names

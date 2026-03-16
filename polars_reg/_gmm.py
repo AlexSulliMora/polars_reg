@@ -16,6 +16,7 @@ from polars_reg._se import (
     vcov_robust,
     vcov_wild_bootstrap,
 )
+from polars_reg._ssc import SSC, _default_ssc
 from polars_reg._utils import ensure_polars, extract_arrays, validate_vcov
 
 
@@ -24,6 +25,7 @@ def liml(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    ssc: SSC | None = None,
     time: str | None = None,
     bandwidth: int | None = None,
     n_boot: int = 999,
@@ -36,11 +38,14 @@ def liml(
         data: Polars DataFrame or LazyFrame.
         vcov: "iid", "HC0"-"HC3", "NW", "DK", "bootstrap", or "wildboot".
         cluster: Column name(s) for clustered SEs. Overrides vcov.
+        ssc: Small-sample correction configuration. Default: pyfixest conventions.
         time: Column name for time dimension (required for NW/DK).
         bandwidth: Kernel bandwidth for NW/DK (default: auto).
         n_boot: Bootstrap replications (default 999).
         seed: Random seed for bootstrap reproducibility.
     """
+    if ssc is None:
+        ssc = _default_ssc()
     if isinstance(cluster, str):
         cluster = [cluster]
     _liml_vcov = {"iid", "HC0", "HC1", "HC2", "HC3", "NW", "DK", "bootstrap", "wildboot"}
@@ -151,9 +156,9 @@ def liml(
     if cluster and vcov != "wildboot":
         cluster_arrays = [arrays.cluster_arrays[c] for c in cluster]
         if len(cluster_arrays) == 1:
-            V = vcov_clustered(X_w, resid, cluster_arrays[0])
+            V = vcov_clustered(X_w, resid, cluster_arrays[0], ssc=ssc)
         else:
-            V = vcov_multiway_clustered(X_w, resid, cluster_arrays)
+            V = vcov_multiway_clustered(X_w, resid, cluster_arrays, ssc=ssc)
         vcov_type = "cluster"
         n_clusters = {c: len(np.unique(arrays.cluster_arrays[c])) for c in cluster}
         df_r = min(n_clusters.values()) - 1
@@ -216,31 +221,35 @@ def liml(
         if arrays.time_array is None:
             raise ValueError(f"vcov='{vcov}' requires time= parameter")
         score = X_w * resid[:, None]
+        from polars_reg._ssc import _compute_k_eff
+
+        k_eff = _compute_k_eff(k, ssc.k_fixef, 0, 0)
         if vcov == "NW":
             S = _hac_meat(score, arrays.time_array, bandwidth)
-            dfc = n / (n - k)
+            dfc = n / (n - k_eff) if ssc.k_adj else 1.0
         else:
             S = _dk_meat(score, arrays.time_array, bandwidth)
             T = len(np.unique(arrays.time_array))
+            # T/(T-1) is intrinsic to DK, always applied
             dfc = T / (T - 1)
         V = dfc * XwX_inv @ S @ XwX_inv
         vcov_type = vcov
         df_r = n - k
     elif vcov == "iid":
         # LIML iid VCV: sigma^2 = e'e/(n-k) (finite-sample correction)
-        # Note: iv2sls uses e'e/n (asymptotic, matching Stata ivregress).
-        # LIML uses the finite-sample version following standard textbook
-        # treatment — Cameron & Trivedi (2005), ch. 4.
-        sigma2 = resid @ resid / (n - k)
+        from polars_reg._ssc import _compute_k_eff
+
+        k_eff = _compute_k_eff(k, ssc.k_fixef, 0, 0)
+        sigma2 = resid @ resid / (n - k_eff) if ssc.k_adj else resid @ resid / n
         V = sigma2 * XwX_inv
         vcov_type = "iid"
         df_r = n - k
     else:
-        V = vcov_robust(X_w, resid, kind=vcov)
+        V = vcov_robust(X_w, resid, kind=vcov, ssc=ssc)
         vcov_type = vcov
         df_r = n - k
 
-    return RegressionResult(
+    result = RegressionResult(
         coefficients=beta,
         vcov=V,
         residuals=resid,
@@ -254,6 +263,8 @@ def liml(
         vcov_type=vcov_type,
         n_clusters=n_clusters,
     )
+    result.ssc = ssc
+    return result
 
 
 def gmm_iv(
@@ -261,6 +272,7 @@ def gmm_iv(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    ssc: SSC | None = None,
     time: str | None = None,
     bandwidth: int | None = None,
     n_boot: int = 999,
@@ -275,11 +287,14 @@ def gmm_iv(
             VCV is inherently heteroskedasticity-robust; HC0-HC3
             distinctions do not apply and default to the natural GMM VCV.
         cluster: Column name(s) for clustered SEs. Overrides vcov.
+        ssc: Small-sample correction configuration. Default: pyfixest conventions.
         time: Column name for time dimension (required for NW/DK).
         bandwidth: Kernel bandwidth for NW/DK (default: auto).
         n_boot: Bootstrap replications (default 999).
         seed: Random seed for bootstrap reproducibility.
     """
+    if ssc is None:
+        ssc = _default_ssc()
     if isinstance(cluster, str):
         cluster = [cluster]
     _gmm_vcov = {"iid", "HC1", "NW", "DK", "bootstrap", "wildboot"}
@@ -408,15 +423,27 @@ def gmm_iv(
         XZ_Sinv = XtZ @ S_final_inv  # k x q
         Xe = (XZ_Sinv @ Z.T).T * resid[:, None]  # n x k score-like
         if len(cluster_arrays_list) == 1:
+            from polars_reg._se import _recode_to_contiguous
+            from polars_reg._ssc import _compute_k_eff
+
             cluster_codes = cluster_arrays_list[0]
-            G = len(np.unique(cluster_codes))
+            codes, G = _recode_to_contiguous(cluster_codes)
+            from polars_reg._se import _clustered_meat
+
+            meat_mat = _clustered_meat(Xe, np.ones(n), codes, G)
+            # The meat is sum_g (Xe_g)(Xe_g)' where Xe_g = sum_i(in g) Xe_i
+            # But _clustered_meat expects X * resid, so we use Xe as X and ones as resid
+            # Actually we need to compute this differently:
             unique_clusters = np.unique(cluster_codes)
             meat_mat = np.zeros((k, k))
             for g in unique_clusters:
                 mask = cluster_codes == g
                 sg = Xe[mask].sum(axis=0)
                 meat_mat += np.outer(sg, sg)
-            dfc = (G / (G - 1)) * ((n - 1) / (n - k))
+            k_eff = _compute_k_eff(k, ssc.k_fixef, 0, 0)
+            k_adj_factor = (n - 1) / (n - k_eff) if ssc.k_adj else 1.0
+            G_adj_factor = G / (G - 1) if ssc.G_adj else 1.0
+            dfc = k_adj_factor * G_adj_factor
             V = dfc * bread @ meat_mat @ bread / (n * n)
         else:
             raise NotImplementedError(
@@ -432,12 +459,16 @@ def gmm_iv(
         bread = np.linalg.inv(A_final)
         XZ_Sinv = XtZ @ S_final_inv
         score = (XZ_Sinv @ Z.T).T * resid[:, None]  # n x k effective scores
+        from polars_reg._ssc import _compute_k_eff
+
+        k_eff = _compute_k_eff(k, ssc.k_fixef, 0, 0)
         if vcov == "NW":
             S_nw = _hac_meat(score, arrays.time_array, bandwidth)
-            dfc = n / (n - k)
+            dfc = n / (n - k_eff) if ssc.k_adj else 1.0
         else:
             S_nw = _dk_meat(score, arrays.time_array, bandwidth)
             T_unique = len(np.unique(arrays.time_array))
+            # T/(T-1) is intrinsic to DK, always applied
             dfc = T_unique / (T_unique - 1)
         V = dfc * bread @ S_nw @ bread / (n * n)
         vcov_type = vcov
@@ -466,7 +497,7 @@ def gmm_iv(
         j_stat = None
         j_pvalue = None
 
-    return RegressionResult(
+    result = RegressionResult(
         coefficients=beta_2,
         vcov=V,
         residuals=resid,
@@ -482,3 +513,5 @@ def gmm_iv(
         j_stat=j_stat,
         j_pvalue=j_pvalue,
     )
+    result.ssc = ssc
+    return result
