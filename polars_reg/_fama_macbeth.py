@@ -275,6 +275,9 @@ class FamaMacBethResult:
 
         rows = []
         for t in range(self.lambdas.shape[0]):
+            # Skip periods with NaN lambdas (e.g., rolling warm-up)
+            if not np.all(np.isfinite(self.lambdas[t])):
+                continue
             for j, name in enumerate(self.names):
                 val = self.lambdas[t, j]
                 se_j = self.fm_se[j]
