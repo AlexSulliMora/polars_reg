@@ -90,6 +90,27 @@ tests/
 - Demeaning convergence tolerance: default 1e-8
 - Stata parity tests use `REGHDFE = 1e-5` tolerance (demeaning algorithm differences)
 
+## Feature Showcase Notebooks
+
+After implementing a new feature or significant change, create a Jupyter notebook that demonstrates the feature for human review.
+
+**Location:** `notebooks/new_features/YYYY-MM-DD-<descriptive-name>.ipynb`
+
+**Structure:**
+1. Title + brief description of what's new
+2. Imports
+3. Data simulation (with known true parameters when possible)
+4. Feature demonstrations — one section per feature, each showing inputs and outputs
+5. Cross-package comparison using `compare()` where applicable
+
+**Example:** `notebooks/new_features/2026-03-15-package-comparison.ipynb`
+
+**Guidelines:**
+- Use `report.summary()` (renders GT in Jupyter) rather than `print()` for comparison reports
+- Include `report.code()` output so readers can trace results
+- Show both simple and complex use cases
+- Use `np.random.default_rng(seed)` for reproducible data
+
 ## Principles
 
 Detailed development principles are in `docs/principles/`:
