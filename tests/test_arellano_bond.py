@@ -312,3 +312,42 @@ def test_panel_ab_nan_dropped():
 
     result = panel_ab("y ~ x", data=df, entity="id", time="time")
     assert np.all(np.isfinite(result.coefficients))
+
+
+def test_panel_ab_null_dropped():
+    """Arellano-Bond handles Polars nulls in dependent variable."""
+    rng = np.random.default_rng(42)
+    n_entities, n_periods = 30, 10
+    rows = []
+    for i in range(n_entities):
+        for t in range(n_periods):
+            rows.append({"id": i, "time": t, "y": rng.normal(), "x": rng.normal()})
+    df = pl.DataFrame(rows)
+    # Inject Polars nulls
+    null_mask = pl.Series("m", [False] * len(df))
+    null_mask[5] = True
+    null_mask[50] = True
+    df = df.with_columns(pl.when(null_mask).then(None).otherwise(pl.col("y")).alias("y"))
+    assert df["y"].null_count() == 2
+
+    result = panel_ab("y ~ x", data=df, entity="id", time="time")
+    assert np.all(np.isfinite(result.coefficients))
+
+
+def test_panel_ab_inf_dropped():
+    """Arellano-Bond handles inf in dependent variable."""
+    rng = np.random.default_rng(42)
+    n_entities, n_periods = 30, 10
+    rows = []
+    for i in range(n_entities):
+        for t in range(n_periods):
+            rows.append({"id": i, "time": t, "y": rng.normal(), "x": rng.normal()})
+    df = pl.DataFrame(rows)
+    # Inject inf
+    y_vals = df["y"].to_numpy().copy()
+    y_vals[5] = np.inf
+    y_vals[50] = -np.inf
+    df = df.with_columns(pl.Series("y", y_vals))
+
+    result = panel_ab("y ~ x", data=df, entity="id", time="time")
+    assert np.all(np.isfinite(result.coefficients))

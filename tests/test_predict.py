@@ -255,3 +255,19 @@ def test_predict_with_nan_in_new_data():
     assert len(preds) == 3
     assert np.isfinite(preds[0])
     assert np.isfinite(preds[2])
+
+
+def test_predict_with_inf_in_new_data():
+    """predict() handles inf in new_data gracefully."""
+    rng = np.random.default_rng(42)
+    n = 100
+    x = rng.standard_normal(n)
+    y = 2 * x + rng.standard_normal(n) * 0.5
+    df = pl.DataFrame({"x": x, "y": y})
+    result = ols("y ~ x", data=df)
+
+    # new_data with inf — predict should still work (inf propagates to prediction)
+    new_df = pl.DataFrame({"x": [1.0, np.inf, -np.inf]})
+    preds = result.predict(new_data=new_df)
+    assert len(preds) == 3
+    assert np.isfinite(preds[0])

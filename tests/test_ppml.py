@@ -380,6 +380,45 @@ def test_ppml_nan_dropped():
     assert np.all(np.isfinite(res.coefficients))
 
 
+def test_ppml_null_dropped():
+    """Polars nulls in x columns handled by dropping those rows."""
+    rng = np.random.default_rng(42)
+    n = 500
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    mu = np.exp(0.5 + 0.5 * x1 - 0.3 * x2)
+    y = rng.poisson(mu).astype(float)
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+    # Inject Polars nulls
+    null_mask = pl.Series("m", [False] * n)
+    null_mask[0] = True
+    null_mask[10] = True
+    df = df.with_columns(pl.when(null_mask).then(None).otherwise(pl.col("x1")).alias("x1"))
+    assert df["x1"].null_count() == 2
+
+    res = ppml("y ~ x1 + x2", data=df)
+    assert res.n_obs == n - 2
+    assert np.all(np.isfinite(res.coefficients))
+
+
+def test_ppml_inf_dropped():
+    """Inf in x columns handled by dropping those rows."""
+    rng = np.random.default_rng(42)
+    n = 500
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    mu = np.exp(0.5 + 0.5 * x1 - 0.3 * x2)
+    y = rng.poisson(mu).astype(float)
+    # Inject inf
+    x1[0] = np.inf
+    x2[10] = -np.inf
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+
+    res = ppml("y ~ x1 + x2", data=df)
+    assert res.n_obs == n - 2
+    assert np.all(np.isfinite(res.coefficients))
+
+
 def test_ppml_lazyframe():
     """LazyFrame input works for PPML."""
     rng = np.random.default_rng(42)

@@ -288,3 +288,40 @@ def test_bootstrap_with_nan_in_data():
     result = ols("y ~ x", data=df, vcov="bootstrap", n_boot=99, seed=42)
     assert np.all(np.isfinite(result.coefficients))
     assert np.all(np.isfinite(result.se))
+
+
+def test_bootstrap_with_nulls_in_data():
+    """Bootstrap handles Polars nulls in data (dropped before estimation)."""
+    rng = np.random.default_rng(42)
+    n = 200
+    x = rng.standard_normal(n)
+    y = 2 * x + rng.standard_normal(n) * 0.5
+    df = pl.DataFrame({"x": x, "y": y})
+    # Inject Polars nulls
+    null_mask = pl.Series("m", [False] * n)
+    null_mask[5] = True
+    null_mask[50] = True
+    df = df.with_columns(pl.when(null_mask).then(None).otherwise(pl.col("y")).alias("y"))
+    assert df["y"].null_count() == 2
+
+    result = ols("y ~ x", data=df, vcov="bootstrap", n_boot=99, seed=42)
+    assert np.all(np.isfinite(result.coefficients))
+    assert np.all(np.isfinite(result.se))
+
+
+def test_bootstrap_with_inf_in_data():
+    """Bootstrap handles inf in data (dropped before estimation)."""
+    rng = np.random.default_rng(42)
+    n = 200
+    x = rng.standard_normal(n)
+    y = 2 * x + rng.standard_normal(n) * 0.5
+    df = pl.DataFrame({"x": x, "y": y})
+    # Inject inf
+    y_vals = df["y"].to_numpy().copy()
+    y_vals[5] = np.inf
+    y_vals[50] = -np.inf
+    df = df.with_columns(pl.Series("y", y_vals))
+
+    result = ols("y ~ x", data=df, vcov="bootstrap", n_boot=99, seed=42)
+    assert np.all(np.isfinite(result.coefficients))
+    assert np.all(np.isfinite(result.se))

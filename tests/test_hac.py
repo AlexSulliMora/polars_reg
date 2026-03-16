@@ -257,3 +257,42 @@ def test_nw_with_nan_in_data():
     result = pr.ols("y ~ x", data=df, vcov="NW", time="t", bandwidth=3)
     assert np.all(np.isfinite(result.coefficients))
     assert np.all(np.isfinite(result.se))
+
+
+def test_nw_with_nulls_in_data():
+    """Newey-West handles Polars nulls in data (dropped before estimation)."""
+    rng = np.random.default_rng(42)
+    n = 200
+    x = rng.standard_normal(n)
+    y = 2 * x + rng.standard_normal(n) * 0.5
+    t = np.arange(n)
+    df = pl.DataFrame({"x": x, "y": y, "t": t})
+    # Inject Polars nulls
+    null_mask = pl.Series("m", [False] * n)
+    null_mask[10] = True
+    null_mask[100] = True
+    df = df.with_columns(pl.when(null_mask).then(None).otherwise(pl.col("y")).alias("y"))
+    assert df["y"].null_count() == 2
+
+    result = pr.ols("y ~ x", data=df, vcov="NW", time="t", bandwidth=3)
+    assert np.all(np.isfinite(result.coefficients))
+    assert np.all(np.isfinite(result.se))
+
+
+def test_nw_with_inf_in_data():
+    """Newey-West handles inf in data (dropped before estimation)."""
+    rng = np.random.default_rng(42)
+    n = 200
+    x = rng.standard_normal(n)
+    y = 2 * x + rng.standard_normal(n) * 0.5
+    t = np.arange(n)
+    df = pl.DataFrame({"x": x, "y": y, "t": t})
+    # Inject inf
+    y_vals = df["y"].to_numpy().copy()
+    y_vals[10] = np.inf
+    y_vals[100] = -np.inf
+    df = df.with_columns(pl.Series("y", y_vals))
+
+    result = pr.ols("y ~ x", data=df, vcov="NW", time="t", bandwidth=3)
+    assert np.all(np.isfinite(result.coefficients))
+    assert np.all(np.isfinite(result.se))

@@ -130,6 +130,43 @@ def test_quantreg_nan_dropped():
     assert np.all(np.isfinite(r.coefficients))
 
 
+def test_quantreg_null_dropped():
+    """Polars nulls in x columns handled by dropping those rows."""
+    rng = np.random.default_rng(42)
+    n = 500
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    y = 2.0 + 1.5 * x1 - 0.5 * x2 + rng.standard_normal(n) * 0.5
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+    # Inject Polars nulls
+    null_mask = pl.Series("m", [False] * n)
+    null_mask[0] = True
+    null_mask[3] = True
+    df = df.with_columns(pl.when(null_mask).then(None).otherwise(pl.col("x1")).alias("x1"))
+    assert df["x1"].null_count() == 2
+
+    r = quantreg("y ~ x1 + x2", data=df, tau=0.5, n_boot=49, seed=42)
+    assert r.n_obs == n - 2
+    assert np.all(np.isfinite(r.coefficients))
+
+
+def test_quantreg_inf_dropped():
+    """Inf in x columns handled by dropping those rows."""
+    rng = np.random.default_rng(42)
+    n = 500
+    x1 = rng.standard_normal(n)
+    x2 = rng.standard_normal(n)
+    y = 2.0 + 1.5 * x1 - 0.5 * x2 + rng.standard_normal(n) * 0.5
+    # Inject inf
+    x1[0] = np.inf
+    x2[3] = -np.inf
+    df = pl.DataFrame({"y": y, "x1": x1, "x2": x2})
+
+    r = quantreg("y ~ x1 + x2", data=df, tau=0.5, n_boot=49, seed=42)
+    assert r.n_obs == n - 2
+    assert np.all(np.isfinite(r.coefficients))
+
+
 def test_quantreg_lazyframe():
     """LazyFrame input works for quantreg."""
     rng = np.random.default_rng(42)
