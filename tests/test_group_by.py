@@ -179,3 +179,50 @@ def test_group_by_group_fewer_obs_than_params():
     # Group A should fail (N=1 < k=3), group B should succeed (N=6 >= k=3)
     assert "B" in result
     assert "A" in result.failed
+
+
+def test_group_by_with_nulls():
+    """group_by_reg handles nulls in regressor within some groups."""
+    rng = np.random.default_rng(42)
+    n = 200
+    df = pl.DataFrame(
+        {
+            "group": ["A"] * 100 + ["B"] * 100,
+            "x": rng.normal(size=n),
+            "y": rng.normal(size=n),
+        }
+    )
+    # Inject nulls into group A's x column
+    x_vals = df["x"].to_numpy().copy()
+    x_vals[5] = float("nan")
+    x_vals[10] = float("nan")
+    df = df.with_columns(pl.Series("x", x_vals))
+
+    result = pr.group_by_reg(pr.ols, "y ~ x", df, group_by="group")
+    assert "A" in result
+    assert "B" in result
+    assert np.all(np.isfinite(result["A"].coefficients))
+    assert np.all(np.isfinite(result["B"].coefficients))
+
+
+def test_group_by_with_inf():
+    """group_by_reg handles inf values in data."""
+    rng = np.random.default_rng(42)
+    n = 200
+    df = pl.DataFrame(
+        {
+            "group": ["A"] * 100 + ["B"] * 100,
+            "x": rng.normal(size=n),
+            "y": rng.normal(size=n),
+        }
+    )
+    y_vals = df["y"].to_numpy().copy()
+    y_vals[0] = np.inf
+    y_vals[150] = -np.inf
+    df = df.with_columns(pl.Series("y", y_vals))
+
+    result = pr.group_by_reg(pr.ols, "y ~ x", df, group_by="group")
+    assert "A" in result
+    assert "B" in result
+    assert np.all(np.isfinite(result["A"].coefficients))
+    assert np.all(np.isfinite(result["B"].coefficients))

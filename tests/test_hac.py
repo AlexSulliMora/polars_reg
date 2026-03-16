@@ -238,3 +238,22 @@ def test_panel_fe_nw_requires_time(panel_data):
             entity="firm_id",
             vcov="NW",
         )
+
+
+def test_nw_with_nan_in_data():
+    """Newey-West handles NaN in data (dropped before estimation)."""
+    rng = np.random.default_rng(42)
+    n = 200
+    x = rng.standard_normal(n)
+    y = 2 * x + rng.standard_normal(n) * 0.5
+    t = np.arange(n)
+    df = pl.DataFrame({"x": x, "y": y, "t": t})
+    # Inject NaN
+    y_vals = df["y"].to_numpy().copy()
+    y_vals[10] = float("nan")
+    y_vals[100] = float("nan")
+    df = df.with_columns(pl.Series("y", y_vals))
+
+    result = pr.ols("y ~ x", data=df, vcov="NW", time="t", bandwidth=3)
+    assert np.all(np.isfinite(result.coefficients))
+    assert np.all(np.isfinite(result.se))

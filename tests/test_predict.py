@@ -238,3 +238,20 @@ def test_predict_no_intercept():
     pred = result.predict(new_data=df)
     expected = result.coefficients[0] * x1
     np.testing.assert_allclose(pred, expected, atol=1e-12)
+
+
+def test_predict_with_nan_in_new_data():
+    """predict() handles NaN in new_data gracefully."""
+    rng = np.random.default_rng(42)
+    n = 100
+    x = rng.standard_normal(n)
+    y = 2 * x + rng.standard_normal(n) * 0.5
+    df = pl.DataFrame({"x": x, "y": y})
+    result = ols("y ~ x", data=df)
+
+    # new_data with a NaN — predict should still work (NaN propagates to prediction)
+    new_df = pl.DataFrame({"x": [1.0, float("nan"), 3.0]})
+    preds = result.predict(new_data=new_df)
+    assert len(preds) == 3
+    assert np.isfinite(preds[0])
+    assert np.isfinite(preds[2])

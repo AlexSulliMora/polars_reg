@@ -271,3 +271,20 @@ def test_panel_fd_pairs_bootstrap(panel_boot_data):
     )
     assert r.vcov_type == "bootstrap"
     assert np.all(r.se > 0)
+
+
+def test_bootstrap_with_nan_in_data():
+    """Bootstrap handles NaN in data (dropped before estimation)."""
+    rng = np.random.default_rng(42)
+    n = 200
+    x = rng.standard_normal(n)
+    y = 2 * x + rng.standard_normal(n) * 0.5
+    df = pl.DataFrame({"x": x, "y": y})
+    # Inject NaN
+    y_vals = df["y"].to_numpy().copy()
+    y_vals[5] = float("nan")
+    df = df.with_columns(pl.Series("y", y_vals))
+
+    result = ols("y ~ x", data=df, vcov="bootstrap", n_boot=99, seed=42)
+    assert np.all(np.isfinite(result.coefficients))
+    assert np.all(np.isfinite(result.se))
