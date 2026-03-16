@@ -17,6 +17,7 @@ from scipy import stats
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
 from polars_reg._se import _clustered_meat, _mle_multiway_clustered
+from polars_reg._ssc import SSC, _default_ssc
 from polars_reg._utils import ensure_polars, extract_arrays, validate_vcov
 
 
@@ -104,8 +105,11 @@ def _binary_model(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    ssc: SSC | None = None,
 ) -> RegressionResult:
     """Common implementation for probit and logit."""
+    if ssc is None:
+        ssc = _default_ssc()
     if isinstance(cluster, str):
         cluster = [cluster]
     _binary_vcov = {"iid", "HC1"}
@@ -202,6 +206,7 @@ def _binary_model(
     result._prob = prob
     result._ll = ll
     result._ll_null = ll_null
+    result.ssc = ssc
     return result
 
 
@@ -210,6 +215,7 @@ def probit(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    ssc: SSC | None = None,
 ) -> RegressionResult:
     """Probit regression (binary choice, normal link) via MLE.
 
@@ -218,8 +224,9 @@ def probit(
         data: Polars DataFrame or LazyFrame
         vcov: "iid" (information matrix) or "HC1" (sandwich)
         cluster: Column name(s) for clustered SEs.
+        ssc: Small-sample correction configuration. Default: pyfixest conventions.
     """
-    return _binary_model("Probit", formula, data, vcov=vcov, cluster=cluster)
+    return _binary_model("Probit", formula, data, vcov=vcov, cluster=cluster, ssc=ssc)
 
 
 def logit(
@@ -227,6 +234,7 @@ def logit(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    ssc: SSC | None = None,
 ) -> RegressionResult:
     """Logit regression (binary choice, logistic link) via MLE.
 
@@ -235,8 +243,9 @@ def logit(
         data: Polars DataFrame or LazyFrame
         vcov: "iid" (information matrix) or "HC1" (sandwich)
         cluster: Column name(s) for clustered SEs.
+        ssc: Small-sample correction configuration. Default: pyfixest conventions.
     """
-    return _binary_model("Logit", formula, data, vcov=vcov, cluster=cluster)
+    return _binary_model("Logit", formula, data, vcov=vcov, cluster=cluster, ssc=ssc)
 
 
 def marginal_effects(

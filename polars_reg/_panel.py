@@ -18,6 +18,7 @@ from polars_reg._se import (
     vcov_robust,
     vcov_wild_bootstrap,
 )
+from polars_reg._ssc import SSC, _default_ssc
 from polars_reg._utils import ensure_polars, extract_arrays, sanitize_inf, validate_vcov
 
 
@@ -28,6 +29,7 @@ def panel_fe(
     time: str | None = None,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    ssc: SSC | None = None,
     bandwidth: int | None = None,
     n_boot: int = 999,
     seed: int | None = None,
@@ -40,10 +42,13 @@ def panel_fe(
 
     Args:
         vcov: "iid", "NW", "DK", "bootstrap", or "wildboot".
+        ssc: Small-sample correction configuration. Default: pyfixest conventions.
         bandwidth: Number of lags for NW/DK. Default: Newey-West rule of thumb.
         n_boot: Bootstrap replications (default 999).
         seed: Random seed for bootstrap reproducibility.
     """
+    if ssc is None:
+        ssc = _default_ssc()
     if isinstance(cluster, str):
         cluster = [cluster]
     elif isinstance(cluster, list) and len(cluster) == 0:
@@ -135,7 +140,7 @@ def panel_fe(
         df_r = n - k - df_abs
         vcov_type_str = "iid"
 
-    return RegressionResult(
+    result = RegressionResult(
         coefficients=beta,
         vcov=V,
         residuals=resid,
@@ -151,6 +156,8 @@ def panel_fe(
         fe_absorbed=list(fe_dict.keys()),
         df_absorbed=df_abs,
     )
+    result.ssc = ssc
+    return result
 
 
 def _group_means(arr: np.ndarray, codes: np.ndarray, n_groups: int) -> np.ndarray:
@@ -173,6 +180,7 @@ def panel_re(
     time: str | None = None,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    ssc: SSC | None = None,
     bandwidth: int | None = None,
     n_boot: int = 999,
     seed: int | None = None,
@@ -189,10 +197,13 @@ def panel_re(
         time: Column name for time identifier (required for NW/DK)
         vcov: "iid", "HC1", "NW", "DK", "bootstrap", or "wildboot"
         cluster: Column name(s) for clustered SEs
+        ssc: Small-sample correction configuration. Default: pyfixest conventions.
         bandwidth: Number of lags for NW/DK. Default: Newey-West rule of thumb.
         n_boot: Bootstrap replications (default 999).
         seed: Random seed for bootstrap reproducibility.
     """
+    if ssc is None:
+        ssc = _default_ssc()
     data = ensure_polars(data)
     if isinstance(cluster, str):
         cluster = [cluster]
@@ -368,7 +379,7 @@ def panel_re(
         vcov_type_str = "iid"
         df_r = n - k
 
-    return RegressionResult(
+    result = RegressionResult(
         coefficients=beta,
         vcov=V,
         residuals=resid,
@@ -382,6 +393,8 @@ def panel_re(
         vcov_type=vcov_type_str,
         n_clusters=n_clusters_dict,
     )
+    result.ssc = ssc
+    return result
 
 
 def panel_fd(
@@ -391,6 +404,7 @@ def panel_fd(
     time: str,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    ssc: SSC | None = None,
     n_boot: int = 999,
     seed: int | None = None,
 ) -> RegressionResult:
@@ -406,9 +420,12 @@ def panel_fd(
         time: Column name for time identifier
         vcov: "iid", "HC1", "bootstrap", or "wildboot"
         cluster: Column name(s) for clustered SEs
+        ssc: Small-sample correction configuration. Default: pyfixest conventions.
         n_boot: Bootstrap replications (default 999).
         seed: Random seed for bootstrap reproducibility.
     """
+    if ssc is None:
+        ssc = _default_ssc()
     if isinstance(cluster, str):
         cluster = [cluster]
     if cluster is None:
@@ -510,7 +527,7 @@ def panel_fd(
         vcov_type_str = "iid"
         df_r = n - k
 
-    return RegressionResult(
+    result = RegressionResult(
         coefficients=beta,
         vcov=V,
         residuals=resid,
@@ -524,3 +541,5 @@ def panel_fd(
         vcov_type=vcov_type_str,
         n_clusters=n_clusters_dict,
     )
+    result.ssc = ssc
+    return result

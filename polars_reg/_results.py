@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
+
+if TYPE_CHECKING:
+    from polars_reg._ssc import SSC
 
 import numpy as np
 import polars as pl
@@ -136,6 +139,8 @@ class RegressionResult:
     _n_instruments: int | None = None
     # Quantile regression
     _tau: float | None = None
+    # Small-sample corrections
+    ssc: SSC | None = None
 
     @property
     def se(self) -> NDArray:

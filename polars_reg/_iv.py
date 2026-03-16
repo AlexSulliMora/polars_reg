@@ -15,6 +15,7 @@ from polars_reg._se import (
     _recode_to_contiguous,
     vcov_wild_bootstrap,
 )
+from polars_reg._ssc import SSC, _default_ssc
 from polars_reg._utils import _to_codes, ensure_polars, extract_arrays, sanitize_inf, validate_vcov
 
 
@@ -151,6 +152,7 @@ def iv2sls(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    ssc: SSC | None = None,
     time: str | None = None,
     bandwidth: int | None = None,
     n_boot: int = 999,
@@ -165,11 +167,14 @@ def iv2sls(
         data: Polars DataFrame or LazyFrame
         vcov: "iid", "HC0", "HC1", "NW", "DK", "bootstrap", or "wildboot"
         cluster: Column name(s) for clustered SEs. Overrides vcov.
+        ssc: Small-sample correction configuration. Default: pyfixest conventions.
         time: Column name for time dimension (required for NW/DK).
         bandwidth: Kernel bandwidth for NW/DK (default: auto).
         n_boot: Bootstrap replications (default 999).
         seed: Random seed for bootstrap reproducibility.
     """
+    if ssc is None:
+        ssc = _default_ssc()
     if isinstance(cluster, str):
         cluster = [cluster]
     _iv_vcov = {"iid", "HC0", "HC1", "NW", "DK", "bootstrap", "wildboot"}
@@ -192,7 +197,9 @@ def iv2sls(
         and (cluster or vcov in ("iid", "HC0", "HC1"))
     )
     if _rust_eligible:
-        return _iv2sls_rust(data, spec, cluster, vcov)
+        result = _iv2sls_rust(data, spec, cluster, vcov)
+        result.ssc = ssc
+        return result
 
     arrays = extract_arrays(data, spec, cluster=cluster, time=time)
 
@@ -382,6 +389,7 @@ def iv2sls(
     result._iv_X_endog = X_endog
     result._iv_Z_excl = Z_excl
     result._iv_cluster_arrays = [arrays.cluster_arrays[c] for c in cluster] if cluster else None
+    result.ssc = ssc
     return result
 
 

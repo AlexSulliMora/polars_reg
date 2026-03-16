@@ -17,6 +17,7 @@ import polars as pl
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
 from polars_reg._se import _clustered_meat, _mle_multiway_clustered, _recode_to_contiguous
+from polars_reg._ssc import SSC, _default_ssc
 from polars_reg._utils import ensure_polars, extract_arrays, validate_vcov
 
 
@@ -40,6 +41,7 @@ def ppml(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "HC1",
     cluster: list[str] | str | None = None,
+    ssc: SSC | None = None,
     max_iter: int = 250,
     tol: float = 1e-8,
 ) -> RegressionResult:
@@ -71,6 +73,8 @@ def ppml(
         returns X @ beta (the linear predictor). Apply np.exp() to obtain
         the conditional mean on the response scale.
     """
+    if ssc is None:
+        ssc = _default_ssc()
     if isinstance(cluster, str):
         cluster = [cluster]
     _ppml_vcov = {"iid", "HC1"}
@@ -207,4 +211,5 @@ def ppml(
     result._mu = mu
     result._deviance = deviance
     result._null_deviance = null_deviance
+    result.ssc = ssc
     return result

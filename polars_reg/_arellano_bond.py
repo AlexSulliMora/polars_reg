@@ -15,6 +15,7 @@ from scipy import stats
 
 from polars_reg._formula import parse_formula
 from polars_reg._results import RegressionResult
+from polars_reg._ssc import SSC, _default_ssc
 from polars_reg._utils import ensure_polars, sanitize_inf
 
 
@@ -26,6 +27,7 @@ def panel_ab(
     lags: int = 2,
     maxlags: int | None = None,
     twostep: bool = False,
+    ssc: SSC | None = None,
 ) -> RegressionResult:
     """Arellano-Bond dynamic panel GMM estimator.
 
@@ -43,7 +45,10 @@ def panel_ab(
         lags: Minimum instrument lag depth (default 2)
         maxlags: Maximum instrument lag depth (None = all available)
         twostep: If True, use two-step efficient GMM
+        ssc: Small-sample correction configuration. Default: pyfixest conventions.
     """
+    if ssc is None:
+        ssc = _default_ssc()
     data = ensure_polars(data)
 
     spec = parse_formula(formula)
@@ -214,6 +219,7 @@ def panel_ab(
     result._ar1 = (ar1_stat, ar1_p)
     result._ar2 = (ar2_stat, ar2_p)
     result._n_instruments = n_iv
+    result.ssc = ssc
     return result
 
 
@@ -225,6 +231,7 @@ def panel_sys_gmm(
     lags: int = 2,
     maxlags: int | None = None,
     twostep: bool = False,
+    ssc: SSC | None = None,
 ) -> RegressionResult:
     """Blundell-Bond system GMM estimator.
 
@@ -241,7 +248,10 @@ def panel_sys_gmm(
         lags: Minimum instrument lag depth (default 2)
         maxlags: Maximum instrument lag depth (None = all available)
         twostep: If True, use two-step efficient GMM
+        ssc: Small-sample correction configuration. Default: pyfixest conventions.
     """
+    if ssc is None:
+        ssc = _default_ssc()
     data = ensure_polars(data)
 
     spec = parse_formula(formula)
@@ -440,6 +450,7 @@ def panel_sys_gmm(
     result._ar1 = (ar1_stat, ar1_p)
     result._ar2 = (ar2_stat, ar2_p)
     result._n_instruments = n_iv
+    result.ssc = ssc
     return result
 
 

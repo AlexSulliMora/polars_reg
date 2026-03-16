@@ -16,6 +16,7 @@ from polars_reg._se import (
     vcov_robust,
     vcov_wild_bootstrap,
 )
+from polars_reg._ssc import SSC, _default_ssc
 from polars_reg._utils import ensure_polars, extract_arrays, validate_vcov
 
 
@@ -24,6 +25,7 @@ def liml(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    ssc: SSC | None = None,
     time: str | None = None,
     bandwidth: int | None = None,
     n_boot: int = 999,
@@ -36,11 +38,14 @@ def liml(
         data: Polars DataFrame or LazyFrame.
         vcov: "iid", "HC0"-"HC3", "NW", "DK", "bootstrap", or "wildboot".
         cluster: Column name(s) for clustered SEs. Overrides vcov.
+        ssc: Small-sample correction configuration. Default: pyfixest conventions.
         time: Column name for time dimension (required for NW/DK).
         bandwidth: Kernel bandwidth for NW/DK (default: auto).
         n_boot: Bootstrap replications (default 999).
         seed: Random seed for bootstrap reproducibility.
     """
+    if ssc is None:
+        ssc = _default_ssc()
     if isinstance(cluster, str):
         cluster = [cluster]
     _liml_vcov = {"iid", "HC0", "HC1", "HC2", "HC3", "NW", "DK", "bootstrap", "wildboot"}
@@ -240,7 +245,7 @@ def liml(
         vcov_type = vcov
         df_r = n - k
 
-    return RegressionResult(
+    result = RegressionResult(
         coefficients=beta,
         vcov=V,
         residuals=resid,
@@ -254,6 +259,8 @@ def liml(
         vcov_type=vcov_type,
         n_clusters=n_clusters,
     )
+    result.ssc = ssc
+    return result
 
 
 def gmm_iv(
@@ -261,6 +268,7 @@ def gmm_iv(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    ssc: SSC | None = None,
     time: str | None = None,
     bandwidth: int | None = None,
     n_boot: int = 999,
@@ -275,11 +283,14 @@ def gmm_iv(
             VCV is inherently heteroskedasticity-robust; HC0-HC3
             distinctions do not apply and default to the natural GMM VCV.
         cluster: Column name(s) for clustered SEs. Overrides vcov.
+        ssc: Small-sample correction configuration. Default: pyfixest conventions.
         time: Column name for time dimension (required for NW/DK).
         bandwidth: Kernel bandwidth for NW/DK (default: auto).
         n_boot: Bootstrap replications (default 999).
         seed: Random seed for bootstrap reproducibility.
     """
+    if ssc is None:
+        ssc = _default_ssc()
     if isinstance(cluster, str):
         cluster = [cluster]
     _gmm_vcov = {"iid", "HC1", "NW", "DK", "bootstrap", "wildboot"}
@@ -466,7 +477,7 @@ def gmm_iv(
         j_stat = None
         j_pvalue = None
 
-    return RegressionResult(
+    result = RegressionResult(
         coefficients=beta_2,
         vcov=V,
         residuals=resid,
@@ -482,3 +493,5 @@ def gmm_iv(
         j_stat=j_stat,
         j_pvalue=j_pvalue,
     )
+    result.ssc = ssc
+    return result

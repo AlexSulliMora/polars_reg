@@ -19,6 +19,7 @@ from polars_reg._se import (
     vcov_robust,
     vcov_wild_bootstrap,
 )
+from polars_reg._ssc import SSC, _default_ssc
 from polars_reg._utils import _to_codes, ensure_polars, extract_arrays, sanitize_inf, validate_vcov
 
 
@@ -338,6 +339,7 @@ def ols(
     data: pl.DataFrame | pl.LazyFrame,
     vcov: str = "iid",
     cluster: list[str] | str | None = None,
+    ssc: SSC | None = None,
     time: str | None = None,
     bandwidth: int | None = None,
     weights: str | None = None,
@@ -352,6 +354,7 @@ def ols(
         data: Polars DataFrame or LazyFrame
         vcov: "iid", "HC0"-"HC3", "NW", "DK", "bootstrap", or "wildboot"
         cluster: Column name(s) for clustered SEs. Overrides vcov (except wildboot).
+        ssc: Small-sample correction configuration. Default: pyfixest conventions.
         time: Column name for time ordering (required for NW/DK).
         bandwidth: Number of lags for HAC/DK. Default: Newey-West rule of thumb.
         weights: Column name for analytic weights (WLS). Minimizes sum w_i*(y_i - x_i'b)^2.
@@ -359,6 +362,8 @@ def ols(
         n_boot: Bootstrap replications (default 999). For vcov="bootstrap"/"wildboot".
         seed: Random seed for bootstrap reproducibility.
     """
+    if ssc is None:
+        ssc = _default_ssc()
     if isinstance(cluster, str):
         cluster = [cluster]
     if weights and fweights:
@@ -382,11 +387,15 @@ def ols(
 
     # Path 1: FE present — use rust_ols_from_arrays (demean + solve + all SE types)
     if _rust_eligible and spec.fe and (cluster or vcov in ("iid", "HC0", "HC1", "HC2", "HC3")):
-        return _ols_direct_rust(data, spec, cluster, vcov)
+        result = _ols_direct_rust(data, spec, cluster, vcov)
+        result.ssc = ssc
+        return result
 
     # Path 2: No FE — use rust_ols_nofe (solve + iid/HC0-HC3/cluster SE)
     if _rust_eligible and not spec.fe and (cluster or vcov in ("iid", "HC0", "HC1", "HC2", "HC3")):
-        return _ols_nofe_rust(data, spec, cluster, vcov)
+        result = _ols_nofe_rust(data, spec, cluster, vcov)
+        result.ssc = ssc
+        return result
 
     weight_col = weights or fweights
     arrays = extract_arrays(data, spec, cluster=cluster, time=time, weights=weight_col)
@@ -404,13 +413,15 @@ def ols(
         and (cluster or vcov == "iid")
     )
     if use_rust:
-        return _ols_rust_path(
+        result = _ols_rust_path(
             arrays,
             spec,
             fe_dict,
             cluster,
             vcov,
         )
+        result.ssc = ssc
+        return result
 
     # Handle frequency weights: expand effective sample size
     fw = None
@@ -567,4 +578,5 @@ def ols(
     )
     result._X = X
     result._y = y
+    result.ssc = ssc
     return result
